@@ -1,0 +1,12 @@
+{
+  "data": {
+    "catalogs": [
+      {
+        "catalogId": 48,
+        "articles": [
+          {"title": "Binance Will List SampleGem (SGEM)", "code": "abc123", "releaseDate": 1757164800000}
+        ]
+      }
+    ]
+  }
+}

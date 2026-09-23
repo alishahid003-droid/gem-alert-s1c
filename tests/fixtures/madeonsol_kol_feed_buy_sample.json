@@ -1,0 +1,14 @@
+{
+  "trades": [
+    {"wallet_address": "W1", "kol_name": "Unipcs", "action": "buy", "sol_amount": 5.0,
+     "market_cap_usd_at_trade": 28000, "traded_at": "2026-09-06T14:00:00+00:00", "token_mint": "TOKEN_A"},
+    {"wallet_address": "W2", "kol_name": "Avast", "action": "buy", "sol_amount": 3.2,
+     "market_cap_usd_at_trade": 29000, "traded_at": "2026-09-06T14:20:00+00:00", "token_mint": "TOKEN_A"},
+    {"wallet_address": "W3", "kol_name": "frank", "action": "buy", "sol_amount": 1.1,
+     "market_cap_usd_at_trade": 31000, "traded_at": "2026-09-06T16:10:00+00:00", "token_mint": "TOKEN_A"},
+    {"wallet_address": "W4", "kol_name": "NotTracked", "action": "buy", "sol_amount": 9.0,
+     "market_cap_usd_at_trade": 15000, "traded_at": "2026-09-06T14:05:00+00:00", "token_mint": "TOKEN_B"},
+    {"wallet_address": "W5", "kol_name": "Aurelius", "action": "buy", "sol_amount": 2.0,
+     "market_cap_usd_at_trade": 15000, "traded_at": "2026-09-06T14:06:00+00:00", "token_mint": "TOKEN_B"}
+  ]
+}

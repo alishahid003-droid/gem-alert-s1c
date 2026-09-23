@@ -1,0 +1,54 @@
+{
+  "data": {
+    "token": {
+      "mint": "AGi2s9zPRPHs3zEDPhPTroumTEXK5ufymYSfEFndCSSW",
+      "pool": "2aaw5Wk7mX1jxajGE2YTRz3ScjuksktU3ijhSPmrsXeg",
+      "name": "Leveraged Cat",
+      "symbol": "LEVERCAT",
+      "quote": {
+        "mint": "4sWNB8zGWHkh6UnmwiEtzNxL4XrN7uK9tosbESbJFfVs",
+        "symbol": "xSOL",
+        "name": "xSOL",
+        "logoUrl": "/api/asset/quote-logo/4sWNB8zGWHkh6UnmwiEtzNxL4XrN7uK9tosbESbJFfVs?v=2ac8f2a6",
+        "category": "leverage",
+        "categoryLabel": "Leverage"
+      },
+      "launchpad": "launchlab",
+      "mode": "reward",
+      "quoteOnlyFees": true,
+      "transferFee": {"bps": 300},
+      "imageUrl": "https://gateway.irys.xyz/72ipFM6nub2FJEzQjhLSG2KGq7YDFQ2qmp8ZpYwcNKyh",
+      "links": {"website": "https://levercat.money/", "twitter": "https://x.com/LeverCatSol"},
+      "market": {
+        "priceUsd": 0.003123521903589628,
+        "marketCapUsd": 3123521.9035896277,
+        "fdvUsd": 3123521.9035896277,
+        "volume24hUsd": 192048.95489630933,
+        "liquidityUsd": 215273.68906619734,
+        "priceChange24h": -3.1547859025270575,
+        "peakMarketCapUsd": 8092369.744539557
+      },
+      "status": "graduated",
+      "graduationProgress": 1,
+      "graduatedAt": "2026-09-07T11:33:22.184Z",
+      "createdAt": "2026-09-07T11:20:03.301Z"
+    },
+    "launch": {
+      "mint": "AGi2s9zPRPHs3zEDPhPTroumTEXK5ufymYSfEFndCSSW",
+      "pool": "2aaw5Wk7mX1jxajGE2YTRz3ScjuksktU3ijhSPmrsXeg",
+      "name": "Leveraged Cat",
+      "symbol": "LEVERCAT",
+      "creator": "HRjxStry3mGQoboYjKxZNmcoRbS4FNrYVkbML1gJN58d",
+      "quote": {"mint": "4sWNB8zGWHkh6UnmwiEtzNxL4XrN7uK9tosbESbJFfVs", "symbol": "xSOL"},
+      "launchpad": "launchlab",
+      "mode": "reward",
+      "transferFee": {"bps": 300},
+      "logoUrl": "https://gateway.irys.xyz/72ipFM6nub2FJEzQjhLSG2KGq7YDFQ2qmp8ZpYwcNKyh",
+      "startMarketCapUsd": 2948.746581036123,
+      "targetMarketCapUsd": 2948.746581036123,
+      "createdAt": "2026-09-07T11:19:47.471Z"
+    },
+    "network": "mainnet-beta"
+  },
+  "meta": {"generatedAt": "2026-09-22T16:34:04.824Z"}
+}

@@ -1,0 +1,12 @@
+{
+  "trades": [
+    {"wallet_address": "DEPLOYER1", "kol_name": null, "action": "sell", "sol_amount": 40.0,
+     "traded_at": "2026-09-06T15:00:00+00:00", "token_mint": "TOKEN_A"},
+    {"wallet_address": "W1", "kol_name": "Unipcs", "action": "sell", "sol_amount": 5.0,
+     "traded_at": "2026-09-06T15:05:00+00:00", "token_mint": "TOKEN_A"},
+    {"wallet_address": "W9", "kol_name": "NotTracked", "action": "sell", "sol_amount": 2.0,
+     "traded_at": "2026-09-06T15:06:00+00:00", "token_mint": "TOKEN_A"},
+    {"wallet_address": "W1", "kol_name": "Unipcs", "action": "sell", "sol_amount": 1.0,
+     "traded_at": "2026-09-06T15:07:00+00:00", "token_mint": "TOKEN_OUTSIDE_FEED"}
+  ]
+}

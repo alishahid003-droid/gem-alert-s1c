@@ -1,0 +1,319 @@
+"""
+Layer 0/0b -- Structural scoring engine.
+
+Polls MadeOnSol (Solana + Robinhood Chain) and Mobula Pulse (Base/BSC/TON/ETH)
+for new + trending tokens and scores each 0-100 (+ A/B/C/D band) on:
+
+  - top10/20 holder concentration
+  - LP lock status (post-graduation) / bonding-curve fill velocity (pre-graduation
+    Solana, where LP lock is not yet a meaningful concept)
+  - mint/freeze/update authority state
+  - volume-to-liquidity trend
+  - holder growth rate
+  - bundler/sniper % at launch
+  - liquidity depth relative to a typical position size (thin/deep flag)
+
+Pre-graduation Solana tokens use a STRICTER, separate threshold set from
+graduated/other-chain tokens, because pump.fun's pre-graduation rug/failure
+rate (~98.6% per the spec) means a generic threshold would flood the feed.
+
+MadeOnSol field source: /tokens/{mint}/risk, /tokens/{mint}/holders,
+/tokens/{mint}/bundle (see README for confirmed endpoint list).
+Mobula field source: /api/2/pulse (top10Holdings, snipersCount,
+bundlersCount, noMintAuthority, balanceMutable, etc. -- confirmed against
+docs.mobula.io as of Sep 2026).
+"""
+from dataclasses import dataclass
+from typing import Optional, Literal
+
+from config import CONFIG
+from utils.http import get_json, ApiUnreachable
+
+Chain = Literal["solana", "robinhood_chain", "base", "bsc", "ton", "ethereum"]
+
+
+@dataclass
+class RawSignals:
+    """Normalized 0-1 (or None if unknown) signals, regardless of source API."""
+    top10_holder_pct: Optional[float] = None          # 0-1, lower is better
+    lp_locked_or_curve_healthy: Optional[bool] = None  # True is better
+    mint_authority_revoked: Optional[bool] = None
+    freeze_authority_revoked: Optional[bool] = None
+    vol_to_liq_ratio: Optional[float] = None           # unitless, moderate is better
+    holder_growth_rate_per_hr: Optional[float] = None  # new holders/hr, higher (to a point) better
+    bundler_sniper_pct: Optional[float] = None         # 0-1, lower is better
+    liquidity_usd: Optional[float] = None
+    is_pregraduation_solana: bool = False
+
+
+@dataclass
+class ScoreResult:
+    score: int            # 0-100, higher = structurally safer
+    band: str             # A/B/C/D
+    liquidity_flag: str   # "thin" | "moderate" | "deep" | "unknown"
+    reasons: list
+
+
+# A typical position size Ali would actually try to enter with -- used only
+# to flag thin-vs-deep liquidity, tune via TYPICAL_POSITION_USD env var later
+# if needed.
+TYPICAL_POSITION_USD = 500.0
+
+# Thresholds are separate for pre-graduation Solana (stricter) vs everything
+# else, per spec.
+PREGRAD_SOL_BANDS = {"A": 80, "B": 65, "C": 45}   # else D
+GRADUATED_OR_OTHER_BANDS = {"A": 70, "B": 50, "C": 30}  # else D
+
+
+def score_token(sig: RawSignals) -> ScoreResult:
+    reasons = []
+    points = 0
+    max_points = 0
+
+    def add(weight, condition_points, reason=None):
+        nonlocal points, max_points
+        max_points += weight
+        points += condition_points
+        if reason:
+            reasons.append(reason)
+
+    # Holder concentration (weight 20)
+    if sig.top10_holder_pct is not None:
+        w = 20
+        earned = w * max(0.0, 1.0 - sig.top10_holder_pct / 0.6)  # 0 pts if top10 >= 60%
+        add(w, earned, f"top10 holds {sig.top10_holder_pct*100:.1f}%")
+    else:
+        add(20, 10, "top10 concentration unknown -- scored neutral")
+
+    # LP lock / bonding curve health (weight 20)
+    if sig.lp_locked_or_curve_healthy is not None:
+        w = 20
+        add(w, w if sig.lp_locked_or_curve_healthy else 0,
+            "LP locked / curve healthy" if sig.lp_locked_or_curve_healthy else "LP unlocked / curve unhealthy")
+    else:
+        add(20, 8, "LP/curve status unknown -- scored low-neutral")
+
+    # Mint/freeze/update authority (weight 20)
+    auth_bits = [b for b in (sig.mint_authority_revoked, sig.freeze_authority_revoked) if b is not None]
+    if auth_bits:
+        w = 20
+        earned = w * (sum(1 for b in auth_bits if b) / len(auth_bits))
+        add(w, earned, f"authority revoked: {sum(1 for b in auth_bits if b)}/{len(auth_bits)}")
+    else:
+        add(20, 6, "mint/freeze authority unknown -- scored low-neutral")
+
+    # Volume-to-liquidity trend (weight 15) -- extreme ratios (wash trading /
+    # about to rug) score low; moderate healthy ratio scores high.
+    if sig.vol_to_liq_ratio is not None:
+        w = 15
+        r = sig.vol_to_liq_ratio
+        if r < 0.2:
+            earned = w * 0.3   # dead
+        elif r <= 3.0:
+            earned = w * 1.0   # healthy range
+        else:
+            earned = w * max(0.0, 1.0 - (r - 3.0) / 10.0)  # decays as it gets extreme
+        add(w, earned, f"vol/liq ratio {r:.2f}")
+    else:
+        add(15, 6, "vol/liq trend unknown -- scored low-neutral")
+
+    # Holder growth rate (weight 10)
+    if sig.holder_growth_rate_per_hr is not None:
+        w = 10
+        earned = w * min(1.0, sig.holder_growth_rate_per_hr / 30.0)
+        add(w, earned, f"+{sig.holder_growth_rate_per_hr:.0f} holders/hr")
+    else:
+        add(10, 4, "holder growth unknown -- scored low-neutral")
+
+    # Bundler/sniper % at launch (weight 15)
+    if sig.bundler_sniper_pct is not None:
+        w = 15
+        earned = w * max(0.0, 1.0 - sig.bundler_sniper_pct / 0.5)  # 0 pts if >=50%
+        add(w, earned, f"bundler/sniper {sig.bundler_sniper_pct*100:.1f}%")
+    else:
+        add(15, 6, "bundler/sniper % unknown -- scored low-neutral")
+
+    raw_score = (points / max_points) * 100 if max_points else 0
+    score = int(round(raw_score))
+
+    bands = PREGRAD_SOL_BANDS if sig.is_pregraduation_solana else GRADUATED_OR_OTHER_BANDS
+    if score >= bands["A"]:
+        band = "A"
+    elif score >= bands["B"]:
+        band = "B"
+    elif score >= bands["C"]:
+        band = "C"
+    else:
+        band = "D"
+
+    if sig.liquidity_usd is None:
+        liq_flag = "unknown"
+    elif sig.liquidity_usd < TYPICAL_POSITION_USD * 3:
+        liq_flag = "thin"
+    elif sig.liquidity_usd < TYPICAL_POSITION_USD * 20:
+        liq_flag = "moderate"
+    else:
+        liq_flag = "deep"
+
+    return ScoreResult(score=score, band=band, liquidity_flag=liq_flag, reasons=reasons)
+
+
+# ---------------------------------------------------------------------------
+# Source adapters -- map each API's raw JSON into RawSignals
+# ---------------------------------------------------------------------------
+
+def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json: dict,
+                                 is_pregraduation: bool) -> RawSignals:
+    """risk_json from GET /tokens/{mint}/risk, holders_json from
+    /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle."""
+    factors = {f["key"]: f for f in risk_json.get("factors", [])} if risk_json else {}
+    top10 = None
+    if holders_json and "top10_share" in holders_json:
+        top10 = holders_json["top10_share"] / 100.0
+    return RawSignals(
+        top10_holder_pct=top10,
+        lp_locked_or_curve_healthy=None if is_pregraduation else _factor_ok(factors, "lp_lock"),
+        mint_authority_revoked=_factor_ok(factors, "mint_authority"),
+        freeze_authority_revoked=_factor_ok(factors, "freeze_authority"),
+        vol_to_liq_ratio=None,  # requires a volume+liquidity time series call, wired in scheduler
+        holder_growth_rate_per_hr=None,
+        bundler_sniper_pct=(bundle_json.get("held_pct_of_supply", 0) / 100.0) if bundle_json else None,
+        liquidity_usd=None,
+        is_pregraduation_solana=is_pregraduation,
+    )
+
+
+def _factor_ok(factors: dict, key: str) -> Optional[bool]:
+    f = factors.get(key)
+    if not f:
+        return None
+    return f.get("status") == "ok"
+
+
+def signals_from_mobula_pulse(pulse_item: dict) -> RawSignals:
+    """pulse_item is one token object from GET /api/2/pulse (Mobula), used for
+    Base/BSC/TON/Ethereum."""
+    top10 = pulse_item.get("top10Holdings")
+    snipers = pulse_item.get("snipersCount", 0) or 0
+    bundlers = pulse_item.get("bundlersCount", 0) or 0
+    holder_count = pulse_item.get("holderCount") or pulse_item.get("holders")
+    bundler_sniper_pct = None
+    if holder_count:
+        bundler_sniper_pct = min(1.0, (snipers + bundlers) / holder_count)
+    return RawSignals(
+        top10_holder_pct=(top10 / 100.0) if top10 is not None else None,
+        lp_locked_or_curve_healthy=not pulse_item.get("balanceMutable", False) if "balanceMutable" in pulse_item else None,
+        mint_authority_revoked=pulse_item.get("noMintAuthority"),
+        freeze_authority_revoked=(not pulse_item.get("isBlacklisted")) if "isBlacklisted" in pulse_item else None,
+        vol_to_liq_ratio=_safe_div(pulse_item.get("volume24h"), pulse_item.get("liquidity")),
+        holder_growth_rate_per_hr=None,  # needs a snapshot diff, wired in scheduler (holder census over time)
+        bundler_sniper_pct=bundler_sniper_pct,
+        liquidity_usd=pulse_item.get("liquidity"),
+        is_pregraduation_solana=False,
+    )
+
+
+def _safe_div(a, b):
+    if a is None or b in (None, 0):
+        return None
+    return a / b
+
+
+# ---------------------------------------------------------------------------
+# Live fetchers
+# ---------------------------------------------------------------------------
+
+def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
+    if not CONFIG.madeonsol_api_key:
+        return {"ok": False, "reason": "MADEONSOL_API_KEY not configured"}
+    prefix = "/rhc" if chain == "robinhood_chain" else ""
+    headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
+    out = {}
+    for name, path in [
+        ("risk", f"{prefix}/tokens/{mint}/risk"),
+        ("holders", f"{prefix}/tokens/{mint}/holders"),
+        ("bundle", f"{prefix}/tokens/{mint}/bundle"),
+    ]:
+        result = get_json(f"{CONFIG.madeonsol_base_url}{path}", headers=headers)
+        out[name] = result
+    return {"ok": True, "data": out}
+
+
+def fetch_mobula_pulse(chain_id: str) -> dict:
+    """chain_id examples: 'base:base', 'bnb:bnb', 'ethereum:ethereum'.
+    TON coverage is unconfirmed in Mobula's public docs as of this build --
+    flagged in README, code path left in place for when Ali's key can confirm it."""
+    headers = {}
+    if CONFIG.mobula_api_key:
+        headers["Authorization"] = CONFIG.mobula_api_key
+    result = get_json(f"{CONFIG.mobula_base_url}/api/2/pulse", headers=headers, params={"chainId": chain_id})
+    return result
+
+
+def score_mobula_pulse_items(chain: str, items: list) -> list:
+    """Scores every item already present in ONE Mobula Pulse response -- no
+    per-token re-fetch. (scan_stage1 below calls fetch_mobula_pulse again for
+    every mint even though one call already returns the whole list -- fine
+    for its original small-scale use, but scheduler.py uses THIS function
+    instead for the live Layer 0b discovery loop so the Pulse fetch stays at
+    one call per chain per cycle, not one call per token -- see README.)"""
+    results = []
+    for item in items:
+        sig = signals_from_mobula_pulse(item)
+        results.append({
+            "chain": chain,
+            "address": item.get("address"),
+            "score": score_token(sig),
+            "raw": item,
+        })
+    return results
+
+
+def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
+    """Single-mint MadeOnSol scoring -- 3 calls (risk/holders/bundle). Costly
+    enough per token that scheduler.py only calls this for a bounded subset
+    of Layer 1's deployer alerts (elite tier only, capped per cycle), not
+    every discovered mint -- see README's call-budget section for why."""
+    raw = fetch_madeonsol_token_risk(mint, chain)
+    if not raw.get("ok"):
+        return {"chain": chain, "address": mint, "error": raw.get("reason", "fetch failed")}
+    d = raw["data"]
+    sig = signals_from_madeonsol_risk(
+        d["risk"].get("json") or {}, d["holders"].get("json") or {}, d["bundle"].get("json") or {},
+        is_pregraduation,
+    )
+    return {"chain": chain, "address": mint, "score": score_token(sig)}
+
+
+def scan_stage1(mints_by_chain: dict) -> list:
+    """mints_by_chain: {"solana": [(mint, is_pregrad), ...], "base": [mint,...], ...}
+    Returns list of dicts: {chain, address, score_result}."""
+    results = []
+
+    for mint, is_pregrad in mints_by_chain.get("solana", []):
+        raw = fetch_madeonsol_token_risk(mint, "solana")
+        if not raw.get("ok"):
+            results.append({"chain": "solana", "address": mint, "error": raw.get("reason", "fetch failed")})
+            continue
+        d = raw["data"]
+        sig = signals_from_madeonsol_risk(
+            d["risk"].get("json") or {}, d["holders"].get("json") or {}, d["bundle"].get("json") or {},
+            is_pregrad,
+        )
+        results.append({"chain": "solana", "address": mint, "score": score_token(sig)})
+
+    for chain, chain_id in [("bsc", "bnb:bnb")]:  # scope cut Sept 22, 2026 -- base/ethereum dropped
+        for mint in mints_by_chain.get(chain, []):
+            raw = fetch_mobula_pulse(chain_id)
+            if not raw.get("ok"):
+                results.append({"chain": chain, "address": mint, "error": "mobula pulse fetch failed"})
+                continue
+            items = (raw.get("json") or {}).get("data", []) if isinstance(raw.get("json"), dict) else []
+            match = next((i for i in items if i.get("address", "").lower() == mint.lower()), None)
+            if not match:
+                results.append({"chain": chain, "address": mint, "error": "not present in current pulse snapshot"})
+                continue
+            sig = signals_from_mobula_pulse(match)
+            results.append({"chain": chain, "address": mint, "score": score_token(sig)})
+
+    return results

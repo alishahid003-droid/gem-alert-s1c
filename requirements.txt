@@ -1,0 +1,10 @@
+requests>=2.31.0
+python-dotenv>=1.0.1
+pytest>=8.0.0
+tenacity>=8.2.3
+
+# Part B (Sept 22, 2026) -- auto-buy executor, NOT wired into the live poll
+# loop yet. These are only needed once EXECUTION_ENABLED is turned on.
+solders>=0.21.0
+base58>=2.1.1
+web3>=6.15.0

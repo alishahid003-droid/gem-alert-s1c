@@ -1,0 +1,25 @@
+{
+  "alerts": [
+    {
+      "token_mint": "def2WQVw6E9tzYZ9pF3xJXrK9vN1mQmYtL4b2c3ghpump",
+      "deployer_tier": "elite",
+      "deployer_sol_balance": 42.5301,
+      "alert_type": "new_deploy",
+      "created_at": "2026-09-06T14:30:00Z"
+    },
+    {
+      "token_mint": "aaa1WQVw6E9tzYZ9pF3xJXrK9vN1mQmYtL4b2c3ghpump",
+      "deployer_tier": "unranked",
+      "deployer_sol_balance": 1.2,
+      "alert_type": "new_deploy",
+      "created_at": "2026-09-06T14:31:00Z"
+    },
+    {
+      "token_mint": "bbb1WQVw6E9tzYZ9pF3xJXrK9vN1mQmYtL4b2c3ghpump",
+      "deployer_tier": "good",
+      "deployer_sol_balance": 11.0,
+      "alert_type": "new_deploy",
+      "created_at": "2026-09-06T14:32:00Z"
+    }
+  ]
+}

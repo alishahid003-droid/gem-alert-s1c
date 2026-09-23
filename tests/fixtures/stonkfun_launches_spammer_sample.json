@@ -1,0 +1,10 @@
+{
+  "data": [
+    {"mint": "m1", "name": "Junk One", "symbol": "JNK1", "creator": "SpammerWallet1111111111111111111111111111", "startMarketCapUsd": 3000, "targetMarketCapUsd": 69000, "createdAt": "2026-09-01T00:00:00Z"},
+    {"mint": "m2", "name": "Junk Two", "symbol": "JNK2", "creator": "SpammerWallet1111111111111111111111111111", "startMarketCapUsd": 4200, "targetMarketCapUsd": 69000, "createdAt": "2026-09-03T00:00:00Z"},
+    {"mint": "m3", "name": "Junk Three", "symbol": "JNK3", "creator": "SpammerWallet1111111111111111111111111111", "startMarketCapUsd": 2800, "targetMarketCapUsd": 69000, "createdAt": "2026-09-05T00:00:00Z"},
+    {"mint": "m4", "name": "Junk Four", "symbol": "JNK4", "creator": "SpammerWallet1111111111111111111111111111", "startMarketCapUsd": 5000, "targetMarketCapUsd": 69000, "createdAt": "2026-09-10T00:00:00Z"},
+    {"mint": "m5", "name": "Junk Five", "symbol": "JNK5", "creator": "SpammerWallet1111111111111111111111111111", "startMarketCapUsd": 3100, "targetMarketCapUsd": 69000, "createdAt": "2026-09-15T00:00:00Z"},
+    {"mint": "m6", "name": "Junk Six", "symbol": "JNK6", "creator": "SpammerWallet1111111111111111111111111111", "startMarketCapUsd": 2900, "targetMarketCapUsd": 69000, "createdAt": "2026-09-20T00:00:00Z"}
+  ]
+}

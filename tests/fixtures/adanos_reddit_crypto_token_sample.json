@@ -1,0 +1,31 @@
+{
+  "found": true,
+  "symbol": "PONS",
+  "period_days": 7,
+  "buzz_score": 82,
+  "sentiment_score": 0.55,
+  "bullish_pct": 68,
+  "bearish_pct": 12,
+  "mentions": 420,
+  "unique_posts": 95,
+  "subreddit_count": 6,
+  "total_upvotes": 18500,
+  "trend": "rising",
+  "top_subreddits": [
+    {"subreddit": "CryptoMoonShots", "mentions": 210, "sentiment": 0.6},
+    {"subreddit": "SolanaMemeCoins", "mentions": 130, "sentiment": 0.5}
+  ],
+  "daily_trend": [
+    {"date": "2026-09-01", "mentions": 40, "sentiment_score": 0.10, "buzz_score": 20, "bullish_pct": 40, "bearish_pct": 20},
+    {"date": "2026-09-02", "mentions": 55, "sentiment_score": 0.20, "buzz_score": 25, "bullish_pct": 45, "bearish_pct": 18},
+    {"date": "2026-09-03", "mentions": 60, "sentiment_score": 0.15, "buzz_score": 28, "bullish_pct": 44, "bearish_pct": 20},
+    {"date": "2026-09-04", "mentions": 58, "sentiment_score": 0.18, "buzz_score": 27, "bullish_pct": 46, "bearish_pct": 19},
+    {"date": "2026-09-05", "mentions": 62, "sentiment_score": 0.22, "buzz_score": 30, "bullish_pct": 48, "bearish_pct": 17},
+    {"date": "2026-09-06", "mentions": 70, "sentiment_score": 0.30, "buzz_score": 35, "bullish_pct": 50, "bearish_pct": 15},
+    {"date": "2026-09-07", "mentions": 420, "sentiment_score": 0.55, "buzz_score": 82, "bullish_pct": 68, "bearish_pct": 12}
+  ],
+  "top_mentions": [
+    {"post_id": "abc123", "text_snippet": "PONS just locked liquidity, huge", "sentiment_score": 0.7,
+     "upvotes": 340, "subreddit": "CryptoMoonShots", "created_utc": 1757246400}
+  ]
+}

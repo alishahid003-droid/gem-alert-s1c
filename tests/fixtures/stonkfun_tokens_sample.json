@@ -1,0 +1,63 @@
+{
+  "data": [
+    {
+      "mint": "REALSOLmintAddressExample111111111111111111",
+      "pool": "poolAddrExample111111111111111111111111111",
+      "name": "Real Sol Pair",
+      "symbol": "REALSOL",
+      "quote": {"mint": "So11111111111111111111111111111111111111112", "symbol": "SOL", "name": "Wrapped SOL"},
+      "launchpad": "launchlab",
+      "mode": "standard",
+      "market": {
+        "priceUsd": 0.001,
+        "marketCapUsd": 45000,
+        "peakMarketCapUsd": 52000,
+        "volume24hUsd": 80000,
+        "liquidityUsd": 55000
+      },
+      "status": "new",
+      "graduationProgress": 0.7,
+      "createdAt": "2026-09-22T10:00:00.000Z"
+    },
+    {
+      "mint": "LEVERmintAddressExample1111111111111111111",
+      "pool": "poolAddrExample2222222222222222222222222",
+      "name": "Leveraged Example",
+      "symbol": "LEVEX",
+      "quote": {"mint": "xSOLmint1111111111111111111111111111111111", "symbol": "xSOL", "name": "xSOL", "category": "leverage"},
+      "launchpad": "launchlab",
+      "mode": "reward",
+      "market": {
+        "priceUsd": 0.002,
+        "marketCapUsd": 3000000,
+        "peakMarketCapUsd": 3200000,
+        "volume24hUsd": 190000,
+        "liquidityUsd": 210000
+      },
+      "status": "graduated",
+      "graduationProgress": 1.0,
+      "createdAt": "2026-09-07T11:20:03.301Z"
+    },
+    {
+      "mint": "STOCKmintAddressExample111111111111111111",
+      "pool": "poolAddrExample3333333333333333333333333",
+      "name": "Stock Paired Example",
+      "symbol": "STKEX",
+      "quote": {"mint": "stockQuoteMint1111111111111111111111111111", "symbol": "TSLAx", "name": "Tokenized TSLA", "category": "equity"},
+      "launchpad": "launchlab",
+      "mode": "standard",
+      "market": {
+        "priceUsd": 0.5,
+        "marketCapUsd": 900000,
+        "peakMarketCapUsd": 950000,
+        "volume24hUsd": 40000,
+        "liquidityUsd": 60000
+      },
+      "status": "new",
+      "graduationProgress": 0.4,
+      "createdAt": "2026-09-21T08:00:00.000Z"
+    }
+  ],
+  "pagination": {"page": 1, "totalPages": 1, "total": 3},
+  "network": "mainnet-beta"
+}

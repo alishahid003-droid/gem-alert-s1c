@@ -1,0 +1,14 @@
+{
+  "risk_score": 28,
+  "band": "caution",
+  "factors": [
+    {"key": "mint_authority", "status": "ok", "points": 0},
+    {"key": "freeze_authority", "status": "ok", "points": 0},
+    {"key": "top_holder_concentration", "status": "warn", "points": 18}
+  ],
+  "dev": {
+    "wallet_empty": true,
+    "buy_supply_pct": 2.42,
+    "first_sell_at": "2026-07-11T09:14:09Z"
+  }
+}

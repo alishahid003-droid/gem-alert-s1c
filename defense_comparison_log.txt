@@ -1,0 +1,1599 @@
+(using seed=1 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      199
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 30.9% of wallet (cap: 30%)
+
+Realized P&L:            $-15.43
+Ending wallet (realized):$34.57
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      199
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 30.9% of wallet (cap: 30%)
+
+Realized P&L:            $-15.43
+Ending wallet (realized):$34.57
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-15.43
+Defense OFF realized P&L: $-15.43
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=2 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          4
+Skipped (budget maxed): 0
+Skipped (breaker):      0
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  1  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  2/2 (exited at 55-85% of stake)
+  undetected:    0/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: no
+
+Realized P&L:            $+7.74
+Ending wallet (realized):$57.74
+
+Still-riding moonbags:   1  ($56.42 unrealized, not in wallet total above)
+  SimMint0072: runner, peaked 4.3x, 65% of stake still riding, $56.42 unrealized
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          3
+Skipped (budget maxed): 0
+Skipped (breaker):      176
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/2 (exited at 55-85% of stake)
+  undetected:    2/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 62.7% of wallet (cap: 30%)
+
+Realized P&L:            $-31.36
+Ending wallet (realized):$18.64
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $+7.74
+Defense OFF realized P&L: $-31.36
+Difference this run: $+39.11
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=3 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      182
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  2/2 (exited at 55-85% of stake)
+  undetected:    0/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 32.9% of wallet (cap: 30%)
+
+Realized P&L:            $-16.45
+Ending wallet (realized):$33.55
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      194
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 37.2% of wallet (cap: 30%)
+
+Realized P&L:            $-18.59
+Ending wallet (realized):$31.41
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-16.45
+Defense OFF realized P&L: $-18.59
+Difference this run: $+2.14
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=4 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      198
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 39.2% of wallet (cap: 30%)
+
+Realized P&L:            $-19.60
+Ending wallet (realized):$30.40
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      198
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 39.2% of wallet (cap: 30%)
+
+Realized P&L:            $-19.60
+Ending wallet (realized):$30.40
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-19.60
+Defense OFF realized P&L: $-19.60
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=5 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      192
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/2 (exited at 55-85% of stake)
+  undetected:    1/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 44.0% of wallet (cap: 30%)
+
+Realized P&L:            $-22.02
+Ending wallet (realized):$27.98
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      192
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/2 (exited at 55-85% of stake)
+  undetected:    2/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 68.0% of wallet (cap: 30%)
+
+Realized P&L:            $-33.98
+Ending wallet (realized):$16.02
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-22.02
+Defense OFF realized P&L: $-33.98
+Difference this run: $+11.96
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=6 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          4
+Skipped (budget maxed): 0
+Skipped (breaker):      166
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  1  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/2 (exited at 55-85% of stake)
+  undetected:    1/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 1 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $+81.28
+Ending wallet (realized):$131.28
+
+Still-riding moonbags:   1  ($315.15 unrealized, not in wallet total above)
+  SimMint0004: big, peaked 39.4x, 40% of stake still riding, $315.15 unrealized
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          4
+Skipped (budget maxed): 0
+Skipped (breaker):      166
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  1  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/2 (exited at 55-85% of stake)
+  undetected:    2/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 1 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $+69.94
+Ending wallet (realized):$119.94
+
+Still-riding moonbags:   1  ($315.15 unrealized, not in wallet total above)
+  SimMint0004: big, peaked 39.4x, 40% of stake still riding, $315.15 unrealized
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $+81.28
+Defense OFF realized P&L: $+69.94
+Difference this run: $+11.34
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=7 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          3
+Skipped (budget maxed): 0
+Skipped (breaker):      191
+
+Outcome breakdown (of positions that fired):
+  rug        x  3  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  3/3 (exited at 55-85% of stake)
+  undetected:    0/3 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $-15.51
+Ending wallet (realized):$34.49
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      196
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 39.3% of wallet (cap: 30%)
+
+Realized P&L:            $-19.65
+Ending wallet (realized):$30.35
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-15.51
+Defense OFF realized P&L: $-19.65
+Difference this run: $+4.14
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=8 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          3
+Skipped (budget maxed): 0
+Skipped (breaker):      183
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  2/2 (exited at 55-85% of stake)
+  undetected:    0/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $-12.08
+Ending wallet (realized):$37.92
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      197
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 37.0% of wallet (cap: 30%)
+
+Realized P&L:            $-18.52
+Ending wallet (realized):$31.48
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-12.08
+Defense OFF realized P&L: $-18.52
+Difference this run: $+6.44
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=9 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      197
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 34.4% of wallet (cap: 30%)
+
+Realized P&L:            $-17.22
+Ending wallet (realized):$32.78
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      197
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 34.4% of wallet (cap: 30%)
+
+Realized P&L:            $-17.22
+Ending wallet (realized):$32.78
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-17.22
+Defense OFF realized P&L: $-17.22
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=10 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      181
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/2 (exited at 55-85% of stake)
+  undetected:    1/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 50.8% of wallet (cap: 30%)
+
+Realized P&L:            $-25.38
+Ending wallet (realized):$24.62
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      186
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 36.6% of wallet (cap: 30%)
+
+Realized P&L:            $-18.30
+Ending wallet (realized):$31.70
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-25.38
+Defense OFF realized P&L: $-18.30
+Difference this run: $-7.08
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=11 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          3
+Skipped (budget maxed): 0
+Skipped (breaker):      185
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/2 (exited at 55-85% of stake)
+  undetected:    1/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 46.3% of wallet (cap: 30%)
+
+Realized P&L:            $-23.14
+Ending wallet (realized):$26.86
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      189
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 30.3% of wallet (cap: 30%)
+
+Realized P&L:            $-15.14
+Ending wallet (realized):$34.86
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-23.14
+Defense OFF realized P&L: $-15.14
+Difference this run: $-8.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=12 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          5
+Skipped (budget maxed): 0
+Skipped (breaker):      175
+
+Outcome breakdown (of positions that fired):
+  rug        x  3  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  1  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  2/3 (exited at 55-85% of stake)
+  undetected:    1/3 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 1 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $+61.28
+Ending wallet (realized):$111.28
+
+Still-riding moonbags:   1  ($197.65 unrealized, not in wallet total above)
+  SimMint0007: big, peaked 24.7x, 40% of stake still riding, $197.65 unrealized
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      196
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 32.3% of wallet (cap: 30%)
+
+Realized P&L:            $-16.14
+Ending wallet (realized):$33.86
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $+61.28
+Defense OFF realized P&L: $-16.14
+Difference this run: $+77.42
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=13 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      187
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/2 (exited at 55-85% of stake)
+  undetected:    1/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 40.0% of wallet (cap: 30%)
+
+Realized P&L:            $-20.02
+Ending wallet (realized):$29.98
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      193
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 33.6% of wallet (cap: 30%)
+
+Realized P&L:            $-16.81
+Ending wallet (realized):$33.19
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-20.02
+Defense OFF realized P&L: $-16.81
+Difference this run: $-3.21
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=14 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      199
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 36.9% of wallet (cap: 30%)
+
+Realized P&L:            $-18.47
+Ending wallet (realized):$31.53
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      199
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 36.9% of wallet (cap: 30%)
+
+Realized P&L:            $-18.47
+Ending wallet (realized):$31.53
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-18.47
+Defense OFF realized P&L: $-18.47
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=15 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          5
+Skipped (budget maxed): 0
+Skipped (breaker):      169
+
+Outcome breakdown (of positions that fired):
+  rug        x  4  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  4/4 (exited at 55-85% of stake)
+  undetected:    0/4 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $-12.68
+Ending wallet (realized):$37.32
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          3
+Skipped (budget maxed): 0
+Skipped (breaker):      181
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/2 (exited at 55-85% of stake)
+  undetected:    2/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 44.4% of wallet (cap: 30%)
+
+Realized P&L:            $-22.20
+Ending wallet (realized):$27.80
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-12.68
+Defense OFF realized P&L: $-22.20
+Difference this run: $+9.51
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=16 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          4
+Skipped (budget maxed): 0
+Skipped (breaker):      175
+
+Outcome breakdown (of positions that fired):
+  rug        x  3  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/3 (exited at 55-85% of stake)
+  undetected:    2/3 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- 3 consecutive losses (cap: 3)
+
+Realized P&L:            $-33.36
+Ending wallet (realized):$16.64
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          3
+Skipped (budget maxed): 0
+Skipped (breaker):      179
+
+Outcome breakdown (of positions that fired):
+  rug        x  2  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/2 (exited at 55-85% of stake)
+  undetected:    2/2 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 58.4% of wallet (cap: 30%)
+
+Realized P&L:            $-29.20
+Ending wallet (realized):$20.80
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-33.36
+Defense OFF realized P&L: $-29.20
+Difference this run: $-4.16
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=17 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      0
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  1  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  1/1 (exited at 55-85% of stake)
+  undetected:    0/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: no
+
+Realized P&L:            $+10.67
+Ending wallet (realized):$60.67
+
+Still-riding moonbags:   1  ($87.49 unrealized, not in wallet total above)
+  SimMint0015: runner, peaked 6.7x, 65% of stake still riding, $87.49 unrealized
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      192
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 31.0% of wallet (cap: 30%)
+
+Realized P&L:            $-15.52
+Ending wallet (realized):$34.48
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $+10.67
+Defense OFF realized P&L: $-15.52
+Difference this run: $+26.19
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=18 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      157
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 37.6% of wallet (cap: 30%)
+
+Realized P&L:            $-18.78
+Ending wallet (realized):$31.22
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          2
+Skipped (budget maxed): 0
+Skipped (breaker):      157
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  1  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 37.6% of wallet (cap: 30%)
+
+Realized P&L:            $-18.78
+Ending wallet (realized):$31.22
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-18.78
+Defense OFF realized P&L: $-18.78
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=19 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      192
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: ON
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 36.1% of wallet (cap: 30%)
+
+Realized P&L:            $-18.04
+Ending wallet (realized):$31.96
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      192
+
+Outcome breakdown (of positions that fired):
+  rug        x  1  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  0  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Layer 6 / defensive_sell: OFF (baseline -- no early exit modeled)
+  caught early:  0/1 (exited at 55-85% of stake)
+  undetected:    1/1 (rode to the terminal 0-30% outcome)
+
+Moonbag trims fired:
+  3.0x tier: 0 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: YES -- session loss 36.1% of wallet (cap: 30%)
+
+Realized P&L:            $-18.04
+Ending wallet (realized):$31.96
+
+Still-riding moonbags:   none this run
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $-18.04
+Defense OFF realized P&L: $-18.04
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================
+(using seed=20 for both runs -- identical world, only defense toggles)
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      0
+
+Outcome breakdown (of positions that fired):
+  rug        x  0  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  1  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: no
+
+Realized P&L:            $+14.34
+Ending wallet (realized):$64.34
+
+Still-riding moonbags:   1  ($79.90 unrealized, not in wallet total above)
+  SimMint0012: runner, peaked 6.1x, 65% of stake still riding, $79.90 unrealized
+======================================================================
+
+======================================================================
+S1c EXECUTOR SIMULATION -- SYNTHETIC, NOT A RETURN FORECAST
+======================================================================
+Starting wallet:        $50.00
+Candidates scanned:     200
+Stage 1 fired:          1
+Skipped (budget maxed): 0
+Skipped (breaker):      0
+
+Outcome breakdown (of positions that fired):
+  rug        x  0  -- dies / rugged -- defensive-sell-equivalent exit
+  flat       x  0  -- never reaches first moonbag tier, closed at sim end
+  runner     x  1  -- hits the 3x moonbag tier only
+  big        x  0  -- hits 3x and 10x tiers
+  moonshot   x  0  -- hits all three tiers, moonbag rides the rest of the sim
+
+Moonbag trims fired:
+  3.0x tier: 1 times
+  10.0x tier: 0 times
+  50.0x tier: 0 times
+
+Circuit breaker tripped: no
+
+Realized P&L:            $+14.34
+Ending wallet (realized):$64.34
+
+Still-riding moonbags:   1  ($79.90 unrealized, not in wallet total above)
+  SimMint0012: runner, peaked 6.1x, 65% of stake still riding, $79.90 unrealized
+======================================================================
+
+======================================================================
+Defense ON realized P&L:  $+14.34
+Defense OFF realized P&L: $+14.34
+Difference this run: $+0.00
+
+NOTE: the two runs see the same candidates only UNTIL the circuit breaker
+trips in one of them. Catching a rug early changes realized P&L, which
+changes whether/when the breaker trips, which changes how many MORE
+candidates that run even gets to evaluate. So a single run isn't a clean
+A/B test -- run with --seed unset (or loop over many seeds) and look at the
+AVERAGE difference, not any one run, for an honest read on what Layer 6 is worth.
+======================================================================

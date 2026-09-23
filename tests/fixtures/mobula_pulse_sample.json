@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "address": "0xabc0000000000000000000000000000000000001",
+      "chainId": "base:base",
+      "name": "SampleGem",
+      "symbol": "SGEM",
+      "state": "new",
+      "top10Holdings": 22.5,
+      "top50Holdings": 48.0,
+      "devHoldings": 3.1,
+      "insidersHoldings": 5.0,
+      "snipersCount": 4,
+      "bundlersCount": 2,
+      "holderCount": 180,
+      "noMintAuthority": true,
+      "isBlacklisted": false,
+      "balanceMutable": false,
+      "buyTax": 0,
+      "sellTax": 0,
+      "liquidity": 8400,
+      "volume24h": 12500
+    }
+  ]
+}
