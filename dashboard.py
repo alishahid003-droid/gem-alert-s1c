@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import state
+import links
 from scheduler import readiness_report
 import executor.position_state as position_state
 
@@ -83,6 +84,7 @@ def build_data() -> dict:
         item["ago"] = _ago(item["ts"])
         item["ts_fmt"] = _fmt_ts(item["ts"])
         item["category"] = LAYER_CATEGORY.get(item.get("layer"), item.get("layer") or "other")
+        item["links"] = links.build_links(item.get("chain"), item.get("token_address"))
     positions = position_state.list_open_positions()
     for p in positions:
         p["opened_fmt"] = _fmt_ts(p.get("opened_ts")) if p.get("opened_ts") else "?"
@@ -123,6 +125,8 @@ PAGE_TEMPLATE = """<!doctype html>
   .filters button { background:#161a1f; border:1px solid #2a2f37; color:#e6e6e6; border-radius:5px; padding:4px 10px; margin-right:6px; font-size:11px; cursor:pointer; }
   .filters button.active { background:#2a2f37; }
   .pill { background:#21252b; border-radius:4px; padding:2px 8px; font-size:11px; }
+  .linkbtn { display:inline-block; background:#1f3a2e; color:#2ecc71; border:1px solid #2a5c40; border-radius:4px; padding:2px 7px; margin:1px 3px 1px 0; font-size:11px; text-decoration:none; }
+  .linkbtn:hover { background:#2a5c40; }
 </style></head>
 <body>
 <h1>S1c &mdash; Fomo Gem-Alert System</h1>
@@ -200,7 +204,7 @@ function render(data) {
 
   const shown = activeFilter === "all" ? data.alert_feed : data.alert_feed.filter(a => a.category === activeFilter);
   document.getElementById("feed").innerHTML = shown.length ? `
-    <table><thead><tr><th>When</th><th>Category</th><th>Layer</th><th>Chain</th><th>Token</th><th>Headline</th><th>Tags</th></tr></thead>
+    <table><thead><tr><th>When</th><th>Category</th><th>Layer</th><th>Chain</th><th>Token</th><th>Headline</th><th>Tags</th><th>Buy / Chart</th></tr></thead>
     <tbody>${shown.map(a => `<tr>
       <td title="${esc(a.ts_fmt)}">${esc(a.ago)}</td>
       <td class="cat-${esc(a.category)}">${esc(a.category)}</td>
@@ -208,6 +212,7 @@ function render(data) {
       <td>${esc(a.token_symbol)}</td>
       <td>${esc(a.headline)}</td>
       <td>${Object.entries(a.tags || {}).map(([k,v]) => `<span class="tag">${esc(k)}: ${esc(v)}</span>`).join("")}</td>
+      <td>${Object.entries(a.links || {}).map(([label,url]) => `<a class="linkbtn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" ")}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">no alerts yet</div>';
 }
 
