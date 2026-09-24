@@ -647,7 +647,12 @@ def run_poll_fast():
                   f"snapshot (state.py) -- first cycle establishes the baseline only")
             state.save_snapshot(held)
         else:
-            print(f"[layer6] portfolio fetch failed: {portfolio.get('reason')}")
+            raw = portfolio.get("raw") if isinstance(portfolio, dict) else None
+            if isinstance(raw, dict):
+                detail = raw.get("json") or raw.get("text") or f"HTTP {raw.get('status_code')}"
+            else:
+                detail = portfolio.get("reason") if isinstance(portfolio, dict) else str(portfolio)
+            print(f"[layer6] portfolio fetch failed: {detail}")
     else:
         print("[layer6] BLOCKED: MOBULA_API_KEY and/or WALLET_ADDRESSES not set")
 
