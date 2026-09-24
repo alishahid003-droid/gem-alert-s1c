@@ -581,8 +581,12 @@ def run_poll_fast():
     bn = _safe(fetch_binance_new_listings)
     if bn["ok"]:
         listings = parse_binance_new_listings(bn["raw"].get("json") or {})
-        print(f"[layer4:binance] {len(listings)} recent listing articles fetched")
-        for item in listings[:3]:
+        seen = state.binance_seen_listings()
+        new_listings = [item for item in listings if (item.get("code") or item.get("title")) not in seen]
+        print(f"[layer4:binance] {len(listings)} recent listing article(s) fetched, "
+              f"{len(new_listings)} not-yet-alerted")
+        just_alerted = []
+        for item in new_listings[:3]:
             alert = Alert(item.get("title", "?")[:20], "n/a", "n/a", item["title"])
             alert.set_tag("News", "exchange-listing (Binance)")
             send_res = send_alert(alert)
@@ -590,6 +594,8 @@ def run_poll_fast():
                                   alert.headline, dict(alert.tags))
             if send_res.get("sent"):
                 alerts_sent += 1
+            just_alerted.append(item.get("code") or item.get("title"))
+        state.mark_binance_seen(just_alerted)
     else:
         print("[layer4:binance] fetch failed (network-level or API-level -- see raw response)")
 

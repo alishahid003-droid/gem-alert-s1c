@@ -311,6 +311,30 @@ def pending_rescan_count() -> int:
 # its next check -- otherwise an alert that fires during that chain's
 # skipped cycle would be silently missed rather than just delayed. ---
 
+def binance_seen_listings() -> set:
+    """Layer 4's Binance new-listings feed has no dedup of its own -- every
+    poll cycle it just returns whatever's currently in Binance's top-N
+    recent-listings list, so without this, the same 1-3 articles get
+    re-alerted on every single cycle until they fall out of that list
+    (confirmed live, Sept 24 2026 -- this is what was flooding Ali's
+    Telegram with repeat Binance alerts). Keyed by article code (falls
+    back to title if code is missing), capped like layer0c's seen-set."""
+    return set(get_value("binance_seen_listings") or [])
+
+
+BINANCE_SEEN_CAP = 500
+
+
+def mark_binance_seen(article_ids) -> None:
+    existing = list(get_value("binance_seen_listings") or [])
+    existing_set = set(existing)
+    new_ones = [a for a in article_ids if a and a not in existing_set]
+    merged = existing + new_ones
+    if len(merged) > BINANCE_SEEN_CAP:
+        merged = merged[-BINANCE_SEEN_CAP:]
+    set_value("binance_seen_listings", merged)
+
+
 def layer0c_seen_mints() -> set:
     """Layer 0c (StonkFun) has no documented 'since' cursor on
     /tokens?sort=newest, unlike Layer 1's MadeOnSol endpoint -- so dedup
