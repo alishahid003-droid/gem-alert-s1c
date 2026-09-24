@@ -17,6 +17,14 @@ def test_cryptopanic_parse():
     assert posts[0]["currencies"] == ["SOL"]
 
 
+def test_cryptopanic_parse_includes_post_id():
+    # id is needed for state.cryptopanic_seen_posts dedup -- without it, every
+    # post would re-alert every cycle the same way Binance's feed did before it
+    # got a seen-set (Ali, Sept 24 2026).
+    posts = parse_cryptopanic_posts(_load("cryptopanic_posts_sample.json"))
+    assert posts[0]["id"] == 1
+
+
 def test_binance_listing_parse():
     listings = parse_binance_new_listings(_load("binance_listings_sample.json"))
     assert len(listings) == 1

@@ -29,6 +29,7 @@ def parse_cryptopanic_posts(payload: dict) -> list:
     out = []
     for p in posts:
         out.append({
+            "id": p.get("id"),
             "title": p.get("title"),
             "url": p.get("url") or (p.get("source") or {}).get("domain"),
             "currencies": [c.get("code") for c in p.get("currencies", []) or []],

@@ -335,6 +335,27 @@ def mark_binance_seen(article_ids) -> None:
     set_value("binance_seen_listings", merged)
 
 
+def cryptopanic_seen_posts() -> set:
+    """Layer 4's CryptoPanic rising-news feed has the same no-dedup problem
+    Binance's listing feed had (see binance_seen_listings) -- filter=rising
+    returns whatever is currently trending, so the same post would re-alert
+    every cycle without this. Keyed by CryptoPanic's own post id."""
+    return set(get_value("cryptopanic_seen_posts") or [])
+
+
+CRYPTOPANIC_SEEN_CAP = 500
+
+
+def mark_cryptopanic_seen(post_ids) -> None:
+    existing = list(get_value("cryptopanic_seen_posts") or [])
+    existing_set = set(existing)
+    new_ones = [p for p in post_ids if p and p not in existing_set]
+    merged = existing + new_ones
+    if len(merged) > CRYPTOPANIC_SEEN_CAP:
+        merged = merged[-CRYPTOPANIC_SEEN_CAP:]
+    set_value("cryptopanic_seen_posts", merged)
+
+
 def layer0c_seen_mints() -> set:
     """Layer 0c (StonkFun) has no documented 'since' cursor on
     /tokens?sort=newest, unlike Layer 1's MadeOnSol endpoint -- so dedup

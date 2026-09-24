@@ -592,36 +592,48 @@ def run_poll_fast():
         print(f"[layer0c-momentum] fetch failed: {reason}")
 
     # --- Layer 4: news/exchange (no MadeOnSol cost either way) ---
+    #
+    # CryptoPanic (Ali, Sept 24 2026): this was fetching and parsing posts every
+    # cycle but never turning any of them into an alert -- the exact reason
+    # nothing was showing up for "news or utility based memecoin launches". Fixed:
+    # only posts that actually name a currency alert (pure macro/opinion posts with
+    # no `currencies` tag are skipped -- they're not actionable per-token signal),
+    # deduped the same way Binance's feed is below.
     if report["stage1"]["layer4_news_exchange"]["cryptopanic"]:
         cp = _safe(fetch_cryptopanic_posts, "rising")
         if cp["ok"]:
             posts = parse_cryptopanic_posts(cp["raw"].get("json") or {})
-            print(f"[layer4:cryptopanic] {len(posts)} rising posts fetched")
+            seen = state.cryptopanic_seen_posts()
+            actionable = [p for p in posts if p.get("currencies") and p.get("id") not in seen]
+            print(f"[layer4:cryptopanic] {len(posts)} rising post(s) fetched, "
+                  f"{len(actionable)} new coin-tagged post(s)")
+            just_alerted = []
+            for post in actionable[:5]:
+                coins = ", ".join(post["currencies"])
+                alert = Alert(post["currencies"][0], "n/a", "n/a", post.get("title") or "CryptoPanic rising post")
+                alert.set_tag("News", f"CryptoPanic rising ({coins})")
+                send_res = send_alert(alert)
+                state.log_full_alert("layer4_news", alert.chain, alert.token_symbol, alert.token_address,
+                                      alert.headline, dict(alert.tags))
+                print(f"[layer4:cryptopanic] {coins} -> {send_res}")
+                if send_res.get("sent"):
+                    alerts_sent += 1
+                just_alerted.append(post.get("id"))
+            state.mark_cryptopanic_seen(just_alerted)
         else:
             print(f"[layer4:cryptopanic] fetch failed: {cp.get('reason')}")
     else:
-        print("[layer4:cryptopanic] BLOCKED: CRYPTOPANIC_AUTH_TOKEN not set")
+        print("[layer4:cryptopanic] BLOCKED: CRYPTOPANIC_AUTH_TOKEN not set (see README -- separate free signup)")
 
-    bn = _safe(fetch_binance_new_listings)
-    if bn["ok"]:
-        listings = parse_binance_new_listings(bn["raw"].get("json") or {})
-        seen = state.binance_seen_listings()
-        new_listings = [item for item in listings if (item.get("code") or item.get("title")) not in seen]
-        print(f"[layer4:binance] {len(listings)} recent listing article(s) fetched, "
-              f"{len(new_listings)} not-yet-alerted")
-        just_alerted = []
-        for item in new_listings[:3]:
-            alert = Alert(item.get("title", "?")[:20], "n/a", "n/a", item["title"])
-            alert.set_tag("News", "exchange-listing (Binance)")
-            send_res = send_alert(alert)
-            state.log_full_alert("layer4_news", alert.chain, alert.token_symbol, alert.token_address,
-                                  alert.headline, dict(alert.tags))
-            if send_res.get("sent"):
-                alerts_sent += 1
-            just_alerted.append(item.get("code") or item.get("title"))
-        state.mark_binance_seen(just_alerted)
-    else:
-        print("[layer4:binance] fetch failed (network-level or API-level -- see raw response)")
+    # Binance new-listing feed REMOVED (Ali, Sept 24 2026: "do we really need it
+    # for memecoins"). Binance only lists coins after its own formal review, which
+    # in practice means established/vetted projects, essentially never a brand-new
+    # pump.fun/Fomo/StonkFun-style memecoin -- it was flooding Telegram with the
+    # only alerts actually arriving while the real memecoin layers stayed quiet,
+    # i.e. pure noise for this system's actual purpose. Code left in place
+    # (layers/layer4_news.py's fetch_binance_new_listings/parse_binance_new_listings,
+    # state.py's binance_seen_listings/mark_binance_seen) in case it's ever wanted
+    # back -- just not called from here anymore.
 
     # --- Layer 0b: Mobula Pulse, one call per chain, scores every item in
     # that response -- free (no MadeOnSol cost), so this runs every fast

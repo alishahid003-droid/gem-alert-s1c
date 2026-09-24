@@ -129,3 +129,25 @@ def test_layer1_last_checked_roundtrip_is_per_chain(tmp_path, monkeypatch):
     assert state_module.get_layer1_last_checked("solana") == "2026-09-07T00:00:00+00:00"
     # The other chain's timestamp must stay independent, not shared.
     assert state_module.get_layer1_last_checked("robinhood_chain") is None
+
+
+def test_cryptopanic_seen_roundtrip_and_dedup(tmp_path, monkeypatch):
+    # Mirrors binance_seen_listings' contract -- CryptoPanic's rising-news
+    # feed has no cursor either, so without this the same post re-alerts
+    # every cycle (the exact bug behind "news...have not seen anything",
+    # Ali, Sept 24 2026).
+    _reset_local_state(tmp_path, monkeypatch)
+    assert state_module.cryptopanic_seen_posts() == set()
+    state_module.mark_cryptopanic_seen([1, 2, 2, None])
+    seen = state_module.cryptopanic_seen_posts()
+    assert seen == {1, 2}
+
+
+def test_cryptopanic_seen_cap_keeps_most_recent(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    ids = list(range(state_module.CRYPTOPANIC_SEEN_CAP + 10))
+    state_module.mark_cryptopanic_seen(ids)
+    seen = state_module.cryptopanic_seen_posts()
+    assert len(seen) == state_module.CRYPTOPANIC_SEEN_CAP
+    assert ids[-1] in seen
+    assert ids[0] not in seen
