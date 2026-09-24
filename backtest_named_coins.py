@@ -41,6 +41,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.layer0_scoring import score_solana_mint, fetch_mobula_pulse, score_mobula_pulse_items
+from utils.http import describe_fetch_failure
 
 # Each entry: (display_name, chain, address, is_pregraduation)
 # is_pregraduation is always False here -- every coin below has already
@@ -86,7 +87,7 @@ def score_bsc_by_name(names: list) -> dict:
         return out
     if not raw.get("ok"):
         for n in names:
-            out[n] = {"error": f"Mobula Pulse fetch failed: {raw.get('reason')}"}
+            out[n] = {"error": f"Mobula Pulse fetch failed: {describe_fetch_failure({'raw': raw})}"}
         return out
     items = (raw.get("json") or {}).get("data", []) if isinstance(raw.get("json"), dict) else []
     scored_all = score_mobula_pulse_items("bsc", items)

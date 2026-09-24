@@ -261,10 +261,20 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
 def fetch_mobula_pulse(chain_id: str) -> dict:
     """chain_id examples: 'base:base', 'bnb:bnb', 'ethereum:ethereum'.
     TON coverage is unconfirmed in Mobula's public docs as of this build --
-    flagged in README, code path left in place for when Ali's key can confirm it."""
+    flagged in README, code path left in place for when Ali's key can confirm it.
+
+    Real bug fixed Sept 24 2026: this was sending a bare `Authorization:
+    <key>` header with no "Bearer " prefix -- every OTHER Mobula call in
+    this codebase (layer10_insider_cluster.py, layer6_exit_realizable.py,
+    wallet_balance.py) correctly uses "Bearer <key>". Caught live: Ali's
+    BSC named-coin backtest failed tonight while Solana/RHC calls at
+    least reached MadeOnSol -- this was the actual reason, not a MadeOnSol
+    rate-limit spillover. Almost certainly means every Layer 0b BSC/Base
+    Pulse call in production has been silently failing (401) since this
+    was written -- not a today-only issue."""
     headers = {}
     if CONFIG.mobula_api_key:
-        headers["Authorization"] = CONFIG.mobula_api_key
+        headers["Authorization"] = f"Bearer {CONFIG.mobula_api_key}"
     result = get_json(f"{CONFIG.mobula_base_url}/api/2/pulse", headers=headers, params={"chainId": chain_id})
     return result
 

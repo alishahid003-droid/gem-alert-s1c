@@ -136,3 +136,25 @@ def test_score_solana_mint_degrades_gracefully_on_partial_madeonsol_failure(monk
     result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
     assert "error" not in result
     assert result["score"].band in {"A", "B", "C", "D"}
+
+
+def test_fetch_mobula_pulse_sends_bearer_prefixed_auth_header(monkeypatch):
+    # Real bug fixed Sept 24 2026: this was sending a bare `Authorization:
+    # <key>` header with no "Bearer " prefix, while every other Mobula call
+    # in this codebase (layer10_insider_cluster.py, layer6_exit_realizable.py,
+    # wallet_balance.py) correctly uses "Bearer <key>" -- almost certainly
+    # the real reason Layer 0b's BSC/Base Pulse scoring has been silently
+    # failing (401) in production, caught live via Ali's named-coin backtest.
+    import layers.layer0_scoring as l0
+
+    captured = {}
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        captured["headers"] = headers
+        return {"ok": True, "status_code": 200, "url": url, "json": {"data": []}}
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "mobula_api_key", "mob_test_key")
+
+    l0.fetch_mobula_pulse("bnb:bnb")
+    assert captured["headers"]["Authorization"] == "Bearer mob_test_key"
