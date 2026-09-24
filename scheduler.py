@@ -104,6 +104,21 @@ import sys
 import time
 from datetime import datetime, timezone
 
+# Local-only auto-load of a .env file (Ali, Sept 24 2026 -- python-dotenv was
+# already in requirements.txt but nothing ever called it). Must happen BEFORE
+# `from config import CONFIG` below -- config.py builds CONFIG from
+# os.environ at import time, so loading .env any later leaves CONFIG holding
+# stale/missing values even though the file itself is fine (caught live: a
+# same-day test run showed every key as "not set" despite .env having all
+# six). No-op on GitHub Actions, which has no .env file and gets its secrets
+# from repo Secrets instead -- this only matters for --poll-madeonsol on
+# Ali's own PC.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
 from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint
@@ -129,16 +144,6 @@ from layers.wallet_balance import fetch_wallets_portfolio, extract_balances_for_
 from telegram_alert import Alert, send_alert
 from utils.http import ApiUnreachable
 import state
-
-# Local-only auto-load of a .env file (Ali, Sept 24 2026 -- python-dotenv was
-# already in requirements.txt but nothing ever called it). No-op on GitHub
-# Actions, which has no .env file and gets its secrets from repo Secrets
-# instead -- this only matters for running --poll-madeonsol on Ali's own PC.
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
 
 # True only inside a GitHub Actions runner (GitHub sets this automatically on
 # every job -- see https://docs.github.com/actions/learn-github-actions/variables).
