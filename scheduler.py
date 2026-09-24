@@ -130,6 +130,25 @@ from telegram_alert import Alert, send_alert
 from utils.http import ApiUnreachable
 import state
 
+# Local-only auto-load of a .env file (Ali, Sept 24 2026 -- python-dotenv was
+# already in requirements.txt but nothing ever called it). No-op on GitHub
+# Actions, which has no .env file and gets its secrets from repo Secrets
+# instead -- this only matters for running --poll-madeonsol on Ali's own PC.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# True only inside a GitHub Actions runner (GitHub sets this automatically on
+# every job -- see https://docs.github.com/actions/learn-github-actions/variables).
+# Used to skip every MadeOnSol-calling layer there (Layer 1, Layer 8, Layer 2+9)
+# now that a free MadeOnSol key is confirmed rate-limited by GitHub's rotating
+# runner IPs -- those layers instead run from run_poll_madeonsol(), meant to be
+# scheduled on Ali's own PC (a stable home IP) via Windows Task Scheduler. This
+# flag is what keeps the two from double-alerting on the same event.
+IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
+
 
 def _safe(fn, *args, **kwargs):
     """Runs a network-touching call and converts a genuine network-level
@@ -453,6 +472,47 @@ def poll_layer2b_pumpfun_smart_money() -> dict:
             "roster_size": len(get_smart_money_roster())}
 
 
+def _run_layer1_cycle(_summary_path=None):
+    """The exact Layer 1 logic that used to be inline in run_poll_fast, now
+    shared between there (currently a no-op on GitHub Actions) and
+    run_poll_madeonsol() (the local-PC entrypoint) -- extracted so both call
+    the SAME code instead of two copies that could quietly drift apart.
+    Returns (alerts_sent, madeonsol_calls)."""
+    alerts_sent = 0
+    madeonsol_calls = 0
+    if not CONFIG.layer1_ready():
+        print("[layer1] BLOCKED: MADEONSOL_API_KEY not set")
+        return alerts_sent, madeonsol_calls
+
+    chain = chain_for_cycle(time.time())
+    since = state.get_layer1_last_checked(chain)
+    result = _safe(poll_layer1, chain, since)
+    madeonsol_calls += 1
+    if not result["ok"]:
+        print(f"[layer1:{chain}] skipped: {result.get('reason')}")
+        if _summary_path:
+            with open(_summary_path, "a") as _f:
+                _f.write(f"- [layer1:{chain}] FAILED: {result.get('reason')}\n")
+    else:
+        state.set_layer1_last_checked(chain, datetime.now(timezone.utc).isoformat())
+        for a in result["alerts"]:
+            alert = Alert(a["token_address"][:8], a["token_address"], chain,
+                           "Elite/good-tier deployer just launched a token")
+            alert.set_tag("Chain", chain).set_tag("Deployer", a["deployer_tier"])
+            send_res = _alert(alert, "layer1")
+            print(f"[layer1:{chain}] alert -> {send_res}")
+            if send_res.get("sent"):
+                alerts_sent += 1
+            if a["deployer_tier"] == "elite" and a["token_address"]:
+                state.queue_rescan(a["token_address"], chain, is_pregraduation=(chain == "solana"))
+    print(f"[layer1] checked {chain} this cycle")
+    if _summary_path:
+        with open(_summary_path, "a") as _f:
+            _f.write(f"- [layer1:{chain}] result: {result.get('ok')}, "
+                     f"{len(result.get('alerts', []))} alert(s)\n")
+    return alerts_sent, madeonsol_calls
+
+
 def run_poll_fast():
     """Discovery: Layer 1 (deployer alerts) + Layer 0b (Mobula Pulse
     scoring) + Layer 4 (news) + Layer 6 (exit-risk snapshot). No per-token
@@ -493,49 +553,27 @@ def run_poll_fast():
         print(f"[layer11] boost board fetch failed this cycle: {board}")
         board = None
 
-    # --- Layer 1: deployer alerts. Elite-tier finds go straight onto the
-    # Layer 8 deep-score queue for the NEXT slow cycle to pick up -- not
-    # scored here, to keep this cycle cheap and fast.
-    #
-    # Only ONE chain is checked per fast cycle, alternating Solana/RHC by
-    # wall-clock time (chain_for_cycle) -- see the module docstring above for
-    # why (no combined multi-chain endpoint exists, and the reputation-tier
-    # field is already read off this same single call, so there's no
-    # redundant call to dedup away; alternating is the only real lever).
-    # This halves Layer 1 to 144 MadeOnSol calls/day; each chain still gets
-    # checked roughly every 20 minutes. `since` (the other chain's or this
-    # chain's own last-checked timestamp) is passed so an alert firing during
-    # a skipped cycle is caught late instead of dropped. ---
-    if CONFIG.layer1_ready():
-        chain = chain_for_cycle(time.time())
-        since = state.get_layer1_last_checked(chain)
-        result = _safe(poll_layer1, chain, since)
-        madeonsol_calls += 1
-        if not result["ok"]:
-            print(f"[layer1:{chain}] skipped: {result.get('reason')}")
-            if _summary_path:
-                with open(_summary_path, "a") as _f:
-                    _f.write(f"- [layer1:{chain}] FAILED: {result.get('reason')}\n")
-        else:
-            state.set_layer1_last_checked(chain, datetime.now(timezone.utc).isoformat())
-            for a in result["alerts"]:
-                alert = Alert(a["token_address"][:8], a["token_address"], chain,
-                               "Elite/good-tier deployer just launched a token")
-                alert.set_tag("Chain", chain).set_tag("Deployer", a["deployer_tier"])
-                send_res = _alert(alert, "layer1")
-                print(f"[layer1:{chain}] alert -> {send_res}")
-                if send_res.get("sent"):
-                    alerts_sent += 1
-                if a["deployer_tier"] == "elite" and a["token_address"]:
-                    state.queue_rescan(a["token_address"], chain, is_pregraduation=(chain == "solana"))
-        print(f"[layer1] checked {chain} this cycle (alternates each fast cycle, ~144 MadeOnSol calls/day "
-              f"total instead of 288 -- see README's call-budget section)")
+    # --- Layer 1: deployer alerts. MOVED off GitHub Actions (Ali, Sept 24
+    # 2026): confirmed live that MadeOnSol's free key rate-limits on IP
+    # diversity ("Too many IP addresses for one free key... 8 IP addresses
+    # today"), and GitHub Actions runners get a different IP nearly every
+    # run -- structurally incompatible with a free key, not a code bug.
+    # Runs instead from run_poll_madeonsol(), meant to be scheduled on
+    # Ali's own PC (stable home IP) via Windows Task Scheduler -- see
+    # README. This block is now a no-op on GitHub Actions specifically so
+    # the two never double-alert on the same deployer launch. ---
+    if IS_GITHUB_ACTIONS:
+        print("[layer1] SKIPPED on GitHub Actions -- MadeOnSol free-key IP-rate-limit "
+              "(see run_poll_madeonsol / README). Run 'python scheduler.py --poll-madeonsol' "
+              "on your own PC instead.")
         if _summary_path:
             with open(_summary_path, "a") as _f:
-                _f.write(f"- [layer1:{chain}] result: {result.get('ok')}, "
-                         f"{len(result.get('alerts', []))} alert(s)\n")
+                _f.write("- [layer1] SKIPPED on GitHub Actions -- moved to --poll-madeonsol "
+                         "(MadeOnSol free-key rate limit)\n")
     else:
-        print("[layer1] BLOCKED: MADEONSOL_API_KEY not set")
+        a1, c1 = _run_layer1_cycle(_summary_path)
+        alerts_sent += a1
+        madeonsol_calls += c1
 
     # --- Layer 0c: StonkFun discovery. Keyless, so always attempted --
     # no CONFIG gate needed (see layers/layer0c_stonkfun_scoring.py). Only
@@ -733,31 +771,13 @@ def run_poll_fast():
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
 
 
-def run_poll_slow():
-    """The expensive pieces: Layer 8's per-token MadeOnSol deep scoring (off
-    the pending-rescore queue Layer 1/run_poll_fast feeds) and Layers 2+9's
-    wallet-activity checks. Meant to run every 15-20 min, not 10 -- see
-    README's call-budget section."""
-    report = readiness_report()
-    print("Readiness:", report)
+def _run_layer8_cycle(board):
+    # The exact Layer 8 deep-scoring logic that used to be inline in
+    # run_poll_slow, extracted for the same reason as _run_layer1_cycle --
+    # shared between there (a no-op on GitHub Actions now) and
+    # run_poll_madeonsol() (Ali's own PC). Returns (alerts_sent, madeonsol_calls).
     alerts_sent = 0
     madeonsol_calls = 0
-    active_tokens = set()
-
-    _summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if _summary_path:
-        with open(_summary_path, "a") as _f:
-            _f.write("### Slow-cycle readiness\n```\n" + str(report) + "\n```\n")
-
-    # --- Layer 11: fetch the DexScreener boost board once for this cycle
-    # too -- run_poll_fast and run_poll_slow are separate processes (GitHub
-    # Actions cron), so each needs its own fetch; still just 2 keyless
-    # calls per cycle. See layer11_social_buzz.py. ---
-    board = _safe(fetch_boost_board)
-    if not (isinstance(board, dict) and board.get("ok")):
-        print(f"[layer11] boost board fetch failed this cycle: {board}")
-        board = None
-
     # --- Layer 8: deep-score whatever's queued (initial elite-tier
     # discoveries from Layer 1, plus event-triggered re-scores), capped per
     # chain per cycle. Overflow beyond the cap is re-queued, not dropped. ---
@@ -781,7 +801,18 @@ def run_poll_slow():
                       f"({len(to_process) * 3} MadeOnSol calls){', ' + str(len(overflow)) + ' re-queued' if overflow else ''}")
     else:
         print("[layer0/8:solana/rhc] BLOCKED: MADEONSOL_API_KEY not set")
+    return alerts_sent, madeonsol_calls
 
+
+def _run_fomo_cycle(report, _summary_path=None):
+    # The exact Layer 2 (buy convergence) + Layer 9 (sell mirror) logic
+    # that used to be inline in run_poll_slow, extracted for the same reason
+    # as _run_layer1_cycle -- shared between there (a no-op on GitHub Actions
+    # now) and run_poll_madeonsol() (Ali's own PC). Returns
+    # (alerts_sent, madeonsol_calls).
+    alerts_sent = 0
+    madeonsol_calls = 0
+    active_tokens = set()
     # --- Layer 2 (buy-side convergence) + Layer 9 (sell-side mirror), sharing
     # one KOL-feed fetch per chain instead of two -- see layers/kol_feed.py.
     # Also the source of Layer 9's balance-snapshot refresh and of Layer 8's
@@ -963,6 +994,54 @@ def run_poll_slow():
                     state.record_balance(ev["wallet"], ev["token"], new_bal)
     else:
         print("[layer2+9] BLOCKED: MADEONSOL_API_KEY not set")
+    return alerts_sent, madeonsol_calls
+
+
+def run_poll_slow():
+    """The expensive pieces: Layer 8's per-token MadeOnSol deep scoring (off
+    the pending-rescore queue Layer 1/run_poll_fast feeds) and Layers 2+9's
+    wallet-activity checks. Meant to run every 15-20 min, not 10 -- see
+    README's call-budget section."""
+    report = readiness_report()
+    print("Readiness:", report)
+    alerts_sent = 0
+    madeonsol_calls = 0
+
+    _summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if _summary_path:
+        with open(_summary_path, "a") as _f:
+            _f.write("### Slow-cycle readiness\n```\n" + str(report) + "\n```\n")
+
+    # --- Layer 11: fetch the DexScreener boost board once for this cycle
+    # too -- run_poll_fast and run_poll_slow are separate processes (GitHub
+    # Actions cron), so each needs its own fetch; still just 2 keyless
+    # calls per cycle. See layer11_social_buzz.py. ---
+    board = _safe(fetch_boost_board)
+    if not (isinstance(board, dict) and board.get("ok")):
+        print(f"[layer11] boost board fetch failed this cycle: {board}")
+        board = None
+
+    if IS_GITHUB_ACTIONS:
+        print("[layer0/8] SKIPPED on GitHub Actions -- MadeOnSol free-key IP-rate-limit "
+              "(see run_poll_madeonsol / README). Run 'python scheduler.py --poll-madeonsol' "
+              "on your own PC instead.")
+    else:
+        a8, c8 = _run_layer8_cycle(board)
+        alerts_sent += a8
+        madeonsol_calls += c8
+
+    if IS_GITHUB_ACTIONS:
+        print("[layer2+9] SKIPPED on GitHub Actions -- MadeOnSol free-key IP-rate-limit "
+              "(see run_poll_madeonsol / README). Run 'python scheduler.py --poll-madeonsol' "
+              "on your own PC instead.")
+        if _summary_path:
+            with open(_summary_path, "a") as _f:
+                _f.write("- [layer2+9] SKIPPED on GitHub Actions -- moved to --poll-madeonsol "
+                         "(MadeOnSol free-key rate limit)\n")
+    else:
+        a29, c29 = _run_fomo_cycle(report, _summary_path)
+        alerts_sent += a29
+        madeonsol_calls += c29
 
     print(f"\nSlow cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used this cycle (see README's call-budget section for how that compares to the 200/day cap "
@@ -1018,6 +1097,62 @@ def run_seed_pumpfun_wallets():
     print(f"[seed] roster: {sorted(roster)}")
 
 
+def run_poll_madeonsol():
+    """Meant to run on Ali's own PC, NOT GitHub Actions (Ali, Sept 24 2026).
+    Covers every layer that actually calls MadeOnSol -- Layer 1 (pump.fun
+    deployer alerts), Layer 8 (deep-scoring the rescan queue), and Layer 2+9
+    (Fomo buy convergence + sell mirror) -- confirmed live that a free
+    MadeOnSol key gets rate-limited ("Too many IP addresses for one free
+    key... 8 IP addresses today") by GitHub Actions' rotating runner IPs.
+    A home/office IP is stable, so running this from Task Scheduler on
+    Ali's own machine sidesteps the limit for free, no paid tier needed.
+
+    poll-fast.yml/poll-slow.yml skip these exact three layers now (guarded
+    by IS_GITHUB_ACTIONS), so running this alongside them will not produce
+    duplicate alerts for the same event -- each layer runs in exactly one
+    place. Schedule via Windows Task Scheduler, e.g. every 15 minutes while
+    the PC is on:
+
+        schtasks /create /tn "GemAlert MadeOnSol" /sc minute /mo 15 ^
+            /tr "cmd /c cd /d C:\\path\\to\\gem-alert-s1c_6 && python scheduler.py --poll-madeonsol" ^
+            /st 00:00
+
+    Requires a .env file in the project folder with the same keys as
+    GitHub Actions Secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, MADEONSOL_API_KEY,
+    MOBULA_API_KEY) -- auto-loaded via python-dotenv, no manual env-var
+    setup needed. Not something this environment could test live end to
+    end (its own local network is confirmed blocked from reaching Upstash
+    at the proxy level, per run_seed_pumpfun_wallets' docstring) -- Ali's
+    real machine's network is untested for this specifically, so the first
+    real run is the real answer; if it can't reach Upstash or Telegram
+    either, that's a separate, new finding to report back."""
+    report = readiness_report()
+    print("Readiness:", report)
+    board = _safe(fetch_boost_board)
+    if not (isinstance(board, dict) and board.get("ok")):
+        print(f"[layer11] boost board fetch failed this cycle: {board}")
+        board = None
+
+    total_alerts = 0
+    total_calls = 0
+
+    a1, c1 = _run_layer1_cycle()
+    total_alerts += a1
+    total_calls += c1
+
+    a8, c8 = _run_layer8_cycle(board)
+    total_alerts += a8
+    total_calls += c8
+
+    a29, c29 = _run_fomo_cycle(report)
+    total_alerts += a29
+    total_calls += c29
+
+    print(f"\nMadeOnSol-only cycle done. {total_alerts} alert(s) delivered. "
+          f"~{total_calls} MadeOnSol call(s) used.")
+
+
 def run_poll():
     """Convenience for local/manual runs -- fast then slow in one process.
     Production runs these on separate crons; see poll-fast.yml/poll-slow.yml."""
@@ -1033,6 +1168,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed-pumpfun-wallets", action="store_true", help="one-off: writes PUMPFUN_MANUAL_SEED_BATCHES into the live roster")
     parser.add_argument("--poll-fast", action="store_true", help="discovery only -- runs on the fast cron")
     parser.add_argument("--poll-slow", action="store_true", help="expensive layers only -- runs on the slow cron")
+    parser.add_argument("--poll-madeonsol", action="store_true", help="Layer 1 + Layer 8 + Layer 2+9 only -- run on your OWN PC via Task Scheduler, never on GitHub Actions (MadeOnSol free-key rate limit)")
     args = parser.parse_args()
     if args.self_test:
         sys.exit(run_self_test())
@@ -1040,6 +1176,8 @@ if __name__ == "__main__":
         run_poll_fast()
     elif args.poll_slow:
         run_poll_slow()
+    elif args.poll_madeonsol:
+        run_poll_madeonsol()
     elif args.poll:
         run_poll()
     elif args.seed_pumpfun_wallets:
