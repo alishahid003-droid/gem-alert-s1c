@@ -513,6 +513,9 @@ def run_poll_fast():
         madeonsol_calls += 1
         if not result["ok"]:
             print(f"[layer1:{chain}] skipped: {result.get('reason')}")
+            if _summary_path:
+                with open(_summary_path, "a") as _f:
+                    _f.write(f"- [layer1:{chain}] FAILED: {result.get('reason')}\n")
         else:
             state.set_layer1_last_checked(chain, datetime.now(timezone.utc).isoformat())
             for a in result["alerts"]:
@@ -527,6 +530,10 @@ def run_poll_fast():
                     state.queue_rescan(a["token_address"], chain, is_pregraduation=(chain == "solana"))
         print(f"[layer1] checked {chain} this cycle (alternates each fast cycle, ~144 MadeOnSol calls/day "
               f"total instead of 288 -- see README's call-budget section)")
+        if _summary_path:
+            with open(_summary_path, "a") as _f:
+                _f.write(f"- [layer1:{chain}] result: {result.get('ok')}, "
+                         f"{len(result.get('alerts', []))} alert(s)\n")
     else:
         print("[layer1] BLOCKED: MADEONSOL_API_KEY not set")
 
