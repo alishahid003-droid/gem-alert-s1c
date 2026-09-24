@@ -785,10 +785,17 @@ def run_poll_slow():
             madeonsol_calls += fetched.get("calls_made", 0)
             if not fetched["ok"]:
                 print(f"[layer2+9:{chain}] skipped: {fetched.get('reason')}")
+                if _summary_path:
+                    with open(_summary_path, "a") as _f:
+                        _f.write(f"- [layer2+9:{chain}] FAILED: {fetched.get('reason')}\n")
                 continue
             print(f"[layer2+9:{chain}] kol-feed fetch mode={fetched['mode']} "
                   f"({fetched['calls_made']} MadeOnSol call(s))")
             buy_trades, sell_trades = fetched["buy_trades"], fetched["sell_trades"]
+            if _summary_path:
+                with open(_summary_path, "a") as _f:
+                    _f.write(f"- [layer2+9:{chain}] OK mode={fetched['mode']} "
+                             f"buy_trades={len(buy_trades)} sell_trades={len(sell_trades)}\n")
 
             # -- Layer 2: convergence alerts + MC-point recording, and the
             # event-triggered re-score check for previously-failing tokens --
