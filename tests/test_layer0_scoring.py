@@ -54,7 +54,20 @@ def test_missing_signals_degrade_gracefully_not_crash():
     assert 0 <= result.score <= 100
 
 
-def test_score_mobula_pulse_items_scores_every_item_from_one_response_no_refetch():
+def test_score_mobula_pulse_items_scores_every_item_from_one_response_no_refetch(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    # Mobula's real security schema has no blacklist/honeypot equivalent
+    # (see signals_from_mobula_pulse docstring, bug #5 correction), so
+    # freeze_authority_revoked is always missing and this now always tries
+    # the GoPlus fallback -- stub it out so this stays a hermetic unit test.
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        assert "gopluslabs" in url
+        return {"ok": True, "status_code": 200, "url": url,
+                "json": {"result": {"0xabc0000000000000000000000000000000000001": {"is_blacklisted": "0", "is_honeypot": "0"}}}}
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+
     pulse = _load("mobula_pulse_sample.json")
     items = pulse["data"]
     results = score_mobula_pulse_items("base", items)

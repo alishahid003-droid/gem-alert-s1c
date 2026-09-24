@@ -272,14 +272,25 @@ def signals_from_mobula_pulse(pulse_item: dict, chain: str = None) -> RawSignals
     This was silently deflating every BSC/Base score since Layer 0b Mobula
     scoring was written -- not just tonight's backtest.
 
-    GoPlus fallback added Sept 25 2026: even after the bug #5 field-name fix,
-    Mobula's own "security" object was still absent entirely for both real
-    coins in tonight's backtest -- a real data gap, not a parsing bug. If
-    lp_locked_or_curve_healthy/mint_authority_revoked/freeze_authority_revoked
-    are ALL still None after reading Mobula's own data, and a chain+address
-    are available, this now tries fetch_goplus_security as a fallback before
-    giving up and returning None (== "unknown -- scored low-neutral" in
-    score_token)."""
+    GoPlus fallback added Sept 25 2026, CORRECTED same day: the first version
+    of this fix (bug #5) used field names for Mobula's nested "security"
+    object -- balanceMutable/noMintAuthority/isBlacklisted -- that were
+    hallucinated from a doc summary and DO NOT EXIST in Mobula's real
+    response. Confirmed against 4 real live tokens (Ali's diag_goplus.py
+    run, Sept 25 2026): the actual keys are `renounced` (bool -- owner gave
+    up contract control) and `isProxy` (bool -- upgradeable/mutable
+    contract logic), plus tax fields. There is no blacklist/honeypot
+    equivalent in Mobula's own data at all -- confirmed absent in all 4
+    samples. This means the OLD code's `security.get(...)` lookups always
+    returned None for all 3 signals, on every token, every time, silently
+    -- it was ALWAYS falling through to GoPlus, never actually using
+    Mobula's own (free, already-fetched) security data. Also: the fallback
+    used to require ALL THREE signals to be None before calling GoPlus; now
+    that real Mobula fields are read correctly, freeze_authority_revoked
+    will almost always still be None (Mobula has nothing for it) while
+    lp/mint may already be filled from Mobula -- fallback is now per-field
+    so a GoPlus call still happens whenever freeze_authority_revoked is
+    missing, not only when everything is missing."""
     security = pulse_item.get("security") or {}
     top10 = pulse_item.get("top10Holdings")
     snipers = pulse_item.get("snipersCount", 0) or 0
@@ -289,29 +300,38 @@ def signals_from_mobula_pulse(pulse_item: dict, chain: str = None) -> RawSignals
     if holder_count:
         bundler_sniper_pct = min(1.0, (snipers + bundlers) / holder_count)
 
-    lp_locked = (not security.get("balanceMutable", False)) if "balanceMutable" in security else None
-    mint_revoked = security.get("noMintAuthority")
-    freeze_revoked = (not security.get("isBlacklisted")) if "isBlacklisted" in security else None
+    # Mobula's real security fields (see docstring): isProxy true means the
+    # contract logic can still be changed post-deploy -- treated as the
+    # LP/curve-health-equivalent risk signal. renounced true means the
+    # owner gave up contract control -- treated as the mint-authority
+    # signal. Neither is a perfect 1:1 match for the original concept, but
+    # both are real, present fields, unlike the old made-up ones.
+    lp_locked = (not security["isProxy"]) if "isProxy" in security else None
+    mint_revoked = security.get("renounced") if "renounced" in security else None
+    freeze_revoked = None  # Mobula's real schema has no blacklist/honeypot equivalent -- always from GoPlus below
 
-    if lp_locked is None and mint_revoked is None and freeze_revoked is None:
+    if lp_locked is None or mint_revoked is None or freeze_revoked is None:
         address = pulse_item.get("address")
         if chain and address:
             gp = fetch_goplus_security(chain, address)
             if gp.get("ok"):
                 d = gp["data"]
-                lp_holders = d.get("lp_holders") or []
-                if lp_holders:
-                    locked_pct = sum(
-                        float(h.get("percent", 0) or 0) for h in lp_holders if h.get("is_locked")
-                    )
-                    lp_locked = locked_pct >= 0.5  # majority of LP locked/burned counts as healthy
-                is_mintable = d.get("is_mintable")
-                if is_mintable is not None:
-                    mint_revoked = is_mintable == "0"  # GoPlus returns "0"/"1" strings
-                is_blacklisted = d.get("is_blacklisted")
-                is_honeypot = d.get("is_honeypot")
-                if is_blacklisted is not None or is_honeypot is not None:
-                    freeze_revoked = (is_blacklisted != "1") and (is_honeypot != "1")
+                if lp_locked is None:
+                    lp_holders = d.get("lp_holders") or []
+                    if lp_holders:
+                        locked_pct = sum(
+                            float(h.get("percent", 0) or 0) for h in lp_holders if h.get("is_locked")
+                        )
+                        lp_locked = locked_pct >= 0.5  # majority of LP locked/burned counts as healthy
+                if mint_revoked is None:
+                    is_mintable = d.get("is_mintable")
+                    if is_mintable is not None:
+                        mint_revoked = is_mintable == "0"  # GoPlus returns "0"/"1" strings
+                if freeze_revoked is None:
+                    is_blacklisted = d.get("is_blacklisted")
+                    is_honeypot = d.get("is_honeypot")
+                    if is_blacklisted is not None or is_honeypot is not None:
+                        freeze_revoked = (is_blacklisted != "1") and (is_honeypot != "1")
 
     return RawSignals(
         top10_holder_pct=(top10 / 100.0) if top10 is not None else None,

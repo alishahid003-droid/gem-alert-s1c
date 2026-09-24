@@ -14,11 +14,13 @@
       "bundlersCount": 2,
       "holdersCount": 180,
       "security": {
-        "noMintAuthority": true,
-        "isBlacklisted": false,
-        "balanceMutable": false,
-        "buyTax": 0,
-        "sellTax": 0
+        "renounced": true,
+        "isProxy": false,
+        "buyTax": "0",
+        "sellTax": "0",
+        "burnRate": "0.00000000",
+        "transferTax": "0.0000",
+        "isNotOpenSource": false
       },
       "liquidity": 8400,
       "volume_24h": 12500
