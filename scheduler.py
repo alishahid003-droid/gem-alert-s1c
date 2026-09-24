@@ -98,6 +98,7 @@ Design notes (read before assuming something's missing on purpose):
     and accepted.
 """
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -475,6 +476,15 @@ def run_poll_fast():
     alerts_sent = 0
     madeonsol_calls = 0
 
+    # Diagnostic (Ali, Sept 24 2026): dump readiness straight into the GitHub Actions
+    # run's Summary tab, which renders without needing 'admin rights' the way the raw
+    # job log API/UI does. No workflow YAML touched -- GITHUB_STEP_SUMMARY is already
+    # set by the runner for every step regardless of what the .yml says.
+    _summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if _summary_path:
+        with open(_summary_path, "a") as _f:
+            _f.write("### Fast-cycle readiness\n```\n" + str(report) + "\n```\n")
+
     # --- Layer 11: fetch the DexScreener boost board once for this whole
     # cycle (2 keyless calls total) -- matched in-memory per token below,
     # see layer11_social_buzz.py. ---
@@ -696,6 +706,12 @@ def run_poll_fast():
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "
           f"pass). See README's call-budget section for how this compares to the 200/day cap.")
+
+    if _summary_path:
+        with open(_summary_path, "a") as _f:
+            _f.write(f"\n### Fast-cycle result\n- alerts_sent: {alerts_sent}\n"
+                     f"- madeonsol_calls: {madeonsol_calls}\n"
+                     f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
 
 
 def run_poll_slow():
@@ -920,6 +936,11 @@ def run_poll_slow():
     print(f"\nSlow cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used this cycle (see README's call-budget section for how that compares to the 200/day cap "
           f"at whatever cadence this is running on).")
+
+    if _summary_path:
+        with open(_summary_path, "a") as _f:
+            _f.write(f"\n### Slow-cycle result\n- alerts_sent: {alerts_sent}\n"
+                     f"- madeonsol_calls: {madeonsol_calls}\n")
 
 
 
