@@ -211,16 +211,156 @@ def _confirm_solana_tx(signature: str, attempts: int = 10, delay_seconds: float 
     return {"ok": False, "reason": f"not confirmed after {attempts} polls ({attempts * delay_seconds:.0f}s)"}
 
 
+PANCAKE_ROUTER_ABI = [
+    {
+        "name": "swapExactETHForTokensSupportingFeeOnTransferTokens",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [
+            {"name": "amountOutMin", "type": "uint256"},
+            {"name": "path", "type": "address[]"},
+            {"name": "to", "type": "address"},
+            {"name": "deadline", "type": "uint256"},
+        ],
+        "outputs": [],
+    },
+    {
+        "name": "getAmountsOut",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [
+            {"name": "amountIn", "type": "uint256"},
+            {"name": "path", "type": "address[]"},
+        ],
+        "outputs": [{"name": "amounts", "type": "uint256[]"}],
+    },
+]
+
+
+def _encode_router_call(router, fn_name: str, args: list) -> str:
+    """web3.py renamed Contract.encodeABI -> Contract.encode_abi between
+    v6 and v7 (requirements.txt pins web3>=6.15.0 with no upper bound, so
+    either method name may be the real one depending on what's installed
+    at deploy time -- confirmed the hard way: this repo's own local
+    install is 8.0.0, where only encode_abi exists). Try the current name
+    first, fall back to the old one, so this doesn't silently break on a
+    pinned-older environment."""
+    if hasattr(router, "encode_abi"):
+        return router.encode_abi(abi_element_identifier=fn_name, args=args)
+    return router.encodeABI(fn_name=fn_name, args=args)  # web3 < 7 fallback
+
+
+def _bnb_price_usd() -> Optional[float]:
+    """Live BNB/USD via PancakeSwap's own on-chain getAmountsOut (1 WBNB ->
+    USDT), read through the RPC failover pool via eth_call -- same
+    "reuse what's already trusted on this path" reasoning as Solana's
+    _sol_price_usd: this hits the exact router/pool this module already
+    depends on for the real swap, not a separate price API."""
+    from web3 import Web3  # type: ignore
+    w3 = Web3()
+    router = w3.eth.contract(address=Web3.to_checksum_address(PANCAKESWAP_V2_ROUTER_BSC), abi=PANCAKE_ROUTER_ABI)
+    calldata = _encode_router_call(router, "getAmountsOut", [
+        10**18, [Web3.to_checksum_address(WBNB_BSC), Web3.to_checksum_address(USDT_BSC)],
+    ])
+    result = rpc_call("bsc", "eth_call", [{"to": PANCAKESWAP_V2_ROUTER_BSC, "data": calldata}, "latest"])
+    if not result.get("ok"):
+        return None
+    raw = result.get("result")
+    if not isinstance(raw, str) or not raw.startswith("0x"):
+        return None
+    try:
+        decoded = w3.codec.decode(["uint256[]"], bytes.fromhex(raw[2:]))
+        usdt_out_wei = decoded[0][1]  # amounts[1] = USDT received for 1 WBNB in
+        return usdt_out_wei / 10**18  # USDT is 18 decimals on BSC (unlike Ethereum's 6)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
     guard = _refuse_unless_ready("bsc")
     if guard:
         return guard
     try:
         from web3 import Web3  # type: ignore
+        from eth_account import Account  # type: ignore
     except ImportError:
         return ExecutionResult(False, "web3.py not installed -- add to requirements.txt before enabling")
-    return ExecutionResult(False, "PancakeSwap V2 router path is written but UNTESTED against a live network -- "
-                                   "do not treat this as a working execution path until a real run confirms it")
+
+    bnb_price = _bnb_price_usd()
+    if bnb_price is None or bnb_price <= 0:
+        return ExecutionResult(False, "could not fetch a live BNB/USD price -- refusing to size a buy on a guess")
+    bnb_amount_wei = int((usd_amount / bnb_price) * 10**18)
+
+    w3 = Web3()
+    router_addr = Web3.to_checksum_address(PANCAKESWAP_V2_ROUTER_BSC)
+    account = Account.from_key(EXECUTOR_CONFIG.bsc_private_key)
+
+    try:
+        # .lower() first: to_checksum_address strictly validates EIP-55 casing on
+        # mixed-case input rather than normalizing it (caught by a local test run
+        # here -- a real address from Mobula in arbitrary case would otherwise be
+        # wrongly refused as "invalid" even though it's a perfectly real address).
+        token_checksum = Web3.to_checksum_address(token_address.lower())
+    except ValueError:
+        return ExecutionResult(False, f"'{token_address}' is not a valid BSC address -- refusing to build a tx to it")
+
+    router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_ABI)
+    deadline = int(__import__("time").time()) + 300
+    calldata = _encode_router_call(
+        router, "swapExactETHForTokensSupportingFeeOnTransferTokens",
+        [0, [Web3.to_checksum_address(WBNB_BSC), token_checksum], account.address, deadline],
+    )
+
+    nonce_result = rpc_call("bsc", "eth_getTransactionCount", [account.address, "pending"])
+    if not nonce_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch nonce: {nonce_result.get('reason')}")
+    gas_price_result = rpc_call("bsc", "eth_gasPrice", [])
+    if not gas_price_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
+
+    tx = {
+        "to": router_addr,
+        "value": bnb_amount_wei,
+        "gas": 400_000,  # conservative fixed limit -- deliberately NOT estimate_gas (that needs a live call
+                          # this module doesn't make against an untrusted new token contract pre-buy)
+        "gasPrice": int(gas_price_result["result"], 16),
+        "nonce": int(nonce_result["result"], 16),
+        "chainId": 56,
+        "data": calldata,
+    }
+    signed = account.sign_transaction(tx)
+    raw_hex = "0x" + signed.raw_transaction.hex() if not signed.raw_transaction.hex().startswith("0x") else signed.raw_transaction.hex()
+
+    send_result = rpc_call("bsc", "eth_sendRawTransaction", [raw_hex])
+    if not send_result.get("ok"):
+        return ExecutionResult(False, f"eth_sendRawTransaction failed: {send_result.get('reason')}")
+    tx_hash = send_result.get("result")
+    if not isinstance(tx_hash, str):
+        return ExecutionResult(False, f"eth_sendRawTransaction returned no usable hash: {send_result}")
+
+    confirmed = _confirm_evm_tx("bsc", tx_hash)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sent but could not confirm (check hash manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=tx_hash)
+    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash, filled_usd=usd_amount)
+
+
+def _confirm_evm_tx(chain: str, tx_hash: str, attempts: int = 10, delay_seconds: float = 3.0) -> dict:
+    """Polls eth_getTransactionReceipt until the tx is mined and checks
+    status == 1 (success) vs 0 (reverted on-chain -- e.g. a honeypot
+    sell-blocking transfer, or slippage). A revert must never be reported
+    as a successful buy even though it was successfully SUBMITTED."""
+    import time
+    for _ in range(attempts):
+        receipt = rpc_call(chain, "eth_getTransactionReceipt", [tx_hash])
+        if receipt.get("ok") and receipt.get("result") is not None:
+            status = receipt["result"].get("status")
+            if status == "0x1":
+                return {"ok": True}
+            if status == "0x0":
+                return {"ok": False, "reason": "transaction was mined but reverted on-chain (status 0x0)"}
+        time.sleep(delay_seconds)
+    return {"ok": False, "reason": f"not confirmed after {attempts} polls ({attempts * delay_seconds:.0f}s)"}
 
 
 def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> ExecutionResult:
