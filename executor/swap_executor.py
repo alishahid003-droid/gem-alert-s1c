@@ -385,12 +385,227 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
 
 def execute_sell(chain: str, token_address: str, amount_tokens: float, reason: str) -> ExecutionResult:
     """Used by defensive_sell.py when Layer 6's rug signal fires on a
-    position this executor opened. Same enable/key guard as the buy paths."""
+    position this executor opened. Same enable/key guard as the buy paths.
+    Routes to the chain-specific sell implementation below -- Solana and
+    BSC only; Robinhood Chain sells are blocked on the same v4 pool-key
+    gap as RHC buys (see module NEXT_STEPS entry)."""
     guard = _refuse_unless_ready(chain)
     if guard:
         return guard
-    return ExecutionResult(False, f"sell path is written but UNTESTED against a live network "
+    if chain == "solana":
+        return _sell_solana(token_address, amount_tokens)
+    if chain == "bsc":
+        return _sell_bsc(token_address, amount_tokens)
+    return ExecutionResult(False, f"no sell path implemented for chain '{chain}' yet "
                                    f"(reason for this sell attempt: {reason})")
+
+
+def _sell_solana(token_mint: str, amount_tokens: float) -> ExecutionResult:
+    """Sells amount_tokens of an SPL token back to SOL via Jupiter --
+    mirrors execute_buy_solana's quote -> swap-tx -> sign -> send ->
+    confirm pipeline, in the reverse direction. Fetches the mint's real
+    decimals on-chain first rather than assuming 9 (SPL tokens commonly
+    use 6 or 9, occasionally other values -- assuming wrong would size
+    every sell off by orders of magnitude)."""
+    decimals_result = rpc_call("solana", "getAccountInfo", [token_mint, {"encoding": "base64"}])
+    if not decimals_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch mint decimals: {decimals_result.get('reason')}")
+    account_info = (decimals_result.get("result") or {}).get("value")
+    if not account_info:
+        return ExecutionResult(False, f"mint account '{token_mint}' not found on-chain")
+    try:
+        import base64 as b64mod
+        raw = b64mod.b64decode(account_info["data"][0])
+        decimals = raw[44]  # SPL Token Mint layout: decimals is the byte at offset 44
+    except Exception as exc:  # noqa: BLE001
+        return ExecutionResult(False, f"could not parse mint decimals: {exc}")
+
+    raw_amount = int(amount_tokens * (10 ** decimals))
+    quote = get_json(f"{CONFIG.jupiter_quote_base_url}/quote", params={
+        "inputMint": token_mint,
+        "outputMint": WRAPPED_SOL_MINT,
+        "amount": raw_amount,
+        "slippageBps": 150,  # wider than the buy's 100bps -- a rug-triggered sell needs to land, not get
+                              # optimal price; too tight a slippage bound here risks the sell itself failing
+    })
+    if not quote.get("ok"):
+        return ExecutionResult(False, f"jupiter sell quote failed: status {quote.get('status_code')}")
+
+    try:
+        pubkey = _solana_pubkey_from_private_key()
+    except Exception as exc:  # noqa: BLE001
+        return ExecutionResult(False, f"could not derive wallet pubkey: {exc}")
+
+    swap_resp = post_json(f"{CONFIG.jupiter_quote_base_url}/swap", json={
+        "quoteResponse": quote.get("json"),
+        "userPublicKey": pubkey,
+        "wrapAndUnwrapSol": True,
+    })
+    if not swap_resp.get("ok"):
+        return ExecutionResult(False, f"jupiter sell swap-tx build failed: status {swap_resp.get('status_code')}")
+
+    return _sign_and_send_solana_swap(swap_resp)
+
+
+def _sign_and_send_solana_swap(swap_resp: dict) -> ExecutionResult:
+    """Shared sign+send+confirm tail for both Solana buys and sells --
+    factored out here (rather than duplicated) so a future fix to the
+    signing/submission logic only has to happen once."""
+    try:
+        import base64
+        from solders.keypair import Keypair  # type: ignore
+        from solders.transaction import VersionedTransaction  # type: ignore
+        import base58  # type: ignore
+        swap_tx_b64 = (swap_resp.get("json") or {}).get("swapTransaction")
+        if not swap_tx_b64:
+            return ExecutionResult(False, "jupiter swap response had no swapTransaction field")
+        keypair = Keypair.from_bytes(base58.b58decode(EXECUTOR_CONFIG.solana_private_key))
+        unsigned_tx = VersionedTransaction.from_bytes(base64.b64decode(swap_tx_b64))
+        signed_tx = VersionedTransaction(unsigned_tx.message, [keypair])
+        signed_tx_b64 = base64.b64encode(bytes(signed_tx)).decode("ascii")
+    except ImportError:
+        return ExecutionResult(False, "solders/base58 not installed -- add to requirements.txt before enabling")
+    except Exception as exc:  # noqa: BLE001
+        return ExecutionResult(False, f"failed to sign transaction: {exc}")
+
+    send_result = rpc_call("solana", "sendTransaction", [
+        signed_tx_b64,
+        {"encoding": "base64", "skipPreflight": False, "maxRetries": 3, "preflightCommitment": "confirmed"},
+    ])
+    if not send_result.get("ok"):
+        return ExecutionResult(False, f"sendTransaction failed: {send_result.get('reason')}")
+    tx_sig = send_result.get("result")
+    if not isinstance(tx_sig, str):
+        return ExecutionResult(False, f"sendTransaction returned no usable signature: {send_result}")
+
+    confirmed = _confirm_solana_tx(tx_sig)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sent but could not confirm (check signature manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=tx_sig)
+    return ExecutionResult(True, "sell submitted and confirmed", tx_signature=tx_sig)
+
+
+ERC20_ABI = [
+    {"name": "decimals", "type": "function", "stateMutability": "view", "inputs": [],
+     "outputs": [{"name": "", "type": "uint8"}]},
+    {"name": "allowance", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "owner", "type": "address"}, {"name": "spender", "type": "address"}],
+     "outputs": [{"name": "", "type": "uint256"}]},
+    {"name": "approve", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
+     "outputs": [{"name": "", "type": "bool"}]},
+]
+
+PANCAKE_ROUTER_SELL_ABI = PANCAKE_ROUTER_ABI + [{
+    "name": "swapExactTokensForETHSupportingFeeOnTransferTokens",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "inputs": [
+        {"name": "amountIn", "type": "uint256"},
+        {"name": "amountOutMin", "type": "uint256"},
+        {"name": "path", "type": "address[]"},
+        {"name": "to", "type": "address"},
+        {"name": "deadline", "type": "uint256"},
+    ],
+    "outputs": [],
+}]
+
+
+def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
+    """Sells amount_tokens of a BEP-20 token back to BNB via PancakeSwap V2.
+    Unlike the buy path, this needs two on-chain steps -- approve() then
+    swap -- since the router has to be allowed to move a token the wallet
+    holds (buys pay with native BNB via msg.value and skip this entirely).
+    If approve succeeds but the swap fails, the allowance is left set;
+    that's a state defensive_sell.py's caller should know about, so it's
+    called out explicitly in the failure reason rather than silently
+    retried, which could double-approve or mis-size a retry."""
+    from web3 import Web3  # type: ignore
+    from eth_account import Account  # type: ignore
+
+    try:
+        token_checksum = Web3.to_checksum_address(token_address.lower())
+    except ValueError:
+        return ExecutionResult(False, f"'{token_address}' is not a valid BSC address -- refusing to build a tx to it")
+
+    w3 = Web3()
+    account = Account.from_key(EXECUTOR_CONFIG.bsc_private_key)
+    token = w3.eth.contract(address=token_checksum, abi=ERC20_ABI)
+
+    decimals_calldata = _encode_router_call(token, "decimals", [])
+    decimals_result = rpc_call("bsc", "eth_call", [{"to": token_checksum, "data": decimals_calldata}, "latest"])
+    if not decimals_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch token decimals: {decimals_result.get('reason')}")
+    try:
+        decimals = int(decimals_result["result"], 16)
+    except (TypeError, ValueError):
+        return ExecutionResult(False, f"could not parse token decimals from {decimals_result.get('result')}")
+    raw_amount = int(amount_tokens * (10 ** decimals))
+
+    router_addr = Web3.to_checksum_address(PANCAKESWAP_V2_ROUTER_BSC)
+
+    allowance_calldata = _encode_router_call(token, "allowance", [account.address, router_addr])
+    allowance_result = rpc_call("bsc", "eth_call", [{"to": token_checksum, "data": allowance_calldata}, "latest"])
+    current_allowance = int(allowance_result["result"], 16) if allowance_result.get("ok") else 0
+
+    if current_allowance < raw_amount:
+        approve_calldata = _encode_router_call(token, "approve", [router_addr, 2**256 - 1])  # unlimited, one-time
+        approve_result = _sign_and_send_bsc_tx(account, token_checksum, 0, approve_calldata)
+        if not approve_result.ok:
+            return ExecutionResult(False, f"approve() failed, no swap attempted: {approve_result.reason}")
+        confirmed = _confirm_evm_tx("bsc", approve_result.tx_signature)
+        if not confirmed.get("ok"):
+            return ExecutionResult(False, f"approve() sent but could not confirm -- swap NOT attempted, "
+                                           f"check allowance manually before retrying: {confirmed.get('reason')}")
+
+    router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_SELL_ABI)
+    deadline = int(__import__("time").time()) + 300
+    swap_calldata = _encode_router_call(router, "swapExactTokensForETHSupportingFeeOnTransferTokens", [
+        raw_amount, 0, [token_checksum, Web3.to_checksum_address(WBNB_BSC)], account.address, deadline,
+    ])
+    swap_result = _sign_and_send_bsc_tx(account, router_addr, 0, swap_calldata)
+    if not swap_result.ok:
+        return ExecutionResult(False, f"approve() succeeded but swap failed: {swap_result.reason}")
+
+    confirmed = _confirm_evm_tx("bsc", swap_result.tx_signature)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sell sent but could not confirm (check hash manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=swap_result.tx_signature)
+    return ExecutionResult(True, "sell submitted and confirmed", tx_signature=swap_result.tx_signature)
+
+
+def _sign_and_send_bsc_tx(account, to_address: str, value_wei: int, calldata: str) -> ExecutionResult:
+    """Shared nonce/gas/sign/send tail for any BSC transaction (approve or
+    swap) -- factored out so execute_buy_bsc's pattern isn't duplicated a
+    third time."""
+    nonce_result = rpc_call("bsc", "eth_getTransactionCount", [account.address, "pending"])
+    if not nonce_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch nonce: {nonce_result.get('reason')}")
+    gas_price_result = rpc_call("bsc", "eth_gasPrice", [])
+    if not gas_price_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
+
+    tx = {
+        "to": to_address,
+        "value": value_wei,
+        "gas": 250_000,
+        "gasPrice": int(gas_price_result["result"], 16),
+        "nonce": int(nonce_result["result"], 16),
+        "chainId": 56,
+        "data": calldata,
+    }
+    signed = account.sign_transaction(tx)
+    raw_hex = signed.raw_transaction.hex()
+    if not raw_hex.startswith("0x"):
+        raw_hex = "0x" + raw_hex
+
+    send_result = rpc_call("bsc", "eth_sendRawTransaction", [raw_hex])
+    if not send_result.get("ok"):
+        return ExecutionResult(False, f"eth_sendRawTransaction failed: {send_result.get('reason')}")
+    tx_hash = send_result.get("result")
+    if not isinstance(tx_hash, str):
+        return ExecutionResult(False, f"eth_sendRawTransaction returned no usable hash: {send_result}")
+    return ExecutionResult(True, "submitted", tx_signature=tx_hash)
 
 
 def _solana_pubkey_from_private_key() -> str:
