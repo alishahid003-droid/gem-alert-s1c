@@ -263,7 +263,7 @@ def fetch_mobula_pulse(chain_id: str) -> dict:
     TON coverage is unconfirmed in Mobula's public docs as of this build --
     flagged in README, code path left in place for when Ali's key can confirm it.
 
-    Real bug fixed Sept 24 2026: this was sending a bare `Authorization:
+    Bug #1 fixed Sept 24 2026: this was sending a bare `Authorization:
     <key>` header with no "Bearer " prefix -- every OTHER Mobula call in
     this codebase (layer10_insider_cluster.py, layer6_exit_realizable.py,
     wallet_balance.py) correctly uses "Bearer <key>". Caught live: Ali's
@@ -271,12 +271,51 @@ def fetch_mobula_pulse(chain_id: str) -> dict:
     least reached MadeOnSol -- this was the actual reason, not a MadeOnSol
     rate-limit spillover. Almost certainly means every Layer 0b BSC/Base
     Pulse call in production has been silently failing (401) since this
-    was written -- not a today-only issue."""
+    was written -- not a today-only issue.
+
+    Bug #2 fixed Sept 24 2026 (same night, re-run after fixing #1 surfaced
+    a NEW failure -- HTTP 500 straight from Mobula): this call was missing
+    the `assetMode` and `model` query params. Mobula's own docs example
+    (docs.mobula.io/guides/query-newly-listed-tokens-onchain) is
+    `GET /api/2/pulse?assetMode=false&chainId=solana:solana&model=default`
+    -- omitting assetMode/model was apparently enough to make Mobula's
+    backend throw a 500 instead of a clean 400. Added both with the
+    documented defaults."""
     headers = {}
     if CONFIG.mobula_api_key:
         headers["Authorization"] = f"Bearer {CONFIG.mobula_api_key}"
-    result = get_json(f"{CONFIG.mobula_base_url}/api/2/pulse", headers=headers, params={"chainId": chain_id})
+    result = get_json(
+        f"{CONFIG.mobula_base_url}/api/2/pulse",
+        headers=headers,
+        params={"chainId": chain_id, "assetMode": "false", "model": "default"},
+    )
     return result
+
+
+def flatten_mobula_pulse_response(pulse_json) -> list:
+    """Bug #3 fixed Sept 24 2026: every call site in this codebase was
+    reading `pulse_json["data"]` as if the Pulse response were a flat list.
+    It isn't -- confirmed against Mobula's own docs
+    (docs.mobula.io/guides/query-newly-listed-tokens-onchain): the real
+    shape is {"new": {"data": [...]}, "bonding": {"data": [...]}, "bonded":
+    {"data": [...]}} -- three lifecycle buckets, each with its own nested
+    "data" array, no top-level "data" key at all. So even once bugs #1 and
+    #2 above are fixed and Mobula returns 200, the old parsing silently
+    returned an empty list every time (a false "not present in current
+    pulse snapshot" / empty-scan result, not a fetch error -- meaning this
+    was invisible unless someone checked the actual item count). This
+    flattens all three buckets into one list, same shape callers already
+    expect (list of raw pulse token dicts)."""
+    if not isinstance(pulse_json, dict):
+        return []
+    out = []
+    for bucket in ("new", "bonding", "bonded"):
+        section = pulse_json.get(bucket)
+        if isinstance(section, dict):
+            items = section.get("data")
+            if isinstance(items, list):
+                out.extend(items)
+    return out
 
 
 def score_mobula_pulse_items(chain: str, items: list) -> list:
@@ -337,7 +376,7 @@ def scan_stage1(mints_by_chain: dict) -> list:
             if not raw.get("ok"):
                 results.append({"chain": chain, "address": mint, "error": "mobula pulse fetch failed"})
                 continue
-            items = (raw.get("json") or {}).get("data", []) if isinstance(raw.get("json"), dict) else []
+            items = flatten_mobula_pulse_response(raw.get("json"))
             match = next((i for i in items if i.get("address", "").lower() == mint.lower()), None)
             if not match:
                 results.append({"chain": chain, "address": mint, "error": "not present in current pulse snapshot"})

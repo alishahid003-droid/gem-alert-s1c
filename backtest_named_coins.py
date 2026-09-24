@@ -40,7 +40,7 @@ except ImportError:
     pass
 
 from config import CONFIG
-from layers.layer0_scoring import score_solana_mint, fetch_mobula_pulse, score_mobula_pulse_items
+from layers.layer0_scoring import score_solana_mint, fetch_mobula_pulse, score_mobula_pulse_items, flatten_mobula_pulse_response
 from utils.http import describe_fetch_failure
 
 # Each entry: (display_name, chain, address, is_pregraduation)
@@ -89,7 +89,7 @@ def score_bsc_by_name(names: list) -> dict:
         for n in names:
             out[n] = {"error": f"Mobula Pulse fetch failed: {describe_fetch_failure({'raw': raw})}"}
         return out
-    items = (raw.get("json") or {}).get("data", []) if isinstance(raw.get("json"), dict) else []
+    items = flatten_mobula_pulse_response(raw.get("json"))
     scored_all = score_mobula_pulse_items("bsc", items)
     by_name = {}
     for item, scored in zip(items, scored_all):

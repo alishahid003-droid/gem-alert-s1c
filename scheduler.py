@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -694,7 +694,7 @@ def run_poll_fast():
             if not raw.get("ok"):
                 print(f"[layer0b/8:{chain}] pulse fetch failed")
                 continue
-            items = (raw.get("json") or {}).get("data", []) if isinstance(raw.get("json"), dict) else []
+            items = flatten_mobula_pulse_response(raw.get("json"))
             for scored in score_mobula_pulse_items(chain, items):
                 mint = scored["address"]
                 mc = scored["raw"].get("marketCap") or scored["raw"].get("market_cap")
