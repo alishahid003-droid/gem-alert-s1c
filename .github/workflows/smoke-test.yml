@@ -107,4 +107,14 @@ jobs:
                   print(f"  WARNING: entire {chain} RPC pool unreachable from this runner -- investigate before enabling execution on {chain}.")
 
           print(f"\n{total_healthy}/{total_endpoints} total RPC endpoints healthy across all 3 chains this run")
-          PY
+
+          # One-off wallet seeding (Ali, Sept 24 2026) -- idempotent
+          # (seed_manual_wallets skips already-present wallets), so running
+          # this on every smoke-test push/dispatch is harmless. Lives here
+          # rather than its own workflow file because Ali's PAT lacks the
+          # `workflow` scope needed to push a NEW workflow file -- this
+          # avoids that without needing him to touch his token.
+          print("\n--- pump.fun manual wallet seeding ---")
+          import scheduler
+          scheduler.run_seed_pumpfun_wallets()
+                    PY
