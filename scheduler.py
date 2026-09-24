@@ -860,6 +860,50 @@ def run_poll_slow():
           f"at whatever cadence this is running on).")
 
 
+
+# One-off manual seeding runs (Ali, Sept 24 2026) -- each entry here is a
+# real wallet address Ali pulled off pump.fun's own signed-in leaderboard
+# himself (see layers/layer2b_pumpfun_smart_money.py's seed_manual_wallets
+# docstring for why this exists instead of a scraped/researched list).
+# This dict can just grow over time as Ali hands over more addresses --
+# already-present wallets are silently skipped (see seed_manual_wallets),
+# so re-running this is always safe.
+PUMPFUN_MANUAL_SEED_BATCHES = {
+    "pumpfun_leaderboard_1D_Sept24": [
+        "4ugDhHJ8XDXAeABmrNmGffFaLbJb9BkPyiFGVSV9ocwo",
+        "4UrFSCrGxgoCtCUBAEZq7ZmPK3Pczkxx7PwYnkBMi1KR",
+        "Bmi9zf27MNN5pjCtyv2Y15TDQoYgcbcmPTxvEoQ6UwWs",
+        "49MHZz9c1mE1ePTcLxBWPjf7KKzt3Ntd25JnspKvV8vL",
+        "3jWTgYPG5s7WfaRvppPBXio4hHQxg18fLUkV2z5covSQ",
+        "J23qr98GjGJJqKq9CBEnyRhHbmkaVxtTJNNxKu597wsA",
+        "24L6uekgvsQRgT41DZRhahEAAVnkseTT7x4qyigC3HvH",
+        "2jgmHtkCkJXm3Xq4dp9DgippkQjXLK3rhaREAz7oG7s7",
+        "6HJetMbdHBuk3mLUainxAPpBpWzDgYbHGTS2TqDAUSX2",
+        "9djgawmgpGrzt7DQoJ6tA2YW4gQyt3yH19uVZ3e2T3JJ",
+        "G29kbPokFzmVeYuZB1ihA7AmGzLjyDaECEyRMKhHiR4J",
+        "2M2vLX34LXMg24dMEnjWHvRXS1tshpEDRWzmXgV8ENNZ",
+        "uDYvqwgSxNDMKGPaMJ7JqyadEg1EhxkuCx9hbLSanHA",
+    ],
+}
+
+
+def run_seed_pumpfun_wallets():
+    """Writes PUMPFUN_MANUAL_SEED_BATCHES into the live smart-money roster.
+    Must run somewhere that can actually reach Upstash -- GitHub Actions,
+    not Ali's own machine (confirmed Sept 24 2026: his local network blocks
+    the outbound connection to Upstash at the proxy level, unrelated to
+    this code)."""
+    from layers.layer2b_pumpfun_smart_money import seed_manual_wallets, get_smart_money_roster
+    print(f"[seed] state backend: {state.backend()}")
+    for source, wallets in PUMPFUN_MANUAL_SEED_BATCHES.items():
+        result = seed_manual_wallets(wallets, source=source, note=f"batch={source}")
+        print(f"[seed] {source}: added={len(result['added'])} "
+              f"already_present={len(result['already_present'])} rejected={result['rejected']}")
+    roster = get_smart_money_roster()
+    print(f"[seed] roster size now: {len(roster)}")
+    print(f"[seed] roster: {sorted(roster)}")
+
+
 def run_poll():
     """Convenience for local/manual runs -- fast then slow in one process.
     Production runs these on separate crons; see poll-fast.yml/poll-slow.yml."""
@@ -872,6 +916,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--poll", action="store_true", help="fast + slow in one process (local/manual only)")
+    parser.add_argument("--seed-pumpfun-wallets", action="store_true", help="one-off: writes PUMPFUN_MANUAL_SEED_BATCHES into the live roster")
     parser.add_argument("--poll-fast", action="store_true", help="discovery only -- runs on the fast cron")
     parser.add_argument("--poll-slow", action="store_true", help="expensive layers only -- runs on the slow cron")
     args = parser.parse_args()
@@ -883,5 +928,7 @@ if __name__ == "__main__":
         run_poll_slow()
     elif args.poll:
         run_poll()
+    elif args.seed_pumpfun_wallets:
+        run_seed_pumpfun_wallets()
     else:
         parser.print_help()
