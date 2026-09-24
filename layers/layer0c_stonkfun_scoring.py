@@ -70,6 +70,18 @@ from utils.http import get_json
 # Discovery is filtered to these quote symbols only -- see scope limit #2.
 STONKFUN_ALLOWED_QUOTE_SYMBOLS = {"SOL", "WSOL", "WRAPPED SOL"}
 
+
+def _extract_quote_symbol(quote) -> str:
+    """StonkFun's /tokens responses have been observed with `quote` as
+    either a dict ({"symbol": "SOL", ...}) or a bare string ("SOL")
+    depending on the token. Handle both instead of assuming a dict shape
+    -- an AttributeError here previously crashed the whole poll cycle."""
+    if isinstance(quote, dict):
+        return (quote.get("symbol") or "").upper()
+    if isinstance(quote, str):
+        return quote.upper()
+    return ""
+
 # A wallet with at least this many total StonkFun launches, none of which
 # reached DEPLOYER_SPAMMER_MAX_MCAP, is flagged "spammer". Deliberately
 # conservative -- see compute_stonkfun_deployer_tier's docstring for why
@@ -182,7 +194,7 @@ def parse_stonkfun_tokens(payload: dict) -> list:
     tokens = payload.get("data") or payload.get("tokens") or []
     out = []
     for t in tokens:
-        quote_symbol = ((t.get("quote") or {}).get("symbol") or "").upper()
+        quote_symbol = _extract_quote_symbol(t.get("quote"))
         if quote_symbol not in STONKFUN_ALLOWED_QUOTE_SYMBOLS:
             continue
         market = t.get("market") or {}
@@ -326,7 +338,7 @@ def parse_stonkfun_token_detail(payload: dict) -> Optional[dict]:
     if not token or not launch:
         return None
     market = token.get("market") or {}
-    quote_symbol = ((token.get("quote") or {}).get("symbol") or "").upper()
+    quote_symbol = _extract_quote_symbol(token.get("quote"))
     return {
         "mint": token.get("mint"),
         "symbol": token.get("symbol"),
