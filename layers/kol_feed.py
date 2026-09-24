@@ -45,11 +45,29 @@ def _confirmed_key(chain: str) -> str:
     return f"kol_feed_confirmed_unfiltered:{chain}"
 
 
+def _describe_fetch_failure(fetch_result: dict) -> str:
+    """fetch_kol_feed_raw only ever sets a top-level "reason" key for the
+    one case checked explicitly (missing API key) -- for every other failure
+    (bad auth, wrong endpoint, rate limit, MadeOnSol-side error) the real
+    detail was sitting unread inside fetch_result["raw"], and callers fell
+    back to the literal string "fetch failed" with zero diagnostic value
+    (Ali, Sept 24 2026 -- this is exactly what silently starved Layer 2+9
+    of any real error to act on). Surfaces it instead."""
+    if "reason" in fetch_result:
+        return fetch_result["reason"]
+    raw = fetch_result.get("raw") or {}
+    status = raw.get("status_code")
+    detail = raw.get("json") if raw.get("json") is not None else raw.get("text")
+    if status is not None:
+        return f"HTTP {status}: {str(detail)[:300]}"
+    return "fetch failed (no status_code in response -- see raw)"
+
+
 def _filtered_fallback(chain: str, limit: int) -> dict:
     buy_fetch = fetch_kol_feed_raw(chain, limit, action="buy")
     sell_fetch = fetch_kol_feed_raw(chain, limit, action="sell")
     if not buy_fetch["ok"] and not sell_fetch["ok"]:
-        reason = buy_fetch.get("reason", "fetch failed")
+        reason = _describe_fetch_failure(buy_fetch)
         return {"ok": False, "reason": reason, "buy_trades": [], "sell_trades": [],
                 "mode": "filtered_fallback", "calls_made": 2}
     buy_trades = (buy_fetch["raw"].get("json") or {}).get("trades", []) if buy_fetch["ok"] else []

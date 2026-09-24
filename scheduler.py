@@ -737,6 +737,11 @@ def run_poll_slow():
     madeonsol_calls = 0
     active_tokens = set()
 
+    _summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if _summary_path:
+        with open(_summary_path, "a") as _f:
+            _f.write("### Slow-cycle readiness\n```\n" + str(report) + "\n```\n")
+
     # --- Layer 11: fetch the DexScreener boost board once for this cycle
     # too -- run_poll_fast and run_poll_slow are separate processes (GitHub
     # Actions cron), so each needs its own fetch; still just 2 keyless
