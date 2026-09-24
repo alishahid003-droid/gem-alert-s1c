@@ -73,36 +73,52 @@ UNRESOLVED = ["Mars coin", "SUICAT"]
 def score_bsc_by_name(names: list) -> dict:
     """Looks up each name in the CURRENT Mobula BSC Pulse snapshot (one
     call, covers the whole trending list) and scores it with the exact same
-    function the live system uses. Returns {name: result_dict_or_reason}."""
+    function the live system uses. Returns {name: result_dict_or_reason}.
+
+    FIXED Sept 25, 2026 -- the real bug behind 和平熊猫 scoring "LP/curve
+    unknown": Mobula's trending list is a live, un-deduplicated feed of
+    on-chain contracts, and multiple UNRELATED contracts commonly launch
+    under the exact same display name (copycat/impersonator tokens are a
+    known meme-coin pattern, not a data glitch). The old code built
+    `by_name` as a plain dict keyed by name, so when two Pulse items shared
+    a name, the second silently overwrote the first -- this backtest was
+    scoring whichever of the two contracts happened to come last in
+    Mobula's response, which is not necessarily the real 和平熊猫 Ali
+    actually traded. If that arbitrary pick was a thinner/newer copycat
+    contract, its LP/holder data being incomplete is exactly what produced
+    "LP/curve unknown" -- a real signal about the WRONG token, not a bug in
+    the scoring math itself. Now collects every match per name and reports
+    all of them, each tagged with its own contract address, so ambiguity is
+    visible instead of silently resolved by dict-overwrite."""
     out = {}
     if not CONFIG.mobula_api_key:
         for n in names:
-            out[n] = {"error": "MOBULA_API_KEY not set"}
+            out[n] = [{"error": "MOBULA_API_KEY not set"}]
         return out
     try:
         raw = fetch_mobula_pulse("evm:56")  # BSC -- evm:<numeric chainId> is Mobula's real format (bug #4, fixed Sept 24 2026); "bnb:bnb" was never valid
     except Exception as e:
         for n in names:
-            out[n] = {"error": f"network error: {e}"}
+            out[n] = [{"error": f"network error: {e}"}]
         return out
     if not raw.get("ok"):
         for n in names:
-            out[n] = {"error": f"Mobula Pulse fetch failed: {describe_fetch_failure({'raw': raw})}"}
+            out[n] = [{"error": f"Mobula Pulse fetch failed: {describe_fetch_failure({'raw': raw})}"}]
         return out
     items = flatten_mobula_pulse_response(raw.get("json"))
     scored_all = score_mobula_pulse_items("bsc", items)
     by_name = {}
     for item, scored in zip(items, scored_all):
         nm = (item.get("name") or item.get("symbol") or "").strip()
-        by_name[nm] = scored
+        by_name.setdefault(nm, []).append(scored)  # list, not overwrite -- keeps every contract sharing this name
     for n in names:
-        match = by_name.get(n)
-        if match:
-            out[n] = match
+        matches = by_name.get(n)
+        if matches:
+            out[n] = matches  # always a list now, even when there's exactly one match
         else:
-            out[n] = {"error": "not in current Mobula BSC Pulse trending snapshot -- "
-                                "cannot retroactively score with current code (no per-address "
-                                "historical Mobula lookup exists in this codebase)"}
+            out[n] = [{"error": "not in current Mobula BSC Pulse trending snapshot -- "
+                                 "cannot retroactively score with current code (no per-address "
+                                 "historical Mobula lookup exists in this codebase)"}]
     return out
 
 
@@ -130,13 +146,26 @@ def main():
 
     print(f"\n--- BSC ({len(BSC_COIN_NAMES)} coins, via Mobula Pulse) ---")
     bsc_results = score_bsc_by_name(BSC_COIN_NAMES)
-    for name, result in bsc_results.items():
-        if "error" in result:
-            print(f"[{name} / bsc] {result['error']}")
+    for name, matches in bsc_results.items():
+        if len(matches) > 1:
+            print(f"[{name} / bsc] AMBIGUOUS -- {len(matches)} different contracts share this "
+                  f"display name in the current Pulse snapshot; showing all so the real one isn't "
+                  f"silently picked for you:")
+            for m in matches:
+                if "error" in m:
+                    print(f"    - {m['error']}")
+                else:
+                    sc = m["score"]
+                    print(f"    - addr={m.get('address')} band={sc.band} score={sc.score}/100 "
+                          f"liquidity={sc.liquidity_flag} reasons={sc.reasons}")
         else:
-            sc = result["score"]
-            print(f"[{name} / bsc] band={sc.band} score={sc.score}/100 "
-                  f"liquidity={sc.liquidity_flag} reasons={sc.reasons}")
+            result = matches[0]
+            if "error" in result:
+                print(f"[{name} / bsc] {result['error']}")
+            else:
+                sc = result["score"]
+                print(f"[{name} / bsc] addr={result.get('address')} band={sc.band} score={sc.score}/100 "
+                      f"liquidity={sc.liquidity_flag} reasons={sc.reasons}")
 
     if UNRESOLVED:
         print(f"\n--- Could not resolve real addresses tonight, not run: {', '.join(UNRESOLVED)} ---")
