@@ -335,10 +335,14 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     wallet convergence count -- aren't known at this point in the code, so
     they're passed as None/0, meaning this path can only ever fire on the
     score-band condition, which is correct: it's the only signal this
-    function actually has). Calling this does NOT move real money --
-    handle_stage1_candidate only records position/conviction state;
-    swap_executor's execute_buy_* paths are still untested placeholders,
-    same safety floor as every other wiring done tonight."""
+    function actually has). STALE NOTE CORRECTED Sept 25, 2026:
+    handle_stage1_candidate now DOES call the real execute_buy_* path on a
+    fire (see executor/entrypoint.py's _attempt_buy_and_record_fill) -- the
+    "does not move real money" claim that used to be here is no longer
+    true of this function, only of the fact that EXECUTION_ENABLED stays
+    "false" until the real (non-mocked) network tests in TASKS_LEFT pass.
+    That flag -- not this function's own logic -- is the only thing
+    standing between a Stage 1 fire here and a real on-chain transaction."""
     if "error" in scored or scored.get("score") is None:
         return False
     mint = scored["address"]
