@@ -50,6 +50,8 @@ wallets, so every entry there will read "untracked". Harmless (no crash,
 the convergence detection itself is unaffected), just not a meaningful
 label for this roster.
 """
+import re
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -60,6 +62,49 @@ MIN_CLOSED_TRADES_FOR_PROMOTION = 5
 MIN_WIN_RATE_FOR_PROMOTION = 0.6
 
 SMART_MONEY_ROSTER_KEY = "pumpfun_smart_money_roster"
+
+# Manual seeding (Ali, Sept 24 2026): "add the known wallet addresses of
+# successful live traders on pump.fun... you need to search them and add
+# them." No verified free "known good trader" API/list exists (see this
+# file's module docstring) -- what IS real is Ali pulling addresses
+# directly off pump.fun's own signed-in leaderboard himself and handing
+# them to us. These go into the SAME roster the auto-promotion path fills,
+# so convergence detection treats them identically -- but tagged separately
+# in MANUAL_SEED_META_KEY so the roster's provenance stays honest: a
+# manually-seeded wallet has NOT been independently verified against this
+# system's own 5-trade/60%-win-rate bar, it is trusted because Ali trusts
+# the leaderboard rank it came from.
+MANUAL_SEED_META_KEY = "pumpfun_manual_seed_meta"
+SOLANA_BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+
+def seed_manual_wallets(wallets: list, source: str, note: str = "") -> dict:
+    """Adds each wallet straight into the smart-money roster (bypassing the
+    live-promotion bar) and records provenance. Returns
+    {"added": [...], "already_present": [...], "rejected": [...]} -- never
+    silently drops a malformed address."""
+    added, already, rejected = [], [], []
+    roster = get_smart_money_roster()
+    meta = state.get_value(MANUAL_SEED_META_KEY) or {}
+    for w in wallets:
+        w = (w or "").strip()
+        if not SOLANA_BASE58_RE.match(w):
+            rejected.append(w)
+            continue
+        if w in roster:
+            already.append(w)
+            continue
+        _add_to_roster(w)
+        roster.add(w)
+        meta[w] = {"source": source, "note": note, "added_ts": time.time()}
+        added.append(w)
+    state.set_value(MANUAL_SEED_META_KEY, meta)
+    return {"added": added, "already_present": already, "rejected": rejected}
+
+
+def get_manual_seed_meta() -> dict:
+    return state.get_value(MANUAL_SEED_META_KEY) or {}
+
 
 
 def wallet_qualifies(stats: Optional[dict]) -> bool:

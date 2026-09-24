@@ -147,3 +147,57 @@ def test_convergence_fires_for_two_smart_money_wallets_same_token():
     assert len(events) == 1
     assert events[0]["token"] == "NEWGEM"
     assert events[0]["count"] == 2
+
+
+# --- Manual seeding (Ali, Sept 24 2026) ---
+from layers.layer2b_pumpfun_smart_money import seed_manual_wallets, get_manual_seed_meta
+
+GOOD_WALLET = "4ugDhHJ8XDXAeABmrNmGffFaLbJb9BkPyiFGVSV9ocwo"
+GOOD_WALLET_2 = "4UrFSCrGxgoCtCUBAEZq7ZmPK3Pczkxx7PwYnkBMi1KR"
+
+
+def test_seed_manual_wallets_adds_to_roster():
+    result = seed_manual_wallets([GOOD_WALLET, GOOD_WALLET_2],
+                                  source="pumpfun_leaderboard_1M", note="Ali-supplied Sept 24 2026")
+    assert result["added"] == [GOOD_WALLET, GOOD_WALLET_2]
+    assert result["already_present"] == []
+    assert result["rejected"] == []
+    roster = get_smart_money_roster()
+    assert GOOD_WALLET in roster and GOOD_WALLET_2 in roster
+
+
+def test_seed_manual_wallets_rejects_malformed():
+    result = seed_manual_wallets(["not-a-wallet", "0OIl-invalid-chars"],
+                                  source="test", note="")
+    assert result["added"] == []
+    assert len(result["rejected"]) == 2
+    assert get_smart_money_roster() == set()
+
+
+def test_seed_manual_wallets_dedupes_already_present():
+    seed_manual_wallets([GOOD_WALLET], source="a", note="")
+    result = seed_manual_wallets([GOOD_WALLET], source="b", note="")
+    assert result["added"] == []
+    assert result["already_present"] == [GOOD_WALLET]
+
+
+def test_seed_manual_wallets_records_provenance():
+    seed_manual_wallets([GOOD_WALLET], source="pumpfun_leaderboard_1M", note="rank #1")
+    meta = get_manual_seed_meta()
+    assert meta[GOOD_WALLET]["source"] == "pumpfun_leaderboard_1M"
+    assert meta[GOOD_WALLET]["note"] == "rank #1"
+    assert "added_ts" in meta[GOOD_WALLET]
+
+
+def test_manually_seeded_wallet_participates_in_convergence():
+    """A manually-seeded wallet must be detected the same as a live-promoted
+    one -- convergence detection only checks roster membership."""
+    seed_manual_wallets([GOOD_WALLET, GOOD_WALLET_2], source="test", note="")
+    import time
+    now = time.time()
+    buys = [
+        {"wallet": GOOD_WALLET, "mint": "SomeMint111111111111111111111111111111111", "block_time": now},
+        {"wallet": GOOD_WALLET_2, "mint": "SomeMint111111111111111111111111111111111", "block_time": now + 60},
+    ]
+    convergences = detect_pumpfun_convergence(buys)
+    assert len(convergences) == 1
