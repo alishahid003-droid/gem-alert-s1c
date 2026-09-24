@@ -40,6 +40,25 @@ def get_exit_thresholds(is_high_risk_momentum: bool) -> ExitThresholds:
     return TIGHTENED_THRESHOLDS if is_high_risk_momentum else NORMAL_THRESHOLDS
 
 
+# Our internal chain keys (config.wallet_addresses()' dict keys, matching
+# WALLET_ADDRESSES' chain:address format) don't all match Mobula's own
+# blockchain-name vocabulary for the wallet-portfolio endpoint's
+# "blockchains" filter param (confirmed live, Sept 24 2026 -- passing a
+# name Mobula doesn't recognize returns a hard 400, not a partial result,
+# so ALL chains fail together, not just the bad one):
+#   - "bsc" -> Mobula calls it "bnb"
+#   - "robinhood_chain" -> not a recognized value for this endpoint at all
+#     (RHC is too new / not in Mobula's premium-chain list yet). Omitted
+#     from the explicit filter below; fetchAllChains=true still scans the
+#     wallet across every chain Mobula indexes, RHC included if/when they
+#     add support, so this isn't silently dropping RHC coverage -- it's
+#     just not naming a chain Mobula would reject outright.
+MOBULA_BLOCKCHAIN_NAME = {
+    "solana": "solana",
+    "bsc": "bnb",
+}
+
+
 def fetch_wallet_portfolio() -> dict:
     """Uses Mobula's unified wallet-portfolio endpoint across every chain
     Ali gave an address for (config.wallet_addresses())."""
@@ -49,11 +68,13 @@ def fetch_wallet_portfolio() -> dict:
     if not addrs:
         return {"ok": False, "reason": "WALLET_ADDRESSES not configured (Part A item 7)"}
     headers = {"Authorization": f"Bearer {CONFIG.mobula_api_key}"}
+    mobula_chains = [MOBULA_BLOCKCHAIN_NAME[c] for c in addrs if c in MOBULA_BLOCKCHAIN_NAME]
     params = {
         "wallets": ",".join(addrs.values()),
-        "blockchains": ",".join(addrs.keys()),
         "fetchAllChains": "true",
     }
+    if mobula_chains:
+        params["blockchains"] = ",".join(mobula_chains)
     result = get_json(f"{CONFIG.mobula_base_url}/api/1/wallet/portfolio", headers=headers, params=params)
     return {"ok": result["ok"], "raw": result}
 
