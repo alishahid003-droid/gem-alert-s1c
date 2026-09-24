@@ -192,20 +192,38 @@ def _factor_ok(factors: dict, key: str) -> Optional[bool]:
 
 def signals_from_mobula_pulse(pulse_item: dict) -> RawSignals:
     """pulse_item is one token object from GET /api/2/pulse (Mobula), used for
-    Base/BSC/TON/Ethereum."""
+    Base/BSC/TON/Ethereum.
+
+    Bug #5 fixed Sept 24 2026: caught live when Ali flagged that real winning
+    coins (from tonight's named-coin backtest, after bugs #1-#4 were fixed
+    and Mobula finally returned real data) were scoring band=C, ~42-44/100 --
+    every signal except top10_holder_pct was coming back "unknown" and
+    getting scored low-neutral, not because the coins were actually risky,
+    but because this function was reading the WRONG field names/nesting for
+    Mobula's real Pulse schema (confirmed against
+    docs.mobula.io/guides/query-newly-listed-tokens-onchain):
+      - holder count is `holdersCount`, not `holderCount`/`holders`
+      - 24h volume is `volume_24h`, not `volume24h`
+      - balanceMutable/noMintAuthority/isBlacklisted live INSIDE a nested
+        `security` object, not at the top level of the pulse item -- they
+        were always absent at pulse_item.get(...), so these 3 signals were
+        unconditionally None/unknown for every token, every time.
+    This was silently deflating every BSC/Base score since Layer 0b Mobula
+    scoring was written -- not just tonight's backtest."""
+    security = pulse_item.get("security") or {}
     top10 = pulse_item.get("top10Holdings")
     snipers = pulse_item.get("snipersCount", 0) or 0
     bundlers = pulse_item.get("bundlersCount", 0) or 0
-    holder_count = pulse_item.get("holderCount") or pulse_item.get("holders")
+    holder_count = pulse_item.get("holdersCount")
     bundler_sniper_pct = None
     if holder_count:
         bundler_sniper_pct = min(1.0, (snipers + bundlers) / holder_count)
     return RawSignals(
         top10_holder_pct=(top10 / 100.0) if top10 is not None else None,
-        lp_locked_or_curve_healthy=not pulse_item.get("balanceMutable", False) if "balanceMutable" in pulse_item else None,
-        mint_authority_revoked=pulse_item.get("noMintAuthority"),
-        freeze_authority_revoked=(not pulse_item.get("isBlacklisted")) if "isBlacklisted" in pulse_item else None,
-        vol_to_liq_ratio=_safe_div(pulse_item.get("volume24h"), pulse_item.get("liquidity")),
+        lp_locked_or_curve_healthy=(not security.get("balanceMutable", False)) if "balanceMutable" in security else None,
+        mint_authority_revoked=security.get("noMintAuthority"),
+        freeze_authority_revoked=(not security.get("isBlacklisted")) if "isBlacklisted" in security else None,
+        vol_to_liq_ratio=_safe_div(pulse_item.get("volume_24h"), pulse_item.get("liquidity")),
         holder_growth_rate_per_hr=None,  # needs a snapshot diff, wired in scheduler (holder census over time)
         bundler_sniper_pct=bundler_sniper_pct,
         liquidity_usd=pulse_item.get("liquidity"),
