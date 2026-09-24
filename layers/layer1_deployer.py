@@ -13,7 +13,7 @@ fixture-based parse test *can* verify -- the JSON shape only, not that MadeOnSol
 itself is reachable).
 """
 from config import CONFIG
-from utils.http import get_json
+from utils.http import get_json, describe_fetch_failure
 
 ALERT_TIERS = {"elite", "good"}
 
@@ -76,7 +76,7 @@ def parse_deployer_alerts(payload: dict) -> list:
 def poll_layer1(chain: str = "solana", since: str = None) -> dict:
     fetched = fetch_deployer_alerts(chain, since)
     if not fetched["ok"]:
-        return {"ok": False, "reason": fetched.get("reason", "fetch failed"), "alerts": []}
+        return {"ok": False, "reason": describe_fetch_failure(fetched), "alerts": []}
     body = fetched["raw"].get("json")
     if body is None:
         return {"ok": False, "reason": f"non-JSON response, status {fetched['raw']['status_code']}", "alerts": []}

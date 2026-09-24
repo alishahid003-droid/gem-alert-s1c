@@ -68,3 +68,21 @@ def post_json(url, headers=None, params=None, data=None, json=None, timeout=20):
         result["json"] = None
         result["text"] = resp.text[:2000]
     return result
+
+# For a {"ok": False, "raw": <get_json result>} shaped failure, builds a real
+# diagnostic string from the raw HTTP response instead of a generic default.
+# A caller with its own top-level "reason" key (e.g. a hardcoded "API key not
+# configured" case) should prefer that -- this is the fallback for everything
+# else (bad auth, rate limits, upstream API errors, etc.), which used to be
+# swallowed into the literal string "fetch failed" with zero diagnostic value
+# (Ali, Sept 24 2026 -- found live, this is exactly what made Layer 1 and
+# Layer 2+9's failures undiagnosable).
+def describe_fetch_failure(fetch_result: dict) -> str:
+    if "reason" in fetch_result:
+        return fetch_result["reason"]
+    raw = fetch_result.get("raw") or {}
+    status = raw.get("status_code")
+    detail = raw.get("json") if raw.get("json") is not None else raw.get("text")
+    if status is not None:
+        return f"HTTP {status}: {str(detail)[:300]}"
+    return "fetch failed (no status_code in response -- see raw)"
