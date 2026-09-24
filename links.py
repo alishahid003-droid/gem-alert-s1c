@@ -29,6 +29,7 @@ DEXSCREENER_CHAIN_SLUG = {
     "solana": "solana",
     "bsc": "bsc",
     "robinhood_chain": "robinhood",
+    "base": "base",  # added Sept 24 2026 alongside Base chain re-enable
 }
 
 

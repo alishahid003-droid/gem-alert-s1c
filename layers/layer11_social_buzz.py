@@ -62,6 +62,7 @@ CHAIN_ID_MAP = {
     "bsc": "bsc",
     "solana": "solana",
     "robinhood_chain": "robinhood",
+    "base": "base",  # added Sept 24 2026 alongside Base chain re-enable
 }
 
 # DexScreener sells boosts in fixed packages; a totalAmount at/above this

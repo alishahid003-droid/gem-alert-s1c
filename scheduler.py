@@ -152,7 +152,7 @@ def _safe(fn, *args, **kwargs):
 # worst case -- see README's call-budget section.
 LAYER8_MAX_DEEP_SCORES_PER_SLOW_CYCLE = 3
 
-MOBULA_PULSE_CHAINS = [("bsc", "bnb:bnb")]  # scope cut Sept 22, 2026 -- Solana+RHC+BSC only, Base/TON/ETH dropped
+MOBULA_PULSE_CHAINS = [("bsc", "bnb:bnb"), ("base", "base:base")]  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- TON/ETH still dropped, scope cut Sept 22, 2026
 
 
 def readiness_report() -> dict:
@@ -769,6 +769,20 @@ def run_poll_slow():
                 prior = latest_mc_by_token.get(token)
                 if prior is None or ts >= prior[1]:
                     latest_mc_by_token[token] = (mc, ts)
+
+            # Single-trader buy alerts (Ali, Sept 24 2026 -- see
+            # single_trader_buy_events' docstring): fires the moment ANY one
+            # of the 38 tracked people buys, not just when 2+ converge.
+            # Sent before the convergence block below so if both fire for
+            # the same token this cycle, the individual signal shows first.
+            for ev in result.get("single_events", []):
+                token = ev["token"]
+                alert = Alert(token[:8], token, chain, f"{ev['name']} bought this token")
+                alert.set_tag("Chain", chain).set_tag("Trader", f"{ev['name']} ({ev['tier']})")
+                send_res = _alert(alert, "layer2_single")
+                print(f"[layer2:{chain}] {token[:8]} single tracked-trader buy by {ev['name']} -> {send_res}")
+                if send_res.get("sent"):
+                    alerts_sent += 1
 
             for ev in result["events"]:
                 active_tokens.add(ev["token"])

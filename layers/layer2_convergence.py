@@ -108,6 +108,28 @@ def extract_mc_points(trades: list) -> list:
     return points
 
 
+def single_trader_buy_events(trades: list, roster: set = CONVERGENCE_ROSTER) -> list:
+    """Ali, Sept 24 2026: 'for these 38 people buy should also work...as
+    that is when we know they enter...not the sell side later.' Same gap as
+    pump.fun's Layer 2b had (fixed same night): detect_convergence() above
+    only fires when 2+ roster names buy the SAME token within
+    CONVERGENCE_WINDOW -- a single tracked person buying produced no alert
+    at all. Returns one entry per qualifying buy, tagged with tier so the
+    alert shows how trusted that name is."""
+    events = []
+    for t in trades:
+        if t.get("action") != "buy":
+            continue
+        name = t.get("kol_name")
+        if name not in roster:
+            continue
+        token = _token_id(t)
+        if not token:
+            continue
+        events.append({"name": name, "token": token, "tier": tier_of(name), "raw": t})
+    return events
+
+
 def poll_layer2(chain: str = "solana", trades: list = None) -> dict:
     """If `trades` is given (already-fetched buy trades, e.g. from
     layers.kol_feed.fetch_kol_feed_both shared across Layers 2+9), uses them
@@ -121,4 +143,4 @@ def poll_layer2(chain: str = "solana", trades: list = None) -> dict:
         if body is None:
             return {"ok": False, "reason": f"non-JSON response, status {fetched['raw']['status_code']}", "events": []}
         trades = body.get("trades", [])
-    return {"ok": True, "events": detect_convergence(trades), "mc_points": extract_mc_points(trades)}
+    return {"ok": True, "events": detect_convergence(trades), "single_events": single_trader_buy_events(trades), "mc_points": extract_mc_points(trades)}

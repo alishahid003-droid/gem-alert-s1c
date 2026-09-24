@@ -34,11 +34,18 @@ WATCHLIST_CANDIDATES = {
     "0xdetweiler", "MonsieurMacaron", "PoorGoat_",
 }
 
-# Layer 2 (buy-side convergence): Tier 1/2 ONLY, per spec.
-CONVERGENCE_ROSTER = TIER_1 | TIER_2
-
 # Layer 9 (sell-side mirror): every tier + watchlist candidates.
 SELL_WATCH_ROSTER = TIER_1 | TIER_2 | TIER_3 | TIER_4 | WATCHLIST_CANDIDATES
+
+# Layer 2 (buy-side convergence): CHANGED Sept 24 2026, Ali's explicit call
+# -- "for these 38 people buy should also work...as that is when we know
+# they enter...not the sell side later." Originally Tier 1/2 only, to keep
+# buy-side convergence to the most-trusted names and hold noise down. Ali
+# overrode that: every tracked person's buy should count, not just the top
+# two tiers. Now identical to SELL_WATCH_ROSTER (everyone), by design --
+# tier still exists for reference/display (tier_of below), it just no
+# longer gates which buys trigger a convergence alert.
+CONVERGENCE_ROSTER = SELL_WATCH_ROSTER
 
 
 def tier_of(name: str) -> str:

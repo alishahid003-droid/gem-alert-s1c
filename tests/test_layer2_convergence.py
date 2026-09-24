@@ -53,3 +53,41 @@ def test_poll_layer2_accepts_prefetched_trades_no_network_call(monkeypatch):
     assert result["ok"] is True
     assert len(result["events"]) >= 1
     assert len(result["mc_points"]) == len(trades)
+
+
+# --- Single-trader buy alerts (Ali, Sept 24 2026 -- "for these 38 people
+# buy should also work...as that is when we know they enter...not the sell
+# side later") ---
+from layers.layer2_convergence import single_trader_buy_events
+
+def test_single_trader_event_fires_for_lone_roster_member():
+    """TOKEN_B has only Aurelius (Tier 2) -- detect_convergence() finds
+    nothing there (needs 2+), but single_trader_buy_events() must still
+    report it: this is exactly the gap Ali flagged."""
+    trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
+    events = single_trader_buy_events(trades)
+    token_b = [e for e in events if e["token"] == "TOKEN_B" and e["name"] == "Aurelius"]
+    assert len(token_b) == 1
+    assert token_b[0]["tier"] == "Tier 2"
+
+
+def test_single_trader_event_ignores_untracked_name():
+    trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
+    events = single_trader_buy_events(trades)
+    assert not any(e["name"] == "NotTracked" for e in events)
+
+
+def test_single_trader_event_also_fires_for_convergence_pairs():
+    """A wallet that's part of a 2+ convergence should STILL show up in the
+    single-trader feed too -- both signals are independent, not mutually
+    exclusive (matches pump.fun Layer 2b's same design)."""
+    trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
+    events = single_trader_buy_events(trades)
+    token_a_names = {e["name"] for e in events if e["token"] == "TOKEN_A"}
+    assert {"Unipcs", "Avast"} <= token_a_names
+
+
+def test_single_trader_event_respects_custom_roster():
+    trades = [{"action": "buy", "kol_name": "SomeNewFollow", "token_mint": "TOKEN_X"}]
+    assert single_trader_buy_events(trades, roster=set()) == []
+    assert len(single_trader_buy_events(trades, roster={"SomeNewFollow"})) == 1

@@ -302,7 +302,7 @@ def scan_stage1(mints_by_chain: dict) -> list:
         )
         results.append({"chain": "solana", "address": mint, "score": score_token(sig)})
 
-    for chain, chain_id in [("bsc", "bnb:bnb")]:  # scope cut Sept 22, 2026 -- base/ethereum dropped
+    for chain, chain_id in [("bsc", "bnb:bnb"), ("base", "base:base")]:  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- ethereum/ton still dropped
         for mint in mints_by_chain.get(chain, []):
             raw = fetch_mobula_pulse(chain_id)
             if not raw.get("ok"):
