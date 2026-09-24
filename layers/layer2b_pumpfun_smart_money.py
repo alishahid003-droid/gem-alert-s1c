@@ -161,3 +161,38 @@ def detect_pumpfun_convergence(buy_trades: list) -> list:
         })
     return detect_convergence(adapted, roster=roster,
                                window=CONVERGENCE_WINDOW, min_wallets=MIN_WALLETS_FOR_CONVERGENCE)
+
+
+def single_wallet_buy_events(buy_trades: list) -> list:
+    """Ali, Sept 24 2026: 'if 2 does not buy...or if they dont buy in that
+    one hr...then what will happen...dont u think we can miss on
+    something.' Correct -- detect_pumpfun_convergence() above ONLY fires
+    when 2+ roster wallets buy the SAME mint within CONVERGENCE_WINDOW (1hr).
+    A single roster wallet buying produced no alert at all before this
+    function existed -- a real gap, especially now that the roster includes
+    13 wallets Ali hand-picked off pump.fun's own leaderboard himself (not
+    just cold-start-promoted ones), where a single one of them buying is
+    already a meaningful signal on its own.
+
+    Returns one entry per (wallet, mint) buy where wallet is in the roster.
+    No dedup needed here -- poll_layer2b_pumpfun_smart_money only ever
+    passes buys from signatures newer than its stored cursor, so a given
+    trade is only ever seen once, never replayed on a later cycle."""
+    roster = get_smart_money_roster()
+    if not roster:
+        return []
+    manual_meta = get_manual_seed_meta()
+    events = []
+    for t in buy_trades:
+        wallet = t.get("wallet")
+        if wallet not in roster:
+            continue
+        meta = manual_meta.get(wallet)
+        events.append({
+            "wallet": wallet,
+            "mint": t.get("mint"),
+            "block_time": t.get("block_time"),
+            "source": "manual" if meta else "auto-promoted",
+            "note": (meta or {}).get("note", ""),
+        })
+    return events

@@ -72,7 +72,7 @@ def _ago(ts: float) -> str:
 # ("gem alert or rug alert or developer alert or copy trading alert").
 LAYER_CATEGORY = {
     "layer0": "gem", "layer0b": "gem", "layer0c": "gem", "layer0c_momentum": "gem",
-    "layer1": "developer", "layer2": "copy-trading", "layer9": "sell/rug-watch",
+    "layer1": "developer", "layer2": "copy-trading", "layer2b": "copy-trading", "layer2b_single": "copy-trading", "layer9": "sell/rug-watch",
     "layer4_news": "news", "layer7": "correlation", "layer3": "backing", "layer11": "buzz",
 }
 

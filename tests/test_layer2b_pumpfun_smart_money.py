@@ -201,3 +201,47 @@ def test_manually_seeded_wallet_participates_in_convergence():
     ]
     convergences = detect_pumpfun_convergence(buys)
     assert len(convergences) == 1
+
+
+# --- Single-wallet buy alerts (Ali, Sept 24 2026 -- "if 2 does not buy...
+# then what will happen...dont u think we can miss on something") ---
+from layers.layer2b_pumpfun_smart_money import single_wallet_buy_events
+
+def test_single_wallet_buy_event_fires_for_one_tracked_wallet():
+    """A lone roster wallet buying must still produce an event -- this is
+    exactly the gap Ali flagged: convergence alone requires 2+."""
+    seed_manual_wallets([GOOD_WALLET], source="pumpfun_leaderboard_1M", note="rank #2")
+    buys = [{"wallet": GOOD_WALLET, "mint": "SomeMint111111111111111111111111111111111",
+             "block_time": 1000.0}]
+    events = single_wallet_buy_events(buys)
+    assert len(events) == 1
+    assert events[0]["wallet"] == GOOD_WALLET
+    assert events[0]["source"] == "manual"
+    assert events[0]["note"] == "rank #2"
+
+
+def test_single_wallet_buy_event_ignores_untracked_wallet():
+    seed_manual_wallets([GOOD_WALLET], source="test", note="")
+    buys = [{"wallet": "SomeOtherWallet1111111111111111111111111111", "mint": "MintX",
+             "block_time": 1000.0}]
+    assert single_wallet_buy_events(buys) == []
+
+
+def test_single_wallet_buy_event_empty_roster_no_cost():
+    assert single_wallet_buy_events([{"wallet": GOOD_WALLET, "mint": "MintX", "block_time": 1.0}]) == []
+
+
+def test_single_wallet_buy_event_tags_auto_promoted_wallet_correctly():
+    """A wallet that earned its spot via live promotion (not manually
+    seeded) should be tagged 'auto-promoted', not 'manual'."""
+    process_trade(WALLET, MINT, "buy", -1.0, ts=1000.0)
+    process_trade(WALLET, MINT, "sell", 2.0, ts=1010.0)
+    for i in range(4):
+        m = f"Mint{i}aaa111111111111111111111111111111111"
+        process_trade(WALLET, m, "buy", -1.0, ts=2000.0 + i * 100)
+        process_trade(WALLET, m, "sell", 2.0, ts=2010.0 + i * 100)
+    assert WALLET in get_smart_money_roster()
+    buys = [{"wallet": WALLET, "mint": "NewMint11111111111111111111111111111111111", "block_time": 3000.0}]
+    events = single_wallet_buy_events(buys)
+    assert len(events) == 1
+    assert events[0]["source"] == "auto-promoted"

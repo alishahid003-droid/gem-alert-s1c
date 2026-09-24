@@ -115,7 +115,7 @@ from layers.layer3_backing_check import check_backing_spike
 from layers.layer11_social_buzz import fetch_boost_board, check_buzz
 from layers.pumpfun_trades import fetch_recent_signatures, fetch_transaction, decode_trade
 from layers.layer2b_pumpfun_smart_money import process_trade as pumpfun_process_trade, \
-    detect_pumpfun_convergence, get_smart_money_roster
+    detect_pumpfun_convergence, get_smart_money_roster, single_wallet_buy_events
 from layers.layer7_correlation import AlertEvent, detect_mega_alerts
 import layers.layer10_insider_cluster as layer10
 from layers.layer4_news import fetch_cryptopanic_posts, parse_cryptopanic_posts, \
@@ -445,9 +445,11 @@ def poll_layer2b_pumpfun_smart_money() -> dict:
             decoded_buys.append(trade)
 
     convergence_events = detect_pumpfun_convergence(decoded_buys) if decoded_buys else []
+    single_events = single_wallet_buy_events(decoded_buys) if decoded_buys else []
     return {"ok": True, "checked": len(signatures), "decoded": len(decoded_buys),
             "decode_failures": decode_failures, "promotions": promotions,
-            "convergence_events": convergence_events, "roster_size": len(get_smart_money_roster())}
+            "convergence_events": convergence_events, "single_wallet_events": single_events,
+            "roster_size": len(get_smart_money_roster())}
 
 
 def run_poll_fast():
@@ -638,6 +640,23 @@ def run_poll_fast():
     # the real per-cycle call cost this incurs. ---
     l2b_result = _safe(poll_layer2b_pumpfun_smart_money)
     if isinstance(l2b_result, dict) and l2b_result.get("ok"):
+        # Single-wallet alerts (Ali, Sept 24 2026 -- see single_wallet_buy_events'
+        # docstring): fires on ANY tracked wallet's buy, not just 2+ converging.
+        # Sent BEFORE the convergence check below so if both fire for the same
+        # token this cycle, you see the individual signal first, escalation
+        # second -- matches the actual order of what happened on-chain.
+        for event in l2b_result.get("single_wallet_events", []):
+            token = event["mint"]
+            wallet = event["wallet"]
+            alert = Alert(token[:8], token, "solana", "Pump.fun tracked trader buy")
+            alert.set_tag("Chain", "solana (pump.fun)")
+            alert.set_tag("Trader", f"{wallet[:8]}...{wallet[-4:]} ({event['source']})")
+            if event.get("note"):
+                alert.set_tag("Note", event["note"])
+            send_res = _alert(alert, "layer2b_single")
+            print(f"[layer2b] {token[:8]} single tracked-trader buy by {wallet[:8]}... -> {send_res}")
+            if send_res.get("sent"):
+                alerts_sent += 1
         for event in l2b_result["convergence_events"]:
             token = event["token"]
             alert = Alert(token[:8], token, "solana", "Pump.fun SMART-MONEY convergence")
