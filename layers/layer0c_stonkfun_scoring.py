@@ -425,7 +425,11 @@ def poll_layer0c_momentum(limit: int = 25, max_deep_lookups: int = MOMENTUM_MAX_
     tokens = body.get("data") or body.get("tokens") or []
     candidates = [
         t for t in tokens
-        if t.get("mint") and t.get("mint") not in already_checked and _within_lookback(t.get("createdAt"))
+        if isinstance(t, dict)
+        # StonkFun's /tokens list has been observed containing bare strings
+        # (e.g. plain mint addresses) alongside normal token objects --
+        # skip those instead of crashing the whole poll cycle on .get().
+        and t.get("mint") and t.get("mint") not in already_checked and _within_lookback(t.get("createdAt"))
     ][:max_deep_lookups]
 
     gems = []
