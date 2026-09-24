@@ -123,7 +123,10 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     except ImportError:
         return ExecutionResult(False, "solders/base58 not installed -- add to requirements.txt before enabling")
 
-    lamports = int(usd_amount * 1_000_000_000 / _sol_price_usd_placeholder())
+    sol_price = _sol_price_usd()
+    if sol_price is None or sol_price <= 0:
+        return ExecutionResult(False, "could not fetch a live SOL/USD price -- refusing to size a buy on a guess")
+    lamports = int(usd_amount * 1_000_000_000 / sol_price)
     quote = get_json(f"{CONFIG.jupiter_quote_base_url}/quote", params={
         "inputMint": "So11111111111111111111111111111111111111112",  # wrapped SOL
         "outputMint": token_mint,
@@ -196,13 +199,35 @@ def _solana_pubkey_from_private_key() -> str:
     return str(kp.pubkey())
 
 
-def _sol_price_usd_placeholder() -> float:
-    """Real SOL/USD price needed to convert a target USD position size into
-    lamports. NOT hardcoded to a stale number -- raises until wired to a
-    real price source (Mobula's own price endpoint, already in this stack,
-    is the obvious source; deliberately not auto-wired here so a stale
-    fallback can't silently misprice a real trade)."""
-    raise NotImplementedError(
-        "SOL/USD price source not wired yet -- pull from Mobula's price endpoint "
-        "(already used elsewhere in this stack) before this path can run live."
-    )
+WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
+USDC_MINT_SOLANA = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # 6 decimals, USD-pegged
+
+
+def _sol_price_usd() -> Optional[float]:
+    """Real SOL/USD price, derived from a live Jupiter quote (1 SOL -> USDC)
+    rather than a separate, unverified Mobula price endpoint -- this repo
+    has no prior working call to any Mobula price/market-data endpoint
+    (checked Sept 2026: only /api/2/pulse, /api/1/wallet/*, and
+    /api/2/swap/quoting are used anywhere in this codebase), whereas the
+    Jupiter /quote endpoint used here is the SAME endpoint swap_executor
+    already calls for real buys, already proven live at the quote level.
+    Reusing it means one less untested integration on the path that moves
+    real money, not two. Returns None (never a stale/guessed number) if the
+    quote fails, so callers must treat that as "can't price this trade
+    right now" and refuse, not fall back to a hardcoded price."""
+    quote = get_json(f"{CONFIG.jupiter_quote_base_url}/quote", params={
+        "inputMint": WRAPPED_SOL_MINT,
+        "outputMint": USDC_MINT_SOLANA,
+        "amount": 1_000_000_000,  # 1 SOL, in lamports
+        "slippageBps": 50,
+    })
+    if not quote.get("ok"):
+        return None
+    body = quote.get("json") or {}
+    out_amount = body.get("outAmount")
+    if out_amount is None:
+        return None
+    try:
+        return int(out_amount) / 1_000_000  # USDC has 6 decimals
+    except (TypeError, ValueError):
+        return None
