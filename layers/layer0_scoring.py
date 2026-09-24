@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Optional, Literal
 
 from config import CONFIG
-from utils.http import get_json, ApiUnreachable
+from utils.http import get_json, ApiUnreachable, describe_fetch_failure
 
 Chain = Literal["solana", "robinhood_chain", "base", "bsc", "ton", "ethereum"]
 
@@ -224,11 +224,26 @@ def _safe_div(a, b):
 # ---------------------------------------------------------------------------
 
 def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
+    """Real bug caught live Sept 24 2026: this used to always return
+    ok=True no matter what, even when all 3 sub-calls failed (e.g.
+    MadeOnSol's free-key rate limit) -- signals_from_madeonsol_risk then
+    silently treated the empty/missing data as "no risk flags found" and
+    score_token handed back a fabricated neutral score. Caught because 6
+    completely different real coins all scored an identical 49/100
+    "everything unknown" in the same run -- that's not a real score, that's
+    every signal defaulting because there was no data at all. Now: if
+    every one of the 3 sub-calls failed, this is a real fetch failure, not
+    a token with no risk flags -- surfaced as ok=False so the caller skips
+    it instead of silently mis-scoring it. A PARTIAL failure (1-2 of 3)
+    still degrades gracefully -- score_token already handles individual
+    unknown signals fine, no reason to throw away 2 good calls over 1 bad
+    one."""
     if not CONFIG.madeonsol_api_key:
         return {"ok": False, "reason": "MADEONSOL_API_KEY not configured"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
     out = {}
+    failures = []
     for name, path in [
         ("risk", f"{prefix}/tokens/{mint}/risk"),
         ("holders", f"{prefix}/tokens/{mint}/holders"),
@@ -236,6 +251,10 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     ]:
         result = get_json(f"{CONFIG.madeonsol_base_url}{path}", headers=headers)
         out[name] = result
+        if not result.get("ok"):
+            failures.append(f"{name}: {describe_fetch_failure({'raw': result})}")
+    if len(failures) == 3:
+        return {"ok": False, "reason": "; ".join(failures)}
     return {"ok": True, "data": out}
 
 

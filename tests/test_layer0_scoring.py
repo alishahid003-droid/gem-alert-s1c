@@ -93,3 +93,46 @@ def test_score_solana_mint_fails_closed_without_api_key(monkeypatch):
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", None)
     result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
     assert "error" in result
+
+
+def test_score_solana_mint_fails_closed_when_all_three_madeonsol_calls_fail(monkeypatch):
+    # Real bug caught live Sept 24 2026: fetch_madeonsol_token_risk used to
+    # always return ok=True even when every one of the 3 sub-calls failed
+    # (e.g. MadeOnSol's free-key rate limit) -- 6 completely different real
+    # coins all came back with an identical fabricated 49/100 "everything
+    # unknown" score in the same backtest run, which is what exposed this.
+    # A real rate-limit/network failure must surface as an error, not a
+    # silently mis-scored token.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        return {"ok": False, "status_code": 429, "url": url,
+                "json": {"error": "rate_limit_exceeded", "error_kind": "ip_rotation"}}
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    assert "error" in result
+    assert "429" in result["error"]
+    assert "rate_limit_exceeded" in result["error"]
+
+
+def test_score_solana_mint_degrades_gracefully_on_partial_madeonsol_failure(monkeypatch):
+    # 1-2 of 3 calls failing should NOT throw away the 2 good ones -- only
+    # a total (3/3) failure counts as a real fetch failure.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/risk"):
+            return {"ok": False, "status_code": 429, "url": url, "json": {"error": "rate_limit_exceeded"}}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
+        return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    assert "error" not in result
+    assert result["score"].band in {"A", "B", "C", "D"}
