@@ -78,8 +78,11 @@ from typing import Optional
 from config import CONFIG
 from utils.http import get_json, post_json
 from executor.config import EXECUTOR_CONFIG
+from executor.rpc_pool import rpc_call
 
-PANCAKESWAP_V2_ROUTER_BSC = "0x10ED43C718714eb63d5aA57B78B54704E256024"  # well-known public mainnet address
+PANCAKESWAP_V2_ROUTER_BSC = "0x10ED43C718714eb63d5aA57B78B54704E256024E"  # FIXED Sept 25, 2026: previous value was missing its trailing "E" (39 hex chars instead of 40 -- an invalid address that would have failed every BSC buy). Re-verified against PancakeSwap's own official npm package (@pancakeswap/smart-router, V2_ROUTER_ADDRESS[ChainId.BSC]), not a web summary -- confirmed via is_address() == True and Web3.to_checksum_address() round-tripping to this exact casing.
+WBNB_BSC = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"  # wrapped BNB, re-verified against @pancakeswap/tokens npm package source (same "one char short" trap as the router address above)
+USDT_BSC = "0x55d398326f99059fF775485246999027B3197955"  # verified against @pancakeswap/tokens
 
 # Confirmed Sept 22, 2026 against Uniswap's own official developer docs
 # (developers.uniswap.org/docs/protocols/v4/deployments), Robinhood Chain
@@ -145,9 +148,67 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     if not swap_resp.get("ok"):
         return ExecutionResult(False, f"jupiter swap-tx build failed: status {swap_resp.get('status_code')}")
 
-    # Step 3: sign + send. UNTESTED -- flagged clearly, not run in this build.
-    return ExecutionResult(False, "sign+send path is written but UNTESTED against a live network -- "
-                                   "do not treat this as a working execution path until a real run confirms it")
+    # Step 3: sign + send, for real, via executor.rpc_pool (failover across
+    # all 3 confirmed free Solana endpoints -- see rpc_pool.py docstring for
+    # the round-by-round verification history). This actually submits a
+    # transaction when EXECUTION_ENABLED=true and a key is configured --
+    # there is no dry-run mode below this line by design (module docstring:
+    # "it either clearly refuses, or it is live").
+    try:
+        import base64
+        swap_tx_b64 = (swap_resp.get("json") or {}).get("swapTransaction")
+        if not swap_tx_b64:
+            return ExecutionResult(False, "jupiter swap response had no swapTransaction field")
+
+        keypair = Keypair.from_bytes(base58.b58decode(EXECUTOR_CONFIG.solana_private_key))
+        unsigned_tx = VersionedTransaction.from_bytes(base64.b64decode(swap_tx_b64))
+        signed_tx = VersionedTransaction(unsigned_tx.message, [keypair])
+        signed_tx_b64 = base64.b64encode(bytes(signed_tx)).decode("ascii")
+    except Exception as exc:  # noqa: BLE001 -- any signing failure must refuse, never half-send
+        return ExecutionResult(False, f"failed to sign transaction: {exc}")
+
+    send_result = rpc_call("solana", "sendTransaction", [
+        signed_tx_b64,
+        {"encoding": "base64", "skipPreflight": False, "maxRetries": 3, "preflightCommitment": "confirmed"},
+    ])
+    if not send_result.get("ok"):
+        return ExecutionResult(False, f"sendTransaction failed: {send_result.get('reason')}")
+
+    tx_sig = send_result.get("result")
+    if not isinstance(tx_sig, str):
+        return ExecutionResult(False, f"sendTransaction returned no usable signature: {send_result}")
+
+    confirmed = _confirm_solana_tx(tx_sig)
+    if not confirmed.get("ok"):
+        # Transaction WAS submitted -- this is a "can't confirm" result, not a
+        # "didn't happen" result. Surface the signature so it can be checked
+        # manually on an explorer rather than silently treated as a no-op.
+        return ExecutionResult(False, f"sent but could not confirm (check signature manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=tx_sig)
+
+    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_sig, filled_usd=usd_amount)
+
+
+def _confirm_solana_tx(signature: str, attempts: int = 10, delay_seconds: float = 2.0) -> dict:
+    """Polls getSignatureStatuses until the transaction lands (confirmed/
+    finalized) or errors on-chain. Real polling, not a fire-and-forget --
+    a buy this module reports as successful must actually have a
+    confirmed signature behind it, since Stage1 conviction state and
+    position tracking downstream depend on this being true."""
+    import time
+    for _ in range(attempts):
+        status = rpc_call("solana", "getSignatureStatuses", [[signature], {"searchTransactionHistory": True}])
+        if status.get("ok"):
+            values = ((status.get("result") or {}).get("value")) or [None]
+            info = values[0]
+            if info is not None:
+                if info.get("err"):
+                    return {"ok": False, "reason": f"transaction landed but failed on-chain: {info['err']}"}
+                confirmation_status = info.get("confirmationStatus")
+                if confirmation_status in ("confirmed", "finalized"):
+                    return {"ok": True}
+        time.sleep(delay_seconds)
+    return {"ok": False, "reason": f"not confirmed after {attempts} polls ({attempts * delay_seconds:.0f}s)"}
 
 
 def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
