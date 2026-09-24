@@ -794,6 +794,23 @@ def run_poll_slow():
                 if send_res.get("sent"):
                     alerts_sent += 1
 
+            # Large buy from an UNTRACKED name (Ali, Sept 24 2026 -- "a new
+            # person...good cash balance...maybe he can be an insider
+            # entering"). Not a track-record promotion, just a surfaced
+            # signal -- see large_untracked_buys' docstring for the
+            # first-pass threshold.
+            for ev in result.get("large_untracked_events", []):
+                token = ev["token"]
+                alert = Alert(token[:8], token, chain,
+                               f"Large buy ({ev['sol_amount']:.1f} SOL) from untracked wallet")
+                alert.set_tag("Chain", chain)
+                alert.set_tag("Possible insider", f"{ev['name']} ({ev['sol_amount']:.1f} SOL, not on your tracked list)")
+                send_res = _alert(alert, "layer2_untracked_large")
+                print(f"[layer2:{chain}] {token[:8]} large untracked buy by {ev['name']} "
+                      f"({ev['sol_amount']:.1f} SOL) -> {send_res}")
+                if send_res.get("sent"):
+                    alerts_sent += 1
+
                 # -- Shared execution core (Ali, Sept 23 2026: "point 5 ...
                 # should cover all 3 platforms" -- decided: Pump.fun/Fomo
                 # convergence feeds the SAME executor.entrypoint used by

@@ -91,3 +91,42 @@ def test_single_trader_event_respects_custom_roster():
     trades = [{"action": "buy", "kol_name": "SomeNewFollow", "token_mint": "TOKEN_X"}]
     assert single_trader_buy_events(trades, roster=set()) == []
     assert len(single_trader_buy_events(trades, roster={"SomeNewFollow"})) == 1
+
+
+# --- Large untracked buys / possible-insider signal (Ali, Sept 24 2026 --
+# "maybe a new person has joined fomo and has good cash balance...maybe he
+# can be an insider entering") ---
+from layers.layer2_convergence import large_untracked_buys, LARGE_UNTRACKED_BUY_MIN_SOL
+
+def test_large_untracked_buy_detected():
+    """NotTracked's 9.0 SOL buy on TOKEN_B is exactly the scenario Ali
+    described -- must be surfaced even though the name isn't on roster."""
+    trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
+    events = large_untracked_buys(trades)
+    assert len(events) == 1
+    assert events[0]["name"] == "NotTracked"
+    assert events[0]["wallet"] == "W4"
+    assert events[0]["token"] == "TOKEN_B"
+    assert events[0]["sol_amount"] == 9.0
+
+
+def test_tracked_names_never_appear_even_if_large():
+    """A tracked person's buy, however large, belongs to the other alert
+    paths (single/convergence), not this one -- avoids double-tagging."""
+    trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
+    events = large_untracked_buys(trades, min_sol=1.0)  # lowered to include everyone by size
+    names = {e["name"] for e in events}
+    assert "Unipcs" not in names and "Avast" not in names and "Aurelius" not in names
+
+
+def test_small_untracked_buy_not_flagged():
+    trades = [{"action": "buy", "kol_name": "RandomWallet", "wallet_address": "Wx",
+               "sol_amount": 0.5, "token_mint": "TOKEN_Z"}]
+    assert large_untracked_buys(trades) == []
+
+
+def test_threshold_is_configurable():
+    trades = [{"action": "buy", "kol_name": "RandomWallet", "wallet_address": "Wx",
+               "sol_amount": 2.0, "token_mint": "TOKEN_Z"}]
+    assert large_untracked_buys(trades, min_sol=5.0) == []
+    assert len(large_untracked_buys(trades, min_sol=1.0)) == 1

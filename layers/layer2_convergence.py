@@ -130,6 +130,44 @@ def single_trader_buy_events(trades: list, roster: set = CONVERGENCE_ROSTER) -> 
     return events
 
 
+# Ali, Sept 24 2026: "maybe a new person has joined fomo and has good cash
+# balance...maybe he can be an insider entering." Real gap: single_trader_
+# buy_events (above) and detect_convergence() both only look at the 38
+# names on roster.py -- an unlisted wallet buying big is currently
+# invisible no matter how large. FIRST-PASS THRESHOLD, deliberately
+# arbitrary and flagged for tuning with real data (same honesty standard as
+# layer2b_pumpfun_smart_money's promotion bar): the sample KOL-feed fixture
+# has tracked traders sizing 1-5 SOL and one untracked wallet at 9 SOL, so
+# 5.0 SOL is a reasonable starting "notably large" line, not a researched
+# one. This does NOT auto-promote the wallet into the tracked roster (that
+# would need a track record, which a single trade can't establish) -- it
+# just surfaces the buy so Ali can judge for himself, same spirit as Layer
+# 2b's cold-start but immediate instead of waiting for 5 closed trades.
+LARGE_UNTRACKED_BUY_MIN_SOL = 5.0
+
+
+def large_untracked_buys(trades: list, roster: set = CONVERGENCE_ROSTER,
+                          min_sol: float = LARGE_UNTRACKED_BUY_MIN_SOL) -> list:
+    """Returns one entry per buy from a name NOT on the roster, sized at or
+    above min_sol -- the 'unknown wallet, big conviction buy' pattern."""
+    events = []
+    for t in trades:
+        if t.get("action") != "buy":
+            continue
+        name = t.get("kol_name")
+        if name in roster:
+            continue
+        sol = t.get("sol_amount")
+        if sol is None or sol < min_sol:
+            continue
+        token = _token_id(t)
+        if not token:
+            continue
+        events.append({"name": name or "unknown", "wallet": t.get("wallet_address"),
+                        "token": token, "sol_amount": sol})
+    return events
+
+
 def poll_layer2(chain: str = "solana", trades: list = None) -> dict:
     """If `trades` is given (already-fetched buy trades, e.g. from
     layers.kol_feed.fetch_kol_feed_both shared across Layers 2+9), uses them
@@ -143,4 +181,4 @@ def poll_layer2(chain: str = "solana", trades: list = None) -> dict:
         if body is None:
             return {"ok": False, "reason": f"non-JSON response, status {fetched['raw']['status_code']}", "events": []}
         trades = body.get("trades", [])
-    return {"ok": True, "events": detect_convergence(trades), "single_events": single_trader_buy_events(trades), "mc_points": extract_mc_points(trades)}
+    return {"ok": True, "events": detect_convergence(trades), "single_events": single_trader_buy_events(trades), "large_untracked_events": large_untracked_buys(trades), "mc_points": extract_mc_points(trades)}

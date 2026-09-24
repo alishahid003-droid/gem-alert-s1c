@@ -72,7 +72,7 @@ def _ago(ts: float) -> str:
 # ("gem alert or rug alert or developer alert or copy trading alert").
 LAYER_CATEGORY = {
     "layer0": "gem", "layer0b": "gem", "layer0c": "gem", "layer0c_momentum": "gem",
-    "layer1": "developer", "layer2": "copy-trading", "layer2_single": "copy-trading", "layer2b": "copy-trading", "layer2b_single": "copy-trading", "layer9": "sell/rug-watch",
+    "layer1": "developer", "layer2": "copy-trading", "layer2_single": "copy-trading", "layer2_untracked_large": "insider-watch", "layer2b": "copy-trading", "layer2b_single": "copy-trading", "layer9": "sell/rug-watch",
     "layer4_news": "news", "layer7": "correlation", "layer3": "backing", "layer11": "buzz",
 }
 
@@ -119,7 +119,7 @@ PAGE_TEMPLATE = """<!doctype html>
   .tag { display:inline-block; background:#21252b; border-radius:4px; padding:1px 6px; margin:1px 2px 1px 0; font-size:11px; }
   .cat-gem { color:#2ecc71; } .cat-developer { color:#f1c40f; } .cat-copy-trading { color:#3498db; }
   .cat-sell\\/rug-watch { color:#e74c3c; } .cat-news { color:#9b59b6; } .cat-correlation { color:#e67e22; }
-  .cat-backing { color:#1abc9c; } .cat-buzz { color:#ff6ec7; }
+  .cat-backing { color:#1abc9c; } .cat-buzz { color:#ff6ec7; } .cat-insider-watch { color:#ff4757; font-weight:600; }
   .empty { color:#555; font-style:italic; padding:8px; }
   .filters { margin-bottom:10px; }
   .filters button { background:#161a1f; border:1px solid #2a2f37; color:#e6e6e6; border-radius:5px; padding:4px 10px; margin-right:6px; font-size:11px; cursor:pointer; }
