@@ -1,41 +1,51 @@
 # S1c Gem-Alert — Final Checklist
 
-_Last updated: Sept 25, 2026, ~3:10 AM PKT — see git log for full history_
+_Last updated: Sept 25, 2026, ~3:20 AM PKT — see git log for full history_
 
 ## Auto-buy — done and tested
 
-- [x] Solana: real SOL/USD pricing (Jupiter quote), real tx signing (solders), real submission via RPC failover, real confirmation polling
-- [x] BSC: real swap via PancakeSwap V2, real signing/submission, real confirmation polling
-- [x] Both: real filled-token-amount extraction from the confirmed transaction (Solana: token balance diff; BSC: Transfer event log) — not the requested USD size
-- [x] `entrypoint.py` now actually calls the real buy on a Stage 1/2 fire (previously decision-only) and records the real fill onto the position
-- [ ] Robinhood Chain buy — blocked on Uniswap v4 pool-key data (see below)
+- [x] Solana: real SOL/USD pricing, real tx signing, real submission (RPC failover), real confirmation
+- [x] BSC: real swap via PancakeSwap V2, real signing/submission/confirmation
+- [x] Both: real filled-token-amount extraction from the confirmed transaction, not the requested USD size
+- [x] `entrypoint.py` now actually calls the real buy on a Stage 1/2 fire and records the real fill
 
 ## Auto-sell — done and tested (moonshot logic included)
 
-- [x] Defensive/rug-triggered exit: Solana + BSC full-position sell, real signing/sending/confirming
-- [x] **Moonshot trim ladder** (already existed in `moonbag.py`, now actually wired to real numbers): as a position runs 3x/10x/50x, sells pre-set slices to recover capital, leaves a moonbag riding uncapped
-  - Default ladder: 35% / 25% / 20% trimmed across the 3 tiers → 20% moonbag rides forever
-  - High-conviction ladder (elite deployer, strong wallet convergence, double-confirmed across pump.fun + Fomo, low insider ratio, news catalyst): lighter 15% / 15% / 15% trims → 55% moonbag rides
-  - The moonbag itself is never sold by this logic — only exits via the rug-defense path or a manual close, which is the actual point: this is built to let a real 500x run, not cap it early
-- [x] Real end-to-end run verified: Stage 1 fires → real (mocked) buy fills 100,000 tokens → position records the real quantity → price hits 10x → high-conviction ladder correctly sells 15% of the *real* holding, not a guess
-- [ ] Robinhood Chain sell — same block as its buy
+- [x] Defensive/rug-triggered full exit: Solana + BSC
+- [x] Moonshot trim ladder wired to real fill data: 3x/10x/50x tiers, uncapped moonbag rides forever, lighter ladder for high-conviction positions (55% moonbag vs. 20%)
+- [x] Verified end-to-end with a real mocked run: fire → real fill → real position → 10x → correct real sell size
+
+## Dashboard — partially exists, needs real work
+
+- [x] `dashboard.py` already exists: real local HTML page (`python dashboard.py` → localhost:8787), dark theme, auto-refreshing every 10s, module readiness grid, open-positions table, filterable alert feed with coin/platform links per alert — **not raw CMD output**, already close to what was asked for
+- [ ] **Missing: trade/fill history** — no record of individual buy/sell executions (tx signature, filled tokens, filled USD, timestamp) anywhere in the UI
+- [ ] **Missing: realized P&L** — `position_state.close_position()` already computes `pnl_usd` on close, but closed positions aren't shown anywhere; only open positions render
+- [ ] **Missing: closed-positions history table** — needed to see what actually happened over time, not just the live snapshot
+- [ ] Needs a small backend addition: a running trade log (buy/sell events with tx hash + real filled amount, which now exist thanks to tonight's fill-recording work) that the dashboard can read and render
 
 ## Genuinely blocked on more groundwork, not just more typing
 
-- [ ] **Robinhood Chain (buy + sell)** — Uniswap v4's Universal Router needs pool key data (fee tier, tick spacing, hooks address) this system doesn't currently fetch per-token. Needs a real RHC pool lookup or one confirmed real swap's params to copy from before writing this safely.
+- [ ] Robinhood Chain (buy + sell) — Uniswap v4 needs pool key data (fee tier, tick spacing, hooks) this system doesn't fetch per-token yet
 - [ ] Re-run Solana/RHC backtest once MadeOnSol's rate limit clears
 - [ ] 和平熊猫 "LP/curve unknown" — likely duplicate contracts sharing a display name
 
 ## Best-in-class recommendations (unstarted)
 
-1. **Speed** — switch Layer 0b from REST polling to Mobula's real-time Pulse WebSocket stream
-2. **Backtest depth** — build a real multi-coin backtest set (dozens of gems + rugs, not just 2 coins)
-3. **Coverage ceiling** — MadeOnSol free-tier IP-rotation limit; decide on paid tier or second data source
+1. Speed — Layer 0b REST polling → Mobula's real-time Pulse WebSocket stream
+2. Backtest depth — real multi-coin set (dozens of gems + rugs, not just 2)
+3. Coverage ceiling — MadeOnSol free-tier IP-rotation limit; paid tier or second data source
 
-## Still separate from all of the above
+## Tests still left (real, not mocked)
 
-- `entrypoint.py`'s buy/fill logic is wired and tested, but `entrypoint.py` itself is still NOT called from `scheduler.py`'s live poll loop — that wiring, and turning `EXECUTION_ENABLED=true`, are both deliberately separate, later steps.
+- [ ] One small real Solana buy on a live network (currently only tested against mocked RPC)
+- [ ] One small real Solana sell on a live network
+- [ ] One small real BSC buy on a live network
+- [ ] One small real BSC sell on a live network (exercises the approve+swap two-step flow for real)
+- [ ] A real moonbag trim firing against a real live position, not the mocked end-to-end run done tonight
+- [ ] `entrypoint.py` wired into `scheduler.py`'s actual live poll loop and run through a real cycle (currently callable but not called by anything live)
+- [ ] Dashboard verified against real trade/fill data once the trade-log addition above is built
+- [ ] Solana/RHC backtest re-run once MadeOnSol's rate limit clears
 
-## Before this touches real money
+## Before any of this touches real money
 
-Every buy/sell path above has only ever run against mocked RPC responses in this session — never a real live network. Keep `EXECUTION_ENABLED=false` until at least one small, real test swap succeeds on each chain, each direction (buy and sell).
+`EXECUTION_ENABLED` stays `false` until the 4 real test swaps above succeed — mocked tests prove the logic is right, not that a real node behaves identically.
