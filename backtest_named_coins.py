@@ -80,7 +80,7 @@ def score_bsc_by_name(names: list) -> dict:
             out[n] = {"error": "MOBULA_API_KEY not set"}
         return out
     try:
-        raw = fetch_mobula_pulse("bnb:bnb")
+        raw = fetch_mobula_pulse("evm:56")  # BSC -- evm:<numeric chainId> is Mobula's real format (bug #4, fixed Sept 24 2026); "bnb:bnb" was never valid
     except Exception as e:
         for n in names:
             out[n] = {"error": f"network error: {e}"}

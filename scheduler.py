@@ -177,7 +177,7 @@ def _safe(fn, *args, **kwargs):
 # worst case -- see README's call-budget section.
 LAYER8_MAX_DEEP_SCORES_PER_SLOW_CYCLE = 3
 
-MOBULA_PULSE_CHAINS = [("bsc", "bnb:bnb"), ("base", "base:base")]  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- TON/ETH still dropped, scope cut Sept 22, 2026
+MOBULA_PULSE_CHAINS = [("bsc", "evm:56"), ("base", "evm:8453")]  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- TON/ETH still dropped, scope cut Sept 22, 2026. evm:<numeric chainId> is Mobula's real chain-id format (bug #4, fixed Sept 24 2026) -- "bnb:bnb"/"base:base" were never valid and caused a raw 500.
 
 
 def readiness_report() -> dict:

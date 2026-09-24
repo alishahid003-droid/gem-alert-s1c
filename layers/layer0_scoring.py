@@ -259,7 +259,7 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
 
 
 def fetch_mobula_pulse(chain_id: str) -> dict:
-    """chain_id examples: 'base:base', 'bnb:bnb', 'ethereum:ethereum'.
+    """chain_id examples: 'evm:8453' (Base), 'evm:56' (BSC), 'evm:1' (Ethereum).
     TON coverage is unconfirmed in Mobula's public docs as of this build --
     flagged in README, code path left in place for when Ali's key can confirm it.
 
@@ -290,6 +290,19 @@ def fetch_mobula_pulse(chain_id: str) -> dict:
         params={"chainId": chain_id, "assetMode": "false", "model": "default"},
     )
     return result
+# Bug #4 fixed Sept 24 2026 (found after #1-#3 still left a 500): the chain_id
+# VALUES every caller passed in were wrong. Per Mobula's own REST reference
+# (docs.mobula.io/rest-api-reference/endpoint/pulse-get), EVM chains are
+# addressed as `evm:<numeric chainId>` (their own example: evm:8453 for
+# Base) -- NOT `base:base` / `bnb:bnb` / `ethereum:ethereum`, which were
+# never valid Mobula chain identifiers. Mobula's backend throws an
+# unhandled 500 on an unrecognized chain id instead of a clean 400 -- which
+# is exactly what made this look like a server-side outage for 3 fix
+# attempts. The rest of this codebase already knew the right format (see
+# the evm:4663 / Robinhood Chain convention in utils/swap_quotes.py /
+# README) -- this call site just never matched it. Fixed at every caller:
+# scan_stage1 below, scheduler.py's MOBULA_PULSE_CHAINS, and
+# backtest_named_coins.py.
 
 
 def flatten_mobula_pulse_response(pulse_json) -> list:
@@ -370,7 +383,7 @@ def scan_stage1(mints_by_chain: dict) -> list:
         )
         results.append({"chain": "solana", "address": mint, "score": score_token(sig)})
 
-    for chain, chain_id in [("bsc", "bnb:bnb"), ("base", "base:base")]:  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- ethereum/ton still dropped
+    for chain, chain_id in [("bsc", "evm:56"), ("base", "evm:8453")]:  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- ethereum/ton still dropped. evm:<numeric chainId> is Mobula's real format (bug #4, fixed Sept 24 2026) -- "bnb:bnb"/"base:base" were never valid.
         for mint in mints_by_chain.get(chain, []):
             raw = fetch_mobula_pulse(chain_id)
             if not raw.get("ok"):

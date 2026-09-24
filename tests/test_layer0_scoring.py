@@ -156,5 +156,5 @@ def test_fetch_mobula_pulse_sends_bearer_prefixed_auth_header(monkeypatch):
     monkeypatch.setattr(l0, "get_json", fake_get_json)
     monkeypatch.setattr(l0.CONFIG, "mobula_api_key", "mob_test_key")
 
-    l0.fetch_mobula_pulse("bnb:bnb")
+    l0.fetch_mobula_pulse("evm:56")  # BSC in Mobula's real evm:<chainId> format (bug #4, fixed Sept 24 2026)
     assert captured["headers"]["Authorization"] == "Bearer mob_test_key"
