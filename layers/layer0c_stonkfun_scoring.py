@@ -194,6 +194,12 @@ def parse_stonkfun_tokens(payload: dict) -> list:
     tokens = payload.get("data") or payload.get("tokens") or []
     out = []
     for t in tokens:
+        if not isinstance(t, dict):
+            # StonkFun's /tokens list has been observed containing bare
+            # strings (e.g. plain mint addresses) alongside normal token
+            # objects. Skip anything that isn't a dict instead of crashing
+            # the whole poll cycle on .get().
+            continue
         quote_symbol = _extract_quote_symbol(t.get("quote"))
         if quote_symbol not in STONKFUN_ALLOWED_QUOTE_SYMBOLS:
             continue
@@ -335,7 +341,7 @@ def parse_stonkfun_token_detail(payload: dict) -> Optional[dict]:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else None
     token = data.get("token") if data else None
     launch = data.get("launch") if data else None
-    if not token or not launch:
+    if not isinstance(token, dict) or not isinstance(launch, dict):
         return None
     market = token.get("market") or {}
     quote_symbol = _extract_quote_symbol(token.get("quote"))
