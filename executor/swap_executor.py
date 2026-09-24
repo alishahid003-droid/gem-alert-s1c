@@ -102,6 +102,12 @@ class ExecutionResult:
     reason: str
     tx_signature: Optional[str] = None
     filled_usd: Optional[float] = None
+    filled_amount_tokens: Optional[float] = None  # REAL received quantity, parsed from the
+                                                    # confirmed tx -- not the requested/estimated
+                                                    # size. This is what moonbag.py's trim ladder
+                                                    # needs to compute real sell amounts; without
+                                                    # it, check_and_trim() reads amount_tokens=0
+                                                    # off the position and every trim is a no-op.
 
 
 def _refuse_unless_ready(chain: str) -> Optional[ExecutionResult]:
@@ -186,7 +192,9 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
         return ExecutionResult(False, f"sent but could not confirm (check signature manually): "
                                        f"{confirmed.get('reason')}", tx_signature=tx_sig)
 
-    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_sig, filled_usd=usd_amount)
+    filled_tokens = _get_solana_fill_amount(tx_sig, token_mint, pubkey_from_key=EXECUTOR_CONFIG.solana_private_key)
+    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_sig,
+                            filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
 
 
 def _confirm_solana_tx(signature: str, attempts: int = 10, delay_seconds: float = 2.0) -> dict:
@@ -209,6 +217,41 @@ def _confirm_solana_tx(signature: str, attempts: int = 10, delay_seconds: float 
                     return {"ok": True}
         time.sleep(delay_seconds)
     return {"ok": False, "reason": f"not confirmed after {attempts} polls ({attempts * delay_seconds:.0f}s)"}
+
+def _get_solana_fill_amount(tx_sig: str, token_mint: str, pubkey_from_key: str) -> Optional[float]:
+    """Reads the REAL number of tokens received in a confirmed buy, by
+    diffing postTokenBalances against preTokenBalances for our wallet's
+    entry for this specific mint -- not the quote's estimated outAmount,
+    which is a pre-trade estimate and can differ from the real fill under
+    slippage. Returns None (never a guess) if the transaction can't be
+    fetched or parsed; the caller then has a real tx_signature to check
+    manually rather than a silently wrong number feeding moonbag math."""
+    try:
+        wallet_pubkey = str(Keypair.from_bytes(base58.b58decode(pubkey_from_key)).pubkey())
+    except Exception:  # noqa: BLE001
+        return None
+
+    tx_result = rpc_call("solana", "getTransaction", [
+        tx_sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0},
+    ])
+    if not tx_result.get("ok"):
+        return None
+    meta = ((tx_result.get("result") or {}).get("meta")) or {}
+    pre_balances = meta.get("preTokenBalances") or []
+    post_balances = meta.get("postTokenBalances") or []
+
+    def _amount_for_owner(balances):
+        for b in balances:
+            if b.get("owner") == wallet_pubkey and b.get("mint") == token_mint:
+                ui = (b.get("uiTokenAmount") or {}).get("uiAmount")
+                if ui is not None:
+                    return float(ui)
+        return 0.0
+
+    pre_amount = _amount_for_owner(pre_balances)
+    post_amount = _amount_for_owner(post_balances)
+    delta = post_amount - pre_amount
+    return delta if delta > 0 else None
 
 
 PANCAKE_ROUTER_ABI = [
@@ -342,21 +385,70 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
     if not confirmed.get("ok"):
         return ExecutionResult(False, f"sent but could not confirm (check hash manually): "
                                        f"{confirmed.get('reason')}", tx_signature=tx_hash)
-    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash, filled_usd=usd_amount)
+    filled_tokens = _get_bsc_fill_amount(confirmed.get("receipt") or {}, token_checksum, account.address)
+    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
+                            filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+
+
+TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # keccak256("Transfer(address,address,uint256)"), verified via Web3.keccak
+
+
+def _get_bsc_fill_amount(receipt: dict, token_address: str, wallet_address: str) -> Optional[float]:
+    """Reads the REAL number of tokens received in a confirmed buy, by
+    scanning the receipt's Transfer event logs for one emitted BY the
+    token contract, TO our wallet -- not amountOutMin (which is
+    deliberately 0, since this router call has no slippage floor of its
+    own) and not a pre-trade estimate. Needs real on-chain decimals to
+    convert the raw log value, so this queries them fresh rather than
+    assuming 18 (most BEP-20s are 18, but the field itself is per-token
+    and assuming wrong here would corrupt every downstream trim calc)."""
+    from web3 import Web3  # type: ignore
+    logs = receipt.get("logs") or []
+    token_lower = token_address.lower()
+    wallet_padded = "0x" + wallet_address.lower().replace("0x", "").rjust(64, "0")
+    raw_value = None
+    for log in logs:
+        if (log.get("address") or "").lower() != token_lower:
+            continue
+        topics = log.get("topics") or []
+        if not topics or topics[0].lower() != TRANSFER_EVENT_TOPIC:
+            continue
+        if len(topics) < 3 or topics[2].lower() != wallet_padded:
+            continue  # not a transfer TO our wallet
+        try:
+            raw_value = int(log.get("data"), 16)
+        except (TypeError, ValueError):
+            continue
+    if raw_value is None:
+        return None
+
+    token = Web3().eth.contract(address=Web3.to_checksum_address(token_lower), abi=ERC20_ABI)
+    decimals_calldata = _encode_router_call(token, "decimals", [])
+    decimals_result = rpc_call("bsc", "eth_call", [{"to": token_address, "data": decimals_calldata}, "latest"])
+    if not decimals_result.get("ok"):
+        return None
+    try:
+        decimals = int(decimals_result["result"], 16)
+    except (TypeError, ValueError):
+        return None
+    return raw_value / (10 ** decimals)
 
 
 def _confirm_evm_tx(chain: str, tx_hash: str, attempts: int = 10, delay_seconds: float = 3.0) -> dict:
     """Polls eth_getTransactionReceipt until the tx is mined and checks
     status == 1 (success) vs 0 (reverted on-chain -- e.g. a honeypot
     sell-blocking transfer, or slippage). A revert must never be reported
-    as a successful buy even though it was successfully SUBMITTED."""
+    as a successful buy even though it was successfully SUBMITTED. On
+    success, also returns the full receipt (under "receipt") so callers
+    that need the real logs (e.g. _get_bsc_fill_amount) don't have to
+    re-fetch it."""
     import time
     for _ in range(attempts):
         receipt = rpc_call(chain, "eth_getTransactionReceipt", [tx_hash])
         if receipt.get("ok") and receipt.get("result") is not None:
             status = receipt["result"].get("status")
             if status == "0x1":
-                return {"ok": True}
+                return {"ok": True, "receipt": receipt["result"]}
             if status == "0x0":
                 return {"ok": False, "reason": "transaction was mined but reverted on-chain (status 0x0)"}
         time.sleep(delay_seconds)

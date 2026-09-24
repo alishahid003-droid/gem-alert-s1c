@@ -49,6 +49,25 @@ def has_stage(chain: str, token: str, stage: str) -> bool:
     return bool(pos and stage in pos.get("stages", {}))
 
 
+def record_fill(chain: str, token: str, amount_tokens: Optional[float]):
+    """Adds a REAL, on-chain-confirmed token quantity to the position's
+    running total -- called once per successful buy, with
+    ExecutionResult.filled_amount_tokens (never the requested USD size).
+    Without this, moonbag.check_and_trim() reads amount_tokens=0 off every
+    position and every trim silently sells nothing. A None or non-positive
+    amount is deliberately ignored rather than zeroing out an existing
+    total -- a fill-parsing failure on one call shouldn't erase a real
+    quantity recorded by an earlier one (e.g. Stage 1 filled fine, Stage 2's
+    fill-amount parse failed for an unrelated reason)."""
+    if amount_tokens is None or amount_tokens <= 0:
+        return
+    pos = get_position(chain, token)
+    if not pos:
+        return
+    pos["amount_tokens"] = pos.get("amount_tokens", 0.0) + amount_tokens
+    state.set_value(_key(chain, token), pos)
+
+
 def close_position(chain: str, token: str, reason: str, exit_usd: Optional[float] = None):
     pos = get_position(chain, token)
     if not pos:
