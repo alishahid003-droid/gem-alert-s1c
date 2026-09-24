@@ -77,30 +77,54 @@ def score_token(sig: RawSignals) -> ScoreResult:
         if reason:
             reasons.append(reason)
 
-    # Holder concentration (weight 20)
+    # Reweighted Sept 25 2026 -- caught live: once bug #5's field-name fix
+    # (and its own correction) started reading REAL renounced/isProxy data,
+    # both real winners from Ali's Fomo screenshot scored band=C (46/100)
+    # DESPITE having strong momentum (huge vol/liq, near-zero bundler/sniper
+    # %) -- because renounced=False and isProxy=True were each zeroing out
+    # a 20-point bucket. That data is honest, not a bug: these coins really
+    # do have an active owner and a mutable contract. But the old weights
+    # (40/100 combined on LP-mutability + mint/freeze authority) assume
+    # you're evaluating a long-term hold. Ali's system exists to catch a
+    # coin WHILE it's pumping and get in/out fast (S1c Fomo copy-trading,
+    # manual buy/sell) -- almost no coin has renounced ownership in that
+    # exact early window; renouncing (if it happens) comes later. Scoring
+    # that near-universal state as a full zero on 40% of the total was
+    # punishing the exact coins this system exists to catch.
+    # Rebalanced: security flags (concentration/mutability/authority) still
+    # count -- a coin can still lose real points here -- but momentum and
+    # organic-growth signals (vol/liq, holder growth, bundler/sniper %,
+    # i.e. "is this actually catching fire right now") now carry the
+    # majority of the score, since that's what a sniper needs to weight
+    # most for a fast in/out play. Old -> new weights: top10 20->15,
+    # LP/curve 20->10, mint/freeze 20->10, vol/liq 15->25, holder growth
+    # 10->20, bundler/sniper 15->20 (unchanged total: 100). Unknown-signal
+    # fallback credit kept at the same FRACTION of its weight as before.
+
+    # Holder concentration (weight 15)
     if sig.top10_holder_pct is not None:
-        w = 20
+        w = 15
         earned = w * max(0.0, 1.0 - sig.top10_holder_pct / 0.6)  # 0 pts if top10 >= 60%
         add(w, earned, f"top10 holds {sig.top10_holder_pct*100:.1f}%")
     else:
-        add(20, 10, "top10 concentration unknown -- scored neutral")
+        add(15, 7.5, "top10 concentration unknown -- scored neutral")
 
-    # LP lock / bonding curve health (weight 20)
+    # LP lock / bonding curve (contract mutability) health (weight 10)
     if sig.lp_locked_or_curve_healthy is not None:
-        w = 20
+        w = 10
         add(w, w if sig.lp_locked_or_curve_healthy else 0,
             "LP locked / curve healthy" if sig.lp_locked_or_curve_healthy else "LP unlocked / curve unhealthy")
     else:
-        add(20, 8, "LP/curve status unknown -- scored low-neutral")
+        add(10, 4, "LP/curve status unknown -- scored low-neutral")
 
-    # Mint/freeze/update authority (weight 20)
+    # Mint/freeze/update authority (weight 10)
     auth_bits = [b for b in (sig.mint_authority_revoked, sig.freeze_authority_revoked) if b is not None]
     if auth_bits:
-        w = 20
+        w = 10
         earned = w * (sum(1 for b in auth_bits if b) / len(auth_bits))
         add(w, earned, f"authority revoked: {sum(1 for b in auth_bits if b)}/{len(auth_bits)}")
     else:
-        add(20, 6, "mint/freeze authority unknown -- scored low-neutral")
+        add(10, 3, "mint/freeze authority unknown -- scored low-neutral")
 
     # Volume-to-liquidity trend (weight 15) -- extreme ratios (wash trading /
     # about to rug) score low; moderate healthy ratio scores high.
@@ -120,7 +144,7 @@ def score_token(sig: RawSignals) -> ScoreResult:
     # -- worth revisiting once more named coins can be scored (MadeOnSol
     # rate limit resets, more BSC/Base winners run through this).
     if sig.vol_to_liq_ratio is not None:
-        w = 15
+        w = 25
         r = sig.vol_to_liq_ratio
         if r < 0.2:
             earned = w * 0.3   # dead / no real trading
@@ -130,23 +154,23 @@ def score_token(sig: RawSignals) -> ScoreResult:
             earned = w * max(0.3, 1.0 - (r - 15.0) / 150.0)  # gentle decay, floors at 0.3 not 0
         add(w, earned, f"vol/liq ratio {r:.2f}")
     else:
-        add(15, 6, "vol/liq trend unknown -- scored low-neutral")
+        add(25, 10, "vol/liq trend unknown -- scored low-neutral")
 
-    # Holder growth rate (weight 10)
+    # Holder growth rate (weight 20)
     if sig.holder_growth_rate_per_hr is not None:
-        w = 10
+        w = 20
         earned = w * min(1.0, sig.holder_growth_rate_per_hr / 30.0)
         add(w, earned, f"+{sig.holder_growth_rate_per_hr:.0f} holders/hr")
     else:
-        add(10, 4, "holder growth unknown -- scored low-neutral")
+        add(20, 8, "holder growth unknown -- scored low-neutral")
 
-    # Bundler/sniper % at launch (weight 15)
+    # Bundler/sniper % at launch (weight 20)
     if sig.bundler_sniper_pct is not None:
-        w = 15
+        w = 20
         earned = w * max(0.0, 1.0 - sig.bundler_sniper_pct / 0.5)  # 0 pts if >=50%
         add(w, earned, f"bundler/sniper {sig.bundler_sniper_pct*100:.1f}%")
     else:
-        add(15, 6, "bundler/sniper % unknown -- scored low-neutral")
+        add(20, 8, "bundler/sniper % unknown -- scored low-neutral")
 
     raw_score = (points / max_points) * 100 if max_points else 0
     score = int(round(raw_score))
