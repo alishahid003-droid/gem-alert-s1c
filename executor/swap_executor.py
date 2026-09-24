@@ -75,6 +75,7 @@ money, for all three chains at once.
 from dataclasses import dataclass
 from typing import Optional
 
+import state
 from config import CONFIG
 from utils.http import get_json, post_json
 from executor.config import EXECUTOR_CONFIG
@@ -108,6 +109,23 @@ class ExecutionResult:
                                                     # needs to compute real sell amounts; without
                                                     # it, check_and_trim() reads amount_tokens=0
                                                     # off the position and every trim is a no-op.
+
+
+def _log_trade(side: str, chain: str, token: str, result: "ExecutionResult", reason: Optional[str] = None):
+    """Feeds the dashboard's Trade History table (Tasks Left #3/#6, Sept 25
+    2026) -- called once per real attempted buy/sell right where the
+    ExecutionResult is final, success or failure, so the dashboard shows
+    what was actually tried, not just what worked. Best-effort: a logging
+    failure must never take down a real trade in flight, so this is
+    deliberately wrapped and swallows its own errors."""
+    try:
+        state.log_trade_event(
+            side=side, chain=chain, token=token, ok=result.ok, reason=reason or result.reason,
+            amount_tokens=result.filled_amount_tokens, usd_amount=result.filled_usd,
+            tx_signature=result.tx_signature,
+        )
+    except Exception:  # noqa: BLE001 -- logging must never break a real trade
+        pass
 
 
 def _refuse_unless_ready(chain: str) -> Optional[ExecutionResult]:
@@ -193,8 +211,10 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
                                        f"{confirmed.get('reason')}", tx_signature=tx_sig)
 
     filled_tokens = _get_solana_fill_amount(tx_sig, token_mint, pubkey_from_key=EXECUTOR_CONFIG.solana_private_key)
-    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_sig,
-                            filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+    result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_sig,
+                              filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+    _log_trade("buy", "solana", token_mint, result)
+    return result
 
 
 def _confirm_solana_tx(signature: str, attempts: int = 10, delay_seconds: float = 2.0) -> dict:
@@ -386,8 +406,10 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
         return ExecutionResult(False, f"sent but could not confirm (check hash manually): "
                                        f"{confirmed.get('reason')}", tx_signature=tx_hash)
     filled_tokens = _get_bsc_fill_amount(confirmed.get("receipt") or {}, token_checksum, account.address)
-    return ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
-                            filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+    result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
+                              filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+    _log_trade("buy", "bsc", token_checksum, result)
+    return result
 
 
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # keccak256("Transfer(address,address,uint256)"), verified via Web3.keccak
@@ -485,11 +507,15 @@ def execute_sell(chain: str, token_address: str, amount_tokens: float, reason: s
     if guard:
         return guard
     if chain == "solana":
-        return _sell_solana(token_address, amount_tokens)
-    if chain == "bsc":
-        return _sell_bsc(token_address, amount_tokens)
-    return ExecutionResult(False, f"no sell path implemented for chain '{chain}' yet "
-                                   f"(reason for this sell attempt: {reason})")
+        result = _sell_solana(token_address, amount_tokens)
+    elif chain == "bsc":
+        result = _sell_bsc(token_address, amount_tokens)
+    else:
+        result = ExecutionResult(False, f"no sell path implemented for chain '{chain}' yet "
+                                         f"(reason for this sell attempt: {reason})")
+    result.filled_amount_tokens = result.filled_amount_tokens or (amount_tokens if result.ok else None)
+    _log_trade("sell", chain, token_address, result, reason=reason)
+    return result
 
 
 def _sell_solana(token_mint: str, amount_tokens: float) -> ExecutionResult:
@@ -536,7 +562,40 @@ def _sell_solana(token_mint: str, amount_tokens: float) -> ExecutionResult:
     if not swap_resp.get("ok"):
         return ExecutionResult(False, f"jupiter sell swap-tx build failed: status {swap_resp.get('status_code')}")
 
-    return _sign_and_send_solana_swap(swap_resp)
+    result = _sign_and_send_solana_swap(swap_resp)
+    if result.ok and result.tx_signature:
+        # Real SOL received, from the confirmed tx's own balance diff (not the
+        # quote's pre-trade estimate) -- this is what was missing before Sept 25,
+        # 2026: filled_usd was never set on sells, so every close_position() and
+        # moonbag trim downstream computed pnl_usd/exit_usd off of None and
+        # silently produced no realized-P&L number at all.
+        sol_received = _get_solana_native_sol_delta(result.tx_signature)
+        if sol_received is not None:
+            sol_price = _sol_price_usd()
+            if sol_price:
+                result.filled_usd = sol_received * sol_price
+    return result
+
+
+def _get_solana_native_sol_delta(tx_sig: str) -> Optional[float]:
+    """Real native-SOL balance change for the fee-payer account (always
+    accountKeys[0]/preBalances[0]/postBalances[0] in a Solana transaction,
+    by protocol convention -- Jupiter builds the swap tx with our wallet as
+    fee payer) across a confirmed sell. This is the actual SOL received,
+    net of the tx fee, read from the chain itself -- not the quote's
+    pre-trade estimate."""
+    tx_result = rpc_call("solana", "getTransaction", [
+        tx_sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0},
+    ])
+    if not tx_result.get("ok"):
+        return None
+    meta = ((tx_result.get("result") or {}).get("meta")) or {}
+    pre = meta.get("preBalances") or []
+    post = meta.get("postBalances") or []
+    if not pre or not post:
+        return None
+    delta_lamports = post[0] - pre[0]
+    return delta_lamports / 1_000_000_000 if delta_lamports > 0 else None
 
 
 def _sign_and_send_solana_swap(swap_resp: dict) -> ExecutionResult:
@@ -651,6 +710,31 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
                                            f"check allowance manually before retrying: {confirmed.get('reason')}")
 
     router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_SELL_ABI)
+
+    # Estimated BNB-out via the router's own getAmountsOut, taken right before
+    # the swap -- used only to price filled_usd for the dashboard/realized-P&L
+    # (Tasks Left #3/#4, Sept 25 2026); this is a pre-trade estimate, not a
+    # real balance diff like the Solana sell path gets, since PancakeSwap V2
+    # sends native BNB via an internal call that doesn't show up as a log --
+    # still real and quote-derived, not a guess, and far better than the
+    # previous behavior of leaving filled_usd unset on every BSC sell.
+    filled_usd = None
+    try:
+        amounts_out_calldata = _encode_router_call(router, "getAmountsOut", [
+            raw_amount, [token_checksum, Web3.to_checksum_address(WBNB_BSC)],
+        ])
+        amounts_out_result = rpc_call("bsc", "eth_call", [{"to": router_addr, "data": amounts_out_calldata}, "latest"])
+        if amounts_out_result.get("ok"):
+            raw = amounts_out_result.get("result")
+            if isinstance(raw, str) and raw.startswith("0x"):
+                decoded = w3.codec.decode(["uint256[]"], bytes.fromhex(raw[2:]))
+                bnb_out_wei = decoded[0][1]
+                bnb_price = _bnb_price_usd()
+                if bnb_price:
+                    filled_usd = (bnb_out_wei / 10**18) * bnb_price
+    except Exception:  # noqa: BLE001 -- pricing must never block a real sell
+        filled_usd = None
+
     deadline = int(__import__("time").time()) + 300
     swap_calldata = _encode_router_call(router, "swapExactTokensForETHSupportingFeeOnTransferTokens", [
         raw_amount, 0, [token_checksum, Web3.to_checksum_address(WBNB_BSC)], account.address, deadline,
@@ -663,7 +747,8 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
     if not confirmed.get("ok"):
         return ExecutionResult(False, f"sell sent but could not confirm (check hash manually): "
                                        f"{confirmed.get('reason')}", tx_signature=swap_result.tx_signature)
-    return ExecutionResult(True, "sell submitted and confirmed", tx_signature=swap_result.tx_signature)
+    return ExecutionResult(True, "sell submitted and confirmed", tx_signature=swap_result.tx_signature,
+                            filled_usd=filled_usd)
 
 
 def _sign_and_send_bsc_tx(account, to_address: str, value_wei: int, calldata: str) -> ExecutionResult:

@@ -96,6 +96,36 @@ def list_open_positions() -> list:
     return open_positions
 
 
+def list_closed_positions(limit: int = 100) -> list:
+    """Mirrors list_open_positions() but for status == 'closed' -- feeds
+    the dashboard's Closed Positions table (Tasks Left #3/#5, Sept 25
+    2026). Newest-closed first."""
+    index = state.get_value("exec_position_index") or []
+    closed = []
+    for key in index:
+        pos = state.get_value(key)
+        if pos and pos.get("status") == "closed":
+            closed.append(pos)
+    closed.sort(key=lambda p: p.get("closed_ts", 0), reverse=True)
+    return closed[:limit]
+
+
+def realized_pnl_summary() -> dict:
+    """Sum of pnl_usd across every closed position that has one (a
+    position closed without a priceable exit_usd -- e.g. a sell whose
+    filled_usd genuinely couldn't be computed -- is excluded from the
+    total rather than counted as 0, so the number stays honest)."""
+    closed = list_closed_positions(limit=100000)
+    priced = [p for p in closed if p.get("pnl_usd") is not None]
+    total = sum(p["pnl_usd"] for p in priced)
+    wins = sum(1 for p in priced if p["pnl_usd"] > 0)
+    return {
+        "closed_count": len(closed), "priced_count": len(priced),
+        "total_realized_pnl_usd": total, "wins": wins,
+        "losses": len(priced) - wins,
+    }
+
+
 def _index_add(chain: str, token: str):
     index = state.get_value("exec_position_index") or []
     key = _key(chain, token)

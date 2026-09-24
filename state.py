@@ -194,6 +194,37 @@ def get_alert_feed(limit: int = 100) -> list:
     return list(reversed(feed))[:limit]  # newest first
 
 
+# --- Dashboard: global rolling trade log (Tasks Left #3/#6, Sept 25 2026 --
+# "dashboard should show... records of buy, sell open positions realized
+# profit"). Same shape/pattern as the alert feed above: one global
+# append-only list, capped both by age and count, newest first on read. One
+# entry per real execute_buy_*/execute_sell() attempt from swap_executor.py
+# (see its _log_trade helper) -- success AND failure both logged, so the
+# dashboard shows what was actually attempted, not just what worked. ---
+TRADE_LOG_MAX_AGE_SECONDS = 30 * 24 * 3600
+TRADE_LOG_MAX_ITEMS = 500
+TRADE_LOG_KEY = "dashboard_trade_log"
+
+
+def log_trade_event(side: str, chain: str, token: str, ok: bool, reason: str,
+                     amount_tokens: Optional[float] = None, usd_amount: Optional[float] = None,
+                     tx_signature: Optional[str] = None, ts: Optional[float] = None):
+    ts = ts if ts is not None else time.time()
+    log = get_value(TRADE_LOG_KEY) or []
+    log.append({
+        "ts": ts, "side": side, "chain": chain, "token": token, "ok": ok, "reason": reason,
+        "amount_tokens": amount_tokens, "usd_amount": usd_amount, "tx_signature": tx_signature,
+    })
+    cutoff = time.time() - TRADE_LOG_MAX_AGE_SECONDS
+    log = [t for t in log if t["ts"] >= cutoff][-TRADE_LOG_MAX_ITEMS:]
+    set_value(TRADE_LOG_KEY, log)
+
+
+def get_trade_log(limit: int = 100) -> list:
+    log = get_value(TRADE_LOG_KEY) or []
+    return list(reversed(log))[:limit]  # newest first
+
+
 # --- Layer 2b: self-computed pump.fun "smart money" wallet tracker (Ali,
 # Sept 23 2026 -- see layers/layer2b_pumpfun_smart_money.py's docstring for
 # why this exists instead of a third-party leaderboard). One record per

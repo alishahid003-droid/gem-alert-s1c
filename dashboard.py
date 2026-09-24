@@ -88,11 +88,26 @@ def build_data() -> dict:
     positions = position_state.list_open_positions()
     for p in positions:
         p["opened_fmt"] = _fmt_ts(p.get("opened_ts")) if p.get("opened_ts") else "?"
+
+    closed_positions = position_state.list_closed_positions(limit=100)
+    for p in closed_positions:
+        p["opened_fmt"] = _fmt_ts(p.get("opened_ts")) if p.get("opened_ts") else "?"
+        p["closed_fmt"] = _fmt_ts(p.get("closed_ts")) if p.get("closed_ts") else "?"
+
+    trade_log = state.get_trade_log(limit=200)
+    for t in trade_log:
+        t["ago"] = _ago(t["ts"])
+        t["ts_fmt"] = _fmt_ts(t["ts"])
+        t["explorer"] = links.build_links(t.get("chain"), t.get("token")) if t.get("tx_signature") else {}
+
     return {
         "generated_at": _fmt_ts(time.time()),
         "readiness": report,
         "alert_feed": feed,
         "open_positions": positions,
+        "closed_positions": closed_positions,
+        "trade_log": trade_log,
+        "realized_pnl": position_state.realized_pnl_summary(),
         "state_backend": state.backend() if hasattr(state, "backend") else "?",
     }
 
@@ -127,6 +142,10 @@ PAGE_TEMPLATE = """<!doctype html>
   .pill { background:#21252b; border-radius:4px; padding:2px 8px; font-size:11px; }
   .linkbtn { display:inline-block; background:#1f3a2e; color:#2ecc71; border:1px solid #2a5c40; border-radius:4px; padding:2px 7px; margin:1px 3px 1px 0; font-size:11px; text-decoration:none; }
   .linkbtn:hover { background:#2a5c40; }
+  .pos-pnl { color:#2ecc71; } .neg-pnl { color:#e74c3c; }
+  .side-buy { color:#2ecc71; font-weight:600; } .side-sell { color:#e67e22; font-weight:600; }
+  .ok-yes { color:#2ecc71; } .ok-no { color:#e74c3c; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; }
 </style></head>
 <body>
 <h1>S1c &mdash; Fomo Gem-Alert System</h1>
@@ -140,6 +159,21 @@ PAGE_TEMPLATE = """<!doctype html>
 <section>
   <h2>Open Positions</h2>
   <div id="positions"></div>
+</section>
+
+<section>
+  <h2>Realized P&amp;L</h2>
+  <div class="grid" id="pnl"></div>
+</section>
+
+<section>
+  <h2>Closed Positions</h2>
+  <div id="closed_positions"></div>
+</section>
+
+<section>
+  <h2>Trade History</h2>
+  <div id="trade_log"></div>
 </section>
 
 <section>
@@ -176,6 +210,16 @@ function render(data) {
   document.getElementById("meta").textContent =
     `Generated ${data.generated_at} · state backend: ${data.state_backend} · ${data.open_positions.length} open position(s) · ${data.alert_feed.length} recent alert(s)`;
 
+  const pnl = data.realized_pnl || {};
+  const pnlVal = pnl.total_realized_pnl_usd || 0;
+  document.getElementById("pnl").innerHTML = `
+    <div class="card"><h3>Total realized P&amp;L</h3>
+      <div class="${pnlVal >= 0 ? 'pos-pnl' : 'neg-pnl'}" style="font-size:20px;">$${pnlVal.toFixed(2)}</div>
+      <div class="note">${pnl.priced_count || 0} priced / ${pnl.closed_count || 0} closed positions</div></div>
+    <div class="card"><h3>Win / Loss</h3>
+      <div style="font-size:20px;"><span class="pos-pnl">${pnl.wins || 0}W</span> / <span class="neg-pnl">${pnl.losses || 0}L</span></div>
+      <div class="note">closed positions with a priced exit</div></div>`;
+
   const modules = flattenReadiness(data.readiness);
   document.getElementById("modules").innerHTML = modules.map(m => `
     <div class="card">
@@ -194,6 +238,32 @@ function render(data) {
       <td>${esc(p.opened_fmt)}</td>
       <td>${p.double_confirmed ? "yes" : "no"}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">no open positions</div>';
+
+  const closed = data.closed_positions || [];
+  document.getElementById("closed_positions").innerHTML = closed.length ? `
+    <table><thead><tr><th>Chain</th><th>Token</th><th>Opened</th><th>Closed</th><th>Reason</th><th>Entry $</th><th>Exit $</th><th>P&amp;L</th></tr></thead>
+    <tbody>${closed.map(p => `<tr>
+      <td>${esc(p.chain)}</td><td class="mono">${esc(p.token)}</td>
+      <td>${esc(p.opened_fmt)}</td><td>${esc(p.closed_fmt)}</td>
+      <td>${esc(p.close_reason)}</td>
+      <td>$${(p.total_usd || 0).toFixed(2)}</td>
+      <td>${p.exit_usd != null ? '$' + p.exit_usd.toFixed(2) : '<span class="note">unpriced</span>'}</td>
+      <td class="${(p.pnl_usd || 0) >= 0 ? 'pos-pnl' : 'neg-pnl'}">${p.pnl_usd != null ? '$' + p.pnl_usd.toFixed(2) : '-'}</td>
+    </tr>`).join("")}</tbody></table>` : '<div class="empty">no closed positions yet</div>';
+
+  const trades = data.trade_log || [];
+  document.getElementById("trade_log").innerHTML = trades.length ? `
+    <table><thead><tr><th>When</th><th>Side</th><th>Chain</th><th>Token</th><th>Amount</th><th>USD</th><th>OK</th><th>Reason</th><th>Tx</th></tr></thead>
+    <tbody>${trades.map(t => `<tr>
+      <td title="${esc(t.ts_fmt)}">${esc(t.ago)}</td>
+      <td class="side-${esc(t.side)}">${esc((t.side || "").toUpperCase())}</td>
+      <td>${esc(t.chain)}</td><td class="mono">${esc(t.token)}</td>
+      <td>${t.amount_tokens != null ? Number(t.amount_tokens).toLocaleString(undefined, {maximumFractionDigits: 4}) : '-'}</td>
+      <td>${t.usd_amount != null ? '$' + Number(t.usd_amount).toFixed(2) : '-'}</td>
+      <td class="${t.ok ? 'ok-yes' : 'ok-no'}">${t.ok ? 'yes' : 'no'}</td>
+      <td>${esc(t.reason)}</td>
+      <td>${t.tx_signature ? `<span class="mono" title="${esc(t.tx_signature)}">${esc(t.tx_signature.slice(0, 10))}&hellip;</span>` : '-'}</td>
+    </tr>`).join("")}</tbody></table>` : '<div class="empty">no trades logged yet</div>';
 
   const cats = ["all", ...new Set(data.alert_feed.map(a => a.category))];
   document.getElementById("filters").innerHTML = cats.map(c =>
