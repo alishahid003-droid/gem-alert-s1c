@@ -50,6 +50,21 @@ class Config:
     # Birdeye is explicitly optional-only per spec -- never a hard dependency.
     birdeye_api_key: Optional[str] = field(default_factory=lambda: _env("BIRDEYE_API_KEY"))
 
+    # GoPlus Security (added Sept 25 2026) -- fallback security scan for BSC/
+    # Base tokens when Mobula's own Pulse response has no "security" object
+    # for a token (caught live: Ali's real named-coin backtest had LP/curve
+    # and mint/freeze authority coming back "unknown" for BOTH real winners
+    # scored tonight -- Mobula genuinely wasn't returning security data for
+    # them, not a code bug). GoPlus's token_security API now requires an
+    # Authorization: Bearer <key> header per its current docs
+    # (docs.gopluslabs.io/reference/tokensecurityusingget_1) -- optional here,
+    # same pattern as every other key in this file: without it, this layer
+    # just tries the endpoint unauthenticated (works for some accounts/rate
+    # limits per GoPlus's own historical public access, unconfirmed for sure
+    # until tested live) and falls back to "unknown" exactly like before if
+    # that also fails -- never a hard dependency, never blocks scoring.
+    goplus_api_key: Optional[str] = field(default_factory=lambda: _env("GOPLUS_API_KEY"))
+
     # Upstash Redis (REST API) -- cross-poll-cycle state for Layers 6/8/9
     # (previous balances/prices/MC history to diff against). Chosen over
     # GitHub's own actions/cache (not built for read-update-save-back within
@@ -71,6 +86,7 @@ class Config:
     # docstring). Not gated behind a config flag/key like MadeOnSol/Mobula
     # because there's genuinely no account or key involved.
     stonkfun_base_url: str = "https://www.stonkfun.xyz/api/public/v1"
+    goplus_base_url: str = "https://api.gopluslabs.io/api/v1"
     binance_announcements_url: str = (
         "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
     )

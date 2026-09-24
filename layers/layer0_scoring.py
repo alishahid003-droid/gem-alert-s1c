@@ -205,9 +205,55 @@ def _factor_ok(factors: dict, key: str) -> Optional[bool]:
     return f.get("status") == "ok"
 
 
-def signals_from_mobula_pulse(pulse_item: dict) -> RawSignals:
+GOPLUS_CHAIN_IDS = {"bsc": "56", "base": "8453", "ethereum": "1"}  # GoPlus's numeric chain ids
+
+
+def fetch_goplus_security(chain: str, address: str) -> dict:
+    """Fallback security scan, added Sept 25 2026. Caught live: in Ali's real
+    named-coin backtest, Mobula's Pulse response had NO "security" object at
+    all for either real BSC winner scored -- lp_locked_or_curve_healthy,
+    mint_authority_revoked and freeze_authority_revoked all came back
+    "unknown" for both, costing ~26/100 points combined for reasons that
+    have nothing to do with the coin actually being risky (Mobula just
+    hadn't run/returned a security scan for them). This is a genuine data
+    gap, not something the Mobula field-name fixes (bug #5) could close.
+
+    GoPlus (docs.gopluslabs.io/reference/tokensecurityusingget_1) covers the
+    same ground independently -- is_mintable, is_blacklisted/is_honeypot,
+    lp_holders (lock detail), holder_count -- and is only called as a
+    fallback, one extra request per token, and only when Mobula's own
+    security data is genuinely missing (see signals_from_mobula_pulse
+    below), to stay inside this codebase's per-cycle call budget. Works
+    with or without CONFIG.goplus_api_key -- unauthenticated calls may
+    still succeed at a lower rate limit per GoPlus's own historical public
+    access; unconfirmed until run live. Never a hard dependency: any
+    failure here just leaves the caller's signals at None/unknown exactly
+    as before this fallback existed."""
+    goplus_chain = GOPLUS_CHAIN_IDS.get(chain)
+    if not goplus_chain or not address:
+        return {"ok": False, "reason": f"no GoPlus chain mapping for chain={chain!r}"}
+    headers = {}
+    if CONFIG.goplus_api_key:
+        headers["Authorization"] = f"Bearer {CONFIG.goplus_api_key}"
+    result = get_json(
+        f"{CONFIG.goplus_base_url}/token_security/{goplus_chain}",
+        headers=headers,
+        params={"contract_addresses": address},
+    )
+    if not result.get("ok"):
+        return {"ok": False, "reason": describe_fetch_failure({"raw": result})}
+    body = result.get("json") or {}
+    token = (body.get("result") or {}).get(address.lower())
+    if not token:
+        return {"ok": False, "reason": "address not present in GoPlus result"}
+    return {"ok": True, "data": token}
+
+
+def signals_from_mobula_pulse(pulse_item: dict, chain: str = None) -> RawSignals:
     """pulse_item is one token object from GET /api/2/pulse (Mobula), used for
-    Base/BSC/TON/Ethereum.
+    Base/BSC/TON/Ethereum. `chain` (e.g. "bsc"/"base") enables the GoPlus
+    fallback below -- optional/backward-compatible, omit it to skip the
+    fallback (e.g. in isolated unit tests).
 
     Bug #5 fixed Sept 24 2026: caught live when Ali flagged that real winning
     coins (from tonight's named-coin backtest, after bugs #1-#4 were fixed
@@ -224,7 +270,16 @@ def signals_from_mobula_pulse(pulse_item: dict) -> RawSignals:
         were always absent at pulse_item.get(...), so these 3 signals were
         unconditionally None/unknown for every token, every time.
     This was silently deflating every BSC/Base score since Layer 0b Mobula
-    scoring was written -- not just tonight's backtest."""
+    scoring was written -- not just tonight's backtest.
+
+    GoPlus fallback added Sept 25 2026: even after the bug #5 field-name fix,
+    Mobula's own "security" object was still absent entirely for both real
+    coins in tonight's backtest -- a real data gap, not a parsing bug. If
+    lp_locked_or_curve_healthy/mint_authority_revoked/freeze_authority_revoked
+    are ALL still None after reading Mobula's own data, and a chain+address
+    are available, this now tries fetch_goplus_security as a fallback before
+    giving up and returning None (== "unknown -- scored low-neutral" in
+    score_token)."""
     security = pulse_item.get("security") or {}
     top10 = pulse_item.get("top10Holdings")
     snipers = pulse_item.get("snipersCount", 0) or 0
@@ -233,11 +288,36 @@ def signals_from_mobula_pulse(pulse_item: dict) -> RawSignals:
     bundler_sniper_pct = None
     if holder_count:
         bundler_sniper_pct = min(1.0, (snipers + bundlers) / holder_count)
+
+    lp_locked = (not security.get("balanceMutable", False)) if "balanceMutable" in security else None
+    mint_revoked = security.get("noMintAuthority")
+    freeze_revoked = (not security.get("isBlacklisted")) if "isBlacklisted" in security else None
+
+    if lp_locked is None and mint_revoked is None and freeze_revoked is None:
+        address = pulse_item.get("address")
+        if chain and address:
+            gp = fetch_goplus_security(chain, address)
+            if gp.get("ok"):
+                d = gp["data"]
+                lp_holders = d.get("lp_holders") or []
+                if lp_holders:
+                    locked_pct = sum(
+                        float(h.get("percent", 0) or 0) for h in lp_holders if h.get("is_locked")
+                    )
+                    lp_locked = locked_pct >= 0.5  # majority of LP locked/burned counts as healthy
+                is_mintable = d.get("is_mintable")
+                if is_mintable is not None:
+                    mint_revoked = is_mintable == "0"  # GoPlus returns "0"/"1" strings
+                is_blacklisted = d.get("is_blacklisted")
+                is_honeypot = d.get("is_honeypot")
+                if is_blacklisted is not None or is_honeypot is not None:
+                    freeze_revoked = (is_blacklisted != "1") and (is_honeypot != "1")
+
     return RawSignals(
         top10_holder_pct=(top10 / 100.0) if top10 is not None else None,
-        lp_locked_or_curve_healthy=(not security.get("balanceMutable", False)) if "balanceMutable" in security else None,
-        mint_authority_revoked=security.get("noMintAuthority"),
-        freeze_authority_revoked=(not security.get("isBlacklisted")) if "isBlacklisted" in security else None,
+        lp_locked_or_curve_healthy=lp_locked,
+        mint_authority_revoked=mint_revoked,
+        freeze_authority_revoked=freeze_revoked,
         vol_to_liq_ratio=_safe_div(pulse_item.get("volume_24h"), pulse_item.get("liquidity")),
         holder_growth_rate_per_hr=None,  # needs a snapshot diff, wired in scheduler (holder census over time)
         bundler_sniper_pct=bundler_sniper_pct,
@@ -373,7 +453,7 @@ def score_mobula_pulse_items(chain: str, items: list) -> list:
     one call per chain per cycle, not one call per token -- see README.)"""
     results = []
     for item in items:
-        sig = signals_from_mobula_pulse(item)
+        sig = signals_from_mobula_pulse(item, chain)
         results.append({
             "chain": chain,
             "address": item.get("address"),
@@ -427,7 +507,7 @@ def scan_stage1(mints_by_chain: dict) -> list:
             if not match:
                 results.append({"chain": chain, "address": mint, "error": "not present in current pulse snapshot"})
                 continue
-            sig = signals_from_mobula_pulse(match)
+            sig = signals_from_mobula_pulse(match, chain)
             results.append({"chain": chain, "address": mint, "score": score_token(sig)})
 
     return results

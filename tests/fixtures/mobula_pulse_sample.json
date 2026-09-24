@@ -12,14 +12,16 @@
       "insidersHoldings": 5.0,
       "snipersCount": 4,
       "bundlersCount": 2,
-      "holderCount": 180,
-      "noMintAuthority": true,
-      "isBlacklisted": false,
-      "balanceMutable": false,
-      "buyTax": 0,
-      "sellTax": 0,
+      "holdersCount": 180,
+      "security": {
+        "noMintAuthority": true,
+        "isBlacklisted": false,
+        "balanceMutable": false,
+        "buyTax": 0,
+        "sellTax": 0
+      },
       "liquidity": 8400,
-      "volume24h": 12500
+      "volume_24h": 12500
     }
   ]
 }
