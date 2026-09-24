@@ -104,15 +104,30 @@ def score_token(sig: RawSignals) -> ScoreResult:
 
     # Volume-to-liquidity trend (weight 15) -- extreme ratios (wash trading /
     # about to rug) score low; moderate healthy ratio scores high.
+    #
+    # Recalibrated Sept 25 2026: caught live off Ali's named-coin backtest --
+    # once bugs #1-#5 were fixed and this ratio started reading real data,
+    # BOTH real BSC winners from Ali's own Fomo screenshot (和平熊猫: 89.35,
+    # 友谊使者: 33.93) scored 0/15 here. The old thresholds (healthy <=3.0,
+    # decayed to 0 by ~13) assume a high vol/liq ratio means wash trading --
+    # but for a coin in its first hours of going viral (exactly what this
+    # FOMO-copy-trading system is built to catch), a 30-90x ratio is what a
+    # real pump looks like, not a red flag. The old curve was zeroing out
+    # the exact signal the strategy is supposed to reward. Widened the
+    # healthy plateau and flattened the decay so a real early pump keeps
+    # real credit; only true extremes (~150x+) still trend toward the floor.
+    # Ali: these numbers came from 2 real data points, not a large backtest
+    # -- worth revisiting once more named coins can be scored (MadeOnSol
+    # rate limit resets, more BSC/Base winners run through this).
     if sig.vol_to_liq_ratio is not None:
         w = 15
         r = sig.vol_to_liq_ratio
         if r < 0.2:
-            earned = w * 0.3   # dead
-        elif r <= 3.0:
-            earned = w * 1.0   # healthy range
+            earned = w * 0.3   # dead / no real trading
+        elif r <= 15.0:
+            earned = w * 1.0   # healthy range, incl. early-pump velocity
         else:
-            earned = w * max(0.0, 1.0 - (r - 3.0) / 10.0)  # decays as it gets extreme
+            earned = w * max(0.3, 1.0 - (r - 15.0) / 150.0)  # gentle decay, floors at 0.3 not 0
         add(w, earned, f"vol/liq ratio {r:.2f}")
     else:
         add(15, 6, "vol/liq trend unknown -- scored low-neutral")
