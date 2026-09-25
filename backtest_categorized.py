@@ -65,8 +65,49 @@ category for the credibility % to be statistically meaningful, but growing:
   been independently verified and added yet -- DexScreener's own filters
   don't expose "current liquidity ~$0 but had real liquidity historically"
   directly, and guessing one from memory is against this session's
-  standing no-guessing rule. Two honest ways to keep growing this list,
-  NOT guessed/fabricated addresses:
+  standing no-guessing rule.
+
+  Sept 26 2026 -- Ali asked to check 8 more names: SI, ZCAT, JEANPHIL,
+  Stonk, BUTTCOIN, AMC, Moniter, GO. All 8 were researched live on
+  DexScreener (real token pages, real "Copy token address" controls, not
+  guesses). Result, name by name, and WHY each was or wasn't added:
+  - Monitor / "Monitoring the Situation" (mint
+    G8dUSvywefr4GvfFZBZiLHmbjnwjrrJPAnVifjj7pump): ADDED as "flat". Real,
+    1y3mo old, $29K mcap, $31K liquidity, $14 total 24h volume -- a token
+    that never mooned and never fully rugged, just went dormant. Exactly
+    what the "flat" category is for.
+  - JEANPHIL (mint GTBxUiw6wJdmmkCGZgRHLyYxqu1vG4KtRpeox6yDpump), GO /
+    "LESGO" (mint D1YZZg9dBZ7AbfknZVbaeVLto36eySwoFYEVhZrD4F4n): real,
+    verified addresses, but BOTH are still actively pumping right now (6d
+    old +70%/24h and 2d old +35%/24h respectively) with no settled
+    outcome yet -- same reason fresh DexScreener gainers were rejected
+    earlier this session (SPCX). Not added; could be revisited once/if
+    they either sustain (moonshot) or collapse (pump_dump).
+  - ZCAT / "Anonymous Cat" (mint HcRLc9VDgjLeK154xDawfb1dmVJ98DoSqcwTHGqiDeJR)
+    and STONK (mint 6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx): real,
+    verified addresses, both large established tokens ($64.8M and $271M
+    mcap) with real, intact liquidity, just showing ordinary daily
+    volatility (-16% and -14% over 24h). Not a moon, not a rug, not a
+    dump -- doesn't fit any of this list's three pass/fail categories, so
+    not added rather than forced into one.
+  - SI: AMBIGUOUS, not added. At least two real, unrelated tokens share
+    this ticker on Solana alone -- "Super Inu" SI/NVDAx (mint
+    DEW9dSN6QpWyNthphCpMmAbZP1Q4cEKR9xQXAri98WDP, ~$13M mcap) and a
+    separate SI/NVDAx3L pool (~$2M mcap) -- plus more SI pairs seen in
+    earlier research at yet other mcaps ($249K/$6.3M/$6.4M/$7.7M). No way
+    to tell which one Ali means without him supplying the exact address.
+  - AMC: AMBIGUOUS, not added. At least 5 unrelated real tokens share
+    this ticker: "African meme coin" (Solana, $220K mcap), a plain "AMC"
+    (Solana, $320K mcap, 2y+ old), "AMC" (BSC, $897K mcap, 5y+ old), "AI
+    Meta Coin" (BSC, $1.0M mcap), "A MEME CAT" AMC/AMCB (BSC, $3.1K
+    mcap). Same problem as SI -- needs the exact address from Ali.
+  - BUTTCOIN: UNRESOLVED, not added. No token with this exact ticker
+    turned up in DexScreener's current index at all (only unrelated
+    substring matches like "Buttbrain"). Same honest outcome as Mars
+    Coin below.
+
+  Two honest ways to keep growing this list, NOT guessed/fabricated
+  addresses:
   1. Ali pastes more real coins he knows the outcome of (same as he did for
      the Sept 24 2026 named-coin backtest) -- fastest, and he has direct
      first-hand knowledge of real addresses and real outcomes, especially
@@ -115,6 +156,13 @@ SOLANA_LABELED = [
     ("PAID", "solana", "98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump", "moonshot", False),
     ("PONS", "robinhood_chain", "0x39dBED3a2bd333467115dE45665cC57F813C4571", "moonshot", False),
     ("CASHCAT", "robinhood_chain", "0x020bfC650A365f8BB26819deAAbF3E21291018b4", "moonshot", False),
+    # Added Sept 26 2026 -- Ali asked to check "SI, ZCAT, JEANPHIL, Stonk,
+    # BUTTCOIN, AMC, Moniter, GO". Real research done for all 8 via live
+    # DexScreener token pages (not pair pages -- each address below is the
+    # token's own "Copy token address" control). Only ONE was added as a
+    # labeled entry -- see the long note above for why the other 7 were
+    # NOT added.
+    ("Monitor", "solana", "G8dUSvywefr4GvfFZBZiLHmbjnwjrrJPAnVifjj7pump", "flat", False),
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
