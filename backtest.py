@@ -28,6 +28,20 @@ import argparse
 import sys
 from collections import Counter
 
+# Same fix as scheduler.py/backtest_named_coins.py (Sept 24-25, 2026): load
+# .env BEFORE importing config, since config.py builds CONFIG from
+# os.environ at import time. Without this, MADEONSOL_API_KEY (and every
+# other .env-only secret) is invisible even when the real key is present in
+# .env -- this script previously only worked when run as a GitHub Actions
+# step (where the secret is a real env var, not a .env file). Fixed so it
+# also runs locally/on-device with a real .env, per Ali's Sept 25 2026
+# "clear the bugs and blockers" instruction.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from config import CONFIG
 from layers.layer1_deployer import fetch_deployer_alerts
 from layers.layer0_scoring import score_solana_mint
