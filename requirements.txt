@@ -8,3 +8,9 @@ tenacity>=8.2.3
 solders>=0.21.0
 base58>=2.1.1
 web3>=6.15.0
+
+# Part C (Sept 25, 2026) -- worker_pulse_websocket.py, the Layer 0b speed
+# upgrade (REST polling -> Mobula Pulse Stream V2 WebSocket). Only needed
+# to run that one worker -- requires a Growth/Enterprise Mobula plan, see
+# its module docstring.
+websockets>=12.0
