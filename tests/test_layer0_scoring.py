@@ -6,7 +6,8 @@ from layers.layer0_scoring import (
     signals_from_madeonsol_risk, signals_from_mobula_pulse, score_token,
     PREGRAD_SOL_BANDS, GRADUATED_OR_OTHER_BANDS, score_mobula_pulse_items,
     score_solana_mint, compute_holder_growth_rate_per_hr, fetch_dexscreener_vol_liq,
-    HOLDER_GROWTH_MIN_ELAPSED_SECONDS,
+    HOLDER_GROWTH_MIN_ELAPSED_SECONDS, fetch_goplus_security,
+    parse_goplus_solana_security,
 )
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -305,3 +306,142 @@ def test_score_mobula_pulse_items_records_holder_point_and_wires_growth_rate(tmp
 
     history = state_module.get_holder_history(address)
     assert len(history) == 2
+
+
+def test_parse_goplus_solana_security_mint_and_freeze_authority():
+    # Real shape confirmed live Sept 25 2026 against USDC's Solana mint
+    # (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v) -- status "1" means the
+    # authority is still live (NOT revoked), "0" means revoked.
+    data = {
+        "mintable": {"authority": [{"address": "X", "malicious_address": 0}], "status": "1"},
+        "freezable": {"authority": [], "status": "0"},
+    }
+    parsed = parse_goplus_solana_security(data)
+    assert parsed["mint_authority_revoked"] is False  # status "1" -- still mintable
+    assert parsed["freeze_authority_revoked"] is True  # status "0" -- freeze authority gone
+
+
+def test_parse_goplus_solana_security_lp_locked_uses_balance_not_percent():
+    # The live sample's lp_holders[].percent field was NOT a normal 0-100
+    # percentage for this token (values were in the hundreds of millions) --
+    # deliberately computed from "balance" instead, see module comment.
+    data = {
+        "lp_holders": [
+            {"balance": "800.0", "is_locked": 1, "percent": "999999999"},
+            {"balance": "200.0", "is_locked": 0, "percent": "111111111"},
+        ],
+    }
+    parsed = parse_goplus_solana_security(data)
+    assert parsed["lp_locked"] is True  # 800/1000 = 80% locked by balance, >= 0.5 threshold
+
+
+def test_parse_goplus_solana_security_lp_mostly_unlocked():
+    data = {
+        "lp_holders": [
+            {"balance": "100.0", "is_locked": 1},
+            {"balance": "900.0", "is_locked": 0},
+        ],
+    }
+    parsed = parse_goplus_solana_security(data)
+    assert parsed["lp_locked"] is False  # 100/1000 = 10% locked, below threshold
+
+
+def test_parse_goplus_solana_security_missing_or_malformed_fields_stay_none():
+    assert parse_goplus_solana_security({}) == {
+        "mint_authority_revoked": None, "freeze_authority_revoked": None, "lp_locked": None,
+    }
+    # malformed balance -- must not crash, must stay None rather than guess
+    parsed = parse_goplus_solana_security({"lp_holders": [{"balance": "not_a_number", "is_locked": 1}]})
+    assert parsed["lp_locked"] is None
+
+
+def test_fetch_goplus_security_solana_uses_correct_endpoint_and_case_sensitive_key(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    captured = {}
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        captured["url"] = url
+        captured["params"] = params
+        # Real endpoint has no /{chain_id} segment for Solana, unlike the EVM path
+        assert url.endswith("/solana/token_security")
+        return {"ok": True, "status_code": 200, "url": url,
+                "json": {"result": {mint: {"mintable": {"status": "0"}, "freezable": {"status": "0"}}}}}
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    result = fetch_goplus_security("solana", mint)
+    assert result["ok"] is True
+    assert result["data"]["mintable"]["status"] == "0"
+    assert captured["params"] == {"contract_addresses": mint}
+
+
+def test_score_solana_mint_falls_back_to_goplus_when_madeonsol_risk_is_tier_gated(monkeypatch):
+    # Real production scenario, Sept 25 2026: MadeOnSol's /risk 403s for
+    # Ali's BASIC-tier key ("tier_required") while /holders and /bundle
+    # succeed -- this is exactly when the GoPlus fallback should kick in.
+    import layers.layer0_scoring as l0
+
+    mint = "MINT123"
+    captured_kwargs = {}
+    real_signals_from_madeonsol_risk = l0.signals_from_madeonsol_risk
+
+    def spy_signals(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_signals_from_madeonsol_risk(*args, **kwargs)
+
+    monkeypatch.setattr(l0, "signals_from_madeonsol_risk", spy_signals)
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/risk"):
+            return {"ok": False, "status_code": 403, "url": url,
+                     "json": {"error": "tier_required", "message": "requires PRO tier"}}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
+        if url.endswith("/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": []}
+        if url.endswith("/solana/token_security"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {
+                "result": {mint: {"mintable": {"status": "0"}, "freezable": {"status": "0"},
+                                   "lp_holders": [{"balance": "900", "is_locked": 1},
+                                                  {"balance": "100", "is_locked": 0}]}}}}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l0.score_solana_mint(mint, "solana", is_pregraduation=False)
+    assert "error" not in result
+    assert captured_kwargs["goplus_mint_authority_revoked"] is True
+    assert captured_kwargs["goplus_freeze_authority_revoked"] is True
+    assert captured_kwargs["goplus_lp_locked"] is True
+
+
+def test_score_solana_mint_does_not_call_goplus_when_madeonsol_risk_succeeds(monkeypatch):
+    # Regression guard: GoPlus is a fallback for a real gap, never a
+    # second-guess of real MadeOnSol data -- must not even be called when
+    # /risk succeeds.
+    import layers.layer0_scoring as l0
+
+    calls = []
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        calls.append(url)
+        if url.endswith("/risk"):
+            return {"ok": True, "status_code": 200, "url": url, "json": _load("madeonsol_risk_sample.json")}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
+        if url.endswith("/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l0.score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    assert "error" not in result
+    assert not any("gopluslabs" in c or "solana/token_security" in c for c in calls)

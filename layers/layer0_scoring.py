@@ -206,7 +206,10 @@ def score_token(sig: RawSignals) -> ScoreResult:
 def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json: dict,
                                  is_pregraduation: bool, vol_to_liq_ratio: Optional[float] = None,
                                  liquidity_usd: Optional[float] = None,
-                                 holder_growth_rate_per_hr: Optional[float] = None) -> RawSignals:
+                                 holder_growth_rate_per_hr: Optional[float] = None,
+                                 goplus_mint_authority_revoked: Optional[bool] = None,
+                                 goplus_freeze_authority_revoked: Optional[bool] = None,
+                                 goplus_lp_locked: Optional[bool] = None) -> RawSignals:
     """risk_json from GET /tokens/{mint}/risk, holders_json from
     /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle.
 
@@ -225,16 +228,40 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
     count, and guessing an unconfirmed field name is exactly the class of
     bug that caused Mobula bug #5 (see that function's docstring) -- so this
     is left honestly unwired pending a real sample response, rather than
-    guessed."""
+    guessed.
+
+    goplus_mint_authority_revoked/goplus_freeze_authority_revoked/
+    goplus_lp_locked: real GoPlus-derived fallback values (see
+    parse_goplus_solana_security), added Sept 25 2026. MadeOnSol's own
+    /risk endpoint -- the only source for these 3 factors -- is gated
+    behind MadeOnSol's PRO tier; Ali's key is BASIC, so risk_json's
+    "factors" are empty for every Solana token, every time, until/unless
+    he upgrades. These 3 params are used ONLY when the MadeOnSol
+    factor-based value came back None (unknown) -- MadeOnSol's own data
+    always wins when it's actually present, this only fills a real gap,
+    never overrides real data."""
     factors = {f["key"]: f for f in risk_json.get("factors", [])} if risk_json else {}
     top10 = None
     if holders_json and "top10_share" in holders_json:
         top10 = holders_json["top10_share"] / 100.0
+
+    lp_locked_or_curve_healthy = None if is_pregraduation else _factor_ok(factors, "lp_lock")
+    if lp_locked_or_curve_healthy is None and not is_pregraduation:
+        lp_locked_or_curve_healthy = goplus_lp_locked
+
+    mint_authority_revoked = _factor_ok(factors, "mint_authority")
+    if mint_authority_revoked is None:
+        mint_authority_revoked = goplus_mint_authority_revoked
+
+    freeze_authority_revoked = _factor_ok(factors, "freeze_authority")
+    if freeze_authority_revoked is None:
+        freeze_authority_revoked = goplus_freeze_authority_revoked
+
     return RawSignals(
         top10_holder_pct=top10,
-        lp_locked_or_curve_healthy=None if is_pregraduation else _factor_ok(factors, "lp_lock"),
-        mint_authority_revoked=_factor_ok(factors, "mint_authority"),
-        freeze_authority_revoked=_factor_ok(factors, "freeze_authority"),
+        lp_locked_or_curve_healthy=lp_locked_or_curve_healthy,
+        mint_authority_revoked=mint_authority_revoked,
+        freeze_authority_revoked=freeze_authority_revoked,
         vol_to_liq_ratio=vol_to_liq_ratio,
         holder_growth_rate_per_hr=holder_growth_rate_per_hr,
         bundler_sniper_pct=(bundle_json.get("held_pct_of_supply", 0) / 100.0) if bundle_json else None,
@@ -333,6 +360,17 @@ def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
 
 GOPLUS_CHAIN_IDS = {"bsc": "56", "base": "8453", "ethereum": "1"}  # GoPlus's numeric chain ids
 
+# GoPlus's Solana token_security endpoint is a DIFFERENT URL shape from the
+# EVM one above -- confirmed live Sept 25 2026 via a real diagnostic run
+# (Ali's own terminal; the Cowork device bridge's network allowlist blocks
+# gopluslabs.io outright, so this had to be confirmed outside the bridge):
+#   GET https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses={mint}
+# (no /{chain_id} path segment -- "solana" is baked into the path itself),
+# and the result dict is keyed by the address EXACTLY as sent, not
+# lowercased -- unlike the EVM endpoint's hex addresses, a Solana base58
+# mint address is case-sensitive, so lowercasing it would silently break
+# the result lookup.
+
 
 def fetch_goplus_security(chain: str, address: str) -> dict:
     """Fallback security scan, added Sept 25 2026. Caught live: in Ali's real
@@ -355,24 +393,82 @@ def fetch_goplus_security(chain: str, address: str) -> dict:
     access; unconfirmed until run live. Never a hard dependency: any
     failure here just leaves the caller's signals at None/unknown exactly
     as before this fallback existed."""
-    goplus_chain = GOPLUS_CHAIN_IDS.get(chain)
-    if not goplus_chain or not address:
-        return {"ok": False, "reason": f"no GoPlus chain mapping for chain={chain!r}"}
+    if not address:
+        return {"ok": False, "reason": "no address given"}
     headers = {}
     if CONFIG.goplus_api_key:
         headers["Authorization"] = f"Bearer {CONFIG.goplus_api_key}"
-    result = get_json(
-        f"{CONFIG.goplus_base_url}/token_security/{goplus_chain}",
-        headers=headers,
-        params={"contract_addresses": address},
-    )
+
+    if chain == "solana":
+        url = f"{CONFIG.goplus_base_url}/solana/token_security"
+        result_key = address  # case-sensitive, see module note above
+    else:
+        goplus_chain = GOPLUS_CHAIN_IDS.get(chain)
+        if not goplus_chain:
+            return {"ok": False, "reason": f"no GoPlus chain mapping for chain={chain!r}"}
+        url = f"{CONFIG.goplus_base_url}/token_security/{goplus_chain}"
+        result_key = address.lower()
+
+    result = get_json(url, headers=headers, params={"contract_addresses": address})
     if not result.get("ok"):
         return {"ok": False, "reason": describe_fetch_failure({"raw": result})}
     body = result.get("json") or {}
-    token = (body.get("result") or {}).get(address.lower())
+    token = (body.get("result") or {}).get(result_key)
     if not token:
         return {"ok": False, "reason": "address not present in GoPlus result"}
     return {"ok": True, "data": token}
+
+
+# ---------------------------------------------------------------------------
+# Solana GoPlus signal parsing -- real wiring, Sept 25 2026. Real field
+# names confirmed via a live diagnostic run against
+# https://api.gopluslabs.io/api/v1/solana/token_security (a real USDC mint,
+# EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, run from Ali's own terminal
+# since the Cowork device bridge can't reach gopluslabs.io at all). NOT
+# guessed -- a sibling project (unrelated, found via web search) hit this
+# exact trap assuming mintable/freezable were nested as {"status": ...}
+# sub-objects with a different shape than what the live API actually
+# returns, and silently mis-parsed every token as a result. The real,
+# confirmed shape from the live sample:
+#   mintable:  {"authority": [...], "status": "1"}   -- "1" = CAN mint (authority live, i.e. NOT revoked), "0" = revoked
+#   freezable: {"authority": [...], "status": "1"}   -- same "1"/"0" convention
+#   lp_holders: [{"balance": "...", "is_locked": 0|1, ...}, ...] -- a list of
+#     LP-token holders, each either locked or not. NOTE: this sample's
+#     lp_holders[].percent field was NOT a normal 0-100 percentage (values
+#     were in the hundreds of millions for this particular mint) -- rather
+#     than guess what unit that's actually in, LP-lock health here is
+#     computed from the "balance" field instead (a real token-amount figure,
+#     unambiguous), as the fraction of total LP balance held by locked
+#     holders.
+# ---------------------------------------------------------------------------
+
+def parse_goplus_solana_security(data: dict) -> dict:
+    """data is the per-mint dict from fetch_goplus_security("solana", mint)'s
+    "data" key. Returns {"mint_authority_revoked": Optional[bool],
+    "freeze_authority_revoked": Optional[bool], "lp_locked": Optional[bool]}
+    -- any field GoPlus didn't return, or whose shape doesn't match what was
+    confirmed live, stays None (unknown) rather than being guessed."""
+    out = {"mint_authority_revoked": None, "freeze_authority_revoked": None, "lp_locked": None}
+
+    mintable = data.get("mintable")
+    if isinstance(mintable, dict) and "status" in mintable:
+        out["mint_authority_revoked"] = mintable["status"] == "0"
+
+    freezable = data.get("freezable")
+    if isinstance(freezable, dict) and "status" in freezable:
+        out["freeze_authority_revoked"] = freezable["status"] == "0"
+
+    lp_holders = data.get("lp_holders")
+    if isinstance(lp_holders, list) and lp_holders:
+        try:
+            total = sum(float(h.get("balance", 0) or 0) for h in lp_holders)
+            locked = sum(float(h.get("balance", 0) or 0) for h in lp_holders if h.get("is_locked"))
+            if total > 0:
+                out["lp_locked"] = (locked / total) >= 0.5
+        except (TypeError, ValueError):
+            pass  # malformed balance field -- stay None rather than guess
+
+    return out
 
 
 def signals_from_mobula_pulse(pulse_item: dict, chain: str = None,
@@ -658,9 +754,31 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
         if liquidity_usd:
             vol_to_liq_ratio = dex["volume_24h"] / liquidity_usd
 
+    # GoPlus fallback (Sept 25 2026, see parse_goplus_solana_security's
+    # docstring) -- only called when MadeOnSol's own /risk call actually
+    # failed (the real, live symptom of Ali's BASIC-tier key hitting
+    # MadeOnSol's PRO gate). Never called when /risk succeeded, so real
+    # MadeOnSol data is never second-guessed by a fallback source -- this
+    # only fills the gap PRO-gating leaves, for Solana only (chain=="solana"
+    # -- GoPlus's Solana endpoint doesn't cover Robinhood Chain, and RHC's
+    # MadeOnSol tier coverage is unconfirmed anyway, see module docstring).
+    goplus_mint_authority_revoked = None
+    goplus_freeze_authority_revoked = None
+    goplus_lp_locked = None
+    if chain == "solana" and not d["risk"].get("ok"):
+        gp = fetch_goplus_security("solana", mint)
+        if gp.get("ok"):
+            parsed = parse_goplus_solana_security(gp["data"])
+            goplus_mint_authority_revoked = parsed["mint_authority_revoked"]
+            goplus_freeze_authority_revoked = parsed["freeze_authority_revoked"]
+            goplus_lp_locked = parsed["lp_locked"]
+
     sig = signals_from_madeonsol_risk(
         d["risk"].get("json") or {}, d["holders"].get("json") or {}, d["bundle"].get("json") or {},
         is_pregraduation, vol_to_liq_ratio=vol_to_liq_ratio, liquidity_usd=liquidity_usd,
+        goplus_mint_authority_revoked=goplus_mint_authority_revoked,
+        goplus_freeze_authority_revoked=goplus_freeze_authority_revoked,
+        goplus_lp_locked=goplus_lp_locked,
     )
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 
