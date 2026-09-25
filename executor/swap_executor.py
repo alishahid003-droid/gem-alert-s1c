@@ -639,9 +639,8 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
 def execute_sell(chain: str, token_address: str, amount_tokens: float, reason: str) -> ExecutionResult:
     """Used by defensive_sell.py when Layer 6's rug signal fires on a
     position this executor opened. Same enable/key guard as the buy paths.
-    Routes to the chain-specific sell implementation below -- Solana and
-    BSC only; Robinhood Chain sells are blocked on the same v4 pool-key
-    gap as RHC buys (see module NEXT_STEPS entry)."""
+    Routes to the chain-specific sell implementation below -- Solana, BSC,
+    and Robinhood Chain (added Sept 25 2026, see _sell_robinhood_chain)."""
     guard = _refuse_unless_ready(chain)
     if guard:
         return guard
@@ -649,6 +648,8 @@ def execute_sell(chain: str, token_address: str, amount_tokens: float, reason: s
         result = _sell_solana(token_address, amount_tokens)
     elif chain == "bsc":
         result = _sell_bsc(token_address, amount_tokens)
+    elif chain == "robinhood_chain":
+        result = _sell_robinhood_chain(token_address, amount_tokens)
     else:
         result = ExecutionResult(False, f"no sell path implemented for chain '{chain}' yet "
                                          f"(reason for this sell attempt: {reason})")
@@ -786,6 +787,28 @@ ERC20_ABI = [
      "outputs": [{"name": "", "type": "bool"}]},
 ]
 
+# Permit2's IAllowanceTransfer interface (canonical cross-chain PERMIT2_RHC
+# address above) -- confirmed function signatures Sept 25 2026 against
+# Uniswap's own official permit2 GitHub source
+# (github.com/Uniswap/permit2/blob/main/src/interfaces/IAllowanceTransfer.sol),
+# not guessed. This is the DIRECT on-chain approve() (msg.sender-based, a
+# real signed transaction), not the signature-based permit() flow -- this
+# codebase has no EIP-712 off-chain signing infra built anywhere, so using
+# the plain on-chain approve() keeps RHC sells consistent with how every
+# other approval in this module already works (a real approve() tx, same
+# as BSC's ERC20 approve step).
+PERMIT2_ABI = [
+    {"name": "allowance", "type": "function", "stateMutability": "view",
+     "inputs": [{"name": "user", "type": "address"}, {"name": "token", "type": "address"},
+                {"name": "spender", "type": "address"}],
+     "outputs": [{"name": "amount", "type": "uint160"}, {"name": "expiration", "type": "uint48"},
+                 {"name": "nonce", "type": "uint48"}]},
+    {"name": "approve", "type": "function", "stateMutability": "nonpayable",
+     "inputs": [{"name": "token", "type": "address"}, {"name": "spender", "type": "address"},
+                {"name": "amount", "type": "uint160"}, {"name": "expiration", "type": "uint48"}],
+     "outputs": []},
+]
+
 PANCAKE_ROUTER_SELL_ABI = PANCAKE_ROUTER_ABI + [{
     "name": "swapExactTokensForETHSupportingFeeOnTransferTokens",
     "type": "function",
@@ -840,7 +863,7 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
 
     if current_allowance < raw_amount:
         approve_calldata = _encode_router_call(token, "approve", [router_addr, 2**256 - 1])  # unlimited, one-time
-        approve_result = _sign_and_send_bsc_tx(account, token_checksum, 0, approve_calldata)
+        approve_result = _sign_and_send_evm_tx("bsc", 56, account, token_checksum, 0, approve_calldata)
         if not approve_result.ok:
             return ExecutionResult(False, f"approve() failed, no swap attempted: {approve_result.reason}")
         confirmed = _confirm_evm_tx("bsc", approve_result.tx_signature)
@@ -878,7 +901,7 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
     swap_calldata = _encode_router_call(router, "swapExactTokensForETHSupportingFeeOnTransferTokens", [
         raw_amount, 0, [token_checksum, Web3.to_checksum_address(WBNB_BSC)], account.address, deadline,
     ])
-    swap_result = _sign_and_send_bsc_tx(account, router_addr, 0, swap_calldata)
+    swap_result = _sign_and_send_evm_tx("bsc", 56, account, router_addr, 0, swap_calldata)
     if not swap_result.ok:
         return ExecutionResult(False, f"approve() succeeded but swap failed: {swap_result.reason}")
 
@@ -890,24 +913,183 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
                             filled_usd=filled_usd)
 
 
-def _sign_and_send_bsc_tx(account, to_address: str, value_wei: int, calldata: str) -> ExecutionResult:
-    """Shared nonce/gas/sign/send tail for any BSC transaction (approve or
-    swap) -- factored out so execute_buy_bsc's pattern isn't duplicated a
-    third time."""
-    nonce_result = rpc_call("bsc", "eth_getTransactionCount", [account.address, "pending"])
+def _get_evm_native_balance(chain: str, address: str) -> Optional[int]:
+    result = rpc_call(chain, "eth_getBalance", [address, "latest"])
+    if not result.get("ok"):
+        return None
+    try:
+        return int(result["result"], 16)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> ExecutionResult:
+    """Sells amount_tokens of an ERC20 token back to native RHC ether via
+    Uniswap v4's Universal Router. Added Sept 25 2026, on top of the same
+    find_v4_pool + build_v4_exact_in_single_calldata pieces the buy path
+    uses (see execute_buy_robinhood_chain), plus the 2 approval steps an
+    ERC20 INPUT needs that a native-ETH buy doesn't:
+
+      1. ERC20.approve(PERMIT2_RHC, big_amount) -- the wallet allows
+         Permit2 itself to move the token (skipped if already approved).
+      2. Permit2.approve(token, UNISWAP_V4_UNIVERSAL_ROUTER_RHC, amount,
+         expiration) -- the wallet allows the Universal Router to pull
+         via Permit2 (skipped if the existing Permit2-level allowance
+         already covers this amount). Confirmed via universal-router's
+         own Permit2Payments.sol (github.com/Uniswap/universal-router)
+         that the router settles a non-native input by calling
+         PERMIT2.transferFrom(payer, recipient, amount, token) when the
+         payer isn't the router itself -- i.e. exactly this 2-step
+         allowance chain, not a single approve.
+
+    filled_usd is derived from a REAL native-balance diff around the
+    swap (eth_getBalance before vs. after, corrected for the swap tx's
+    own gas cost) -- the same "diff the real chain state, don't trust a
+    pre-trade estimate" principle _sell_solana already uses, adapted for
+    EVM's separate gas-deduction accounting (native ETH received isn't
+    visible in Transfer logs the way an ERC20 receive is, so a log scan
+    like _get_evm_fill_amount can't be reused here)."""
+    from web3 import Web3  # type: ignore
+    from eth_account import Account  # type: ignore
+
+    try:
+        token_checksum = Web3.to_checksum_address(token_address.lower())
+    except ValueError:
+        return ExecutionResult(False, f"'{token_address}' is not a valid Robinhood Chain address -- "
+                                       f"refusing to build a tx to it")
+
+    w3 = Web3()
+    account = Account.from_key(EXECUTOR_CONFIG.rhc_private_key)
+    token = w3.eth.contract(address=token_checksum, abi=ERC20_ABI)
+    permit2 = w3.eth.contract(address=Web3.to_checksum_address(PERMIT2_RHC), abi=PERMIT2_ABI)
+    router_addr = Web3.to_checksum_address(UNISWAP_V4_UNIVERSAL_ROUTER_RHC)
+
+    decimals_calldata = _encode_router_call(token, "decimals", [])
+    decimals_result = rpc_call("robinhood_chain", "eth_call", [{"to": token_checksum, "data": decimals_calldata}, "latest"])
+    if not decimals_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch token decimals: {decimals_result.get('reason')}")
+    try:
+        decimals = int(decimals_result["result"], 16)
+    except (TypeError, ValueError):
+        return ExecutionResult(False, f"could not parse token decimals from {decimals_result.get('result')}")
+    raw_amount = int(amount_tokens * (10 ** decimals))
+    if raw_amount <= 0:
+        return ExecutionResult(False, f"amount_tokens {amount_tokens} converts to 0 raw units -- refusing")
+
+    # Step 1: ERC20 -> Permit2 allowance.
+    erc20_allowance_calldata = _encode_router_call(token, "allowance", [account.address, PERMIT2_RHC])
+    erc20_allowance_result = rpc_call("robinhood_chain", "eth_call",
+                                       [{"to": token_checksum, "data": erc20_allowance_calldata}, "latest"])
+    erc20_allowance = int(erc20_allowance_result["result"], 16) if erc20_allowance_result.get("ok") else 0
+    if erc20_allowance < raw_amount:
+        approve_calldata = _encode_router_call(token, "approve", [PERMIT2_RHC, 2 ** 256 - 1])
+        approve_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account,
+                                                token_checksum, 0, approve_calldata)
+        if not approve_result.ok:
+            return ExecutionResult(False, f"ERC20->Permit2 approve() failed, no swap attempted: {approve_result.reason}")
+        confirmed = _confirm_evm_tx("robinhood_chain", approve_result.tx_signature)
+        if not confirmed.get("ok"):
+            return ExecutionResult(False, f"ERC20->Permit2 approve() sent but could not confirm -- swap NOT "
+                                           f"attempted, check allowance manually before retrying: {confirmed.get('reason')}")
+
+    # Step 2: Permit2 -> Universal Router allowance.
+    permit2_allowance_calldata = _encode_router_call(permit2, "allowance", [account.address, token_checksum, router_addr])
+    permit2_allowance_result = rpc_call("robinhood_chain", "eth_call",
+                                         [{"to": PERMIT2_RHC, "data": permit2_allowance_calldata}, "latest"])
+    permit2_allowance = 0
+    if permit2_allowance_result.get("ok"):
+        try:
+            decoded = w3.codec.decode(["uint160", "uint48", "uint48"], bytes.fromhex(permit2_allowance_result["result"][2:]))
+            permit2_allowance = decoded[0]
+        except Exception:  # noqa: BLE001 -- fall through to re-approve on any decode failure
+            permit2_allowance = 0
+    if permit2_allowance < raw_amount:
+        far_future_expiration = int(__import__("time").time()) + 365 * 24 * 3600  # 1 year, real uint48-range value
+        permit2_approve_calldata = _encode_router_call(
+            permit2, "approve", [token_checksum, router_addr, 2 ** 160 - 1, far_future_expiration])
+        permit2_approve_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account,
+                                                        PERMIT2_RHC, 0, permit2_approve_calldata)
+        if not permit2_approve_result.ok:
+            return ExecutionResult(False, f"Permit2->Router approve() failed, no swap attempted: {permit2_approve_result.reason}")
+        confirmed = _confirm_evm_tx("robinhood_chain", permit2_approve_result.tx_signature)
+        if not confirmed.get("ok"):
+            return ExecutionResult(False, f"Permit2->Router approve() sent but could not confirm -- swap NOT "
+                                           f"attempted, check allowance manually before retrying: {confirmed.get('reason')}")
+
+    pool = find_v4_pool(token_checksum, quote_currency=RHC_NATIVE_CURRENCY)
+    if not pool.get("ok"):
+        return ExecutionResult(False, f"no Uniswap v4 pool found for this token: {pool.get('reason')}")
+    pool_key = pool["pool_key"]
+    zero_for_one = pool_key["currency1"].lower() == token_checksum.lower()
+    if not zero_for_one:
+        return ExecutionResult(False, "pool_key's currency1 was not this token -- refusing to guess swap direction")
+
+    deadline = int(__import__("time").time()) + 300
+    try:
+        calldata = build_v4_exact_in_single_calldata(
+            pool_key, zero_for_one=False, amount_in=raw_amount, amount_out_minimum=0, deadline=deadline,
+        )
+    except ValueError as exc:
+        return ExecutionResult(False, f"could not build v4 swap calldata: {exc}")
+
+    pre_balance = _get_evm_native_balance("robinhood_chain", account.address)
+
+    gas_price_result = rpc_call("robinhood_chain", "eth_gasPrice", [])
+    if not gas_price_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
+    gas_price_wei = int(gas_price_result["result"], 16)
+
+    swap_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account, router_addr, 0,
+                                         "0x" + calldata.hex() if not calldata.hex().startswith("0x") else calldata.hex(),
+                                         gas=500_000)
+    if not swap_result.ok:
+        return ExecutionResult(False, f"approvals succeeded but swap failed: {swap_result.reason}")
+
+    confirmed = _confirm_evm_tx("robinhood_chain", swap_result.tx_signature)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sell sent but could not confirm (check hash manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=swap_result.tx_signature)
+
+    filled_usd = None
+    receipt = confirmed.get("receipt") or {}
+    post_balance = _get_evm_native_balance("robinhood_chain", account.address)
+    if pre_balance is not None and post_balance is not None:
+        try:
+            gas_used = int(receipt.get("gasUsed", "0x0"), 16)
+            native_received = post_balance - pre_balance + gas_used * gas_price_wei
+        except (TypeError, ValueError):
+            native_received = None
+        if native_received is not None and native_received > 0:
+            native_price = _rhc_native_price_usd(token_checksum)
+            if native_price:
+                filled_usd = (native_received / 10 ** 18) * native_price
+
+    return ExecutionResult(True, "sell submitted and confirmed", tx_signature=swap_result.tx_signature,
+                            filled_usd=filled_usd)
+
+
+def _sign_and_send_evm_tx(chain: str, chain_id: int, account, to_address: str, value_wei: int,
+                           calldata: str, gas: int = 250_000) -> ExecutionResult:
+    """Shared nonce/gas/sign/send tail for any EVM transaction (approve or
+    swap) on any of this module's EVM chains -- GENERALIZED Sept 25 2026
+    from the old BSC-only _sign_and_send_bsc_tx (chain/chain_id/gas were
+    hardcoded to BSC's values) so Robinhood Chain's sell path (approve,
+    Permit2.approve, swap -- 3 separate txs) can reuse it instead of a
+    fourth copy-pasted nonce/gas/sign/send block."""
+    nonce_result = rpc_call(chain, "eth_getTransactionCount", [account.address, "pending"])
     if not nonce_result.get("ok"):
         return ExecutionResult(False, f"could not fetch nonce: {nonce_result.get('reason')}")
-    gas_price_result = rpc_call("bsc", "eth_gasPrice", [])
+    gas_price_result = rpc_call(chain, "eth_gasPrice", [])
     if not gas_price_result.get("ok"):
         return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
 
     tx = {
         "to": to_address,
         "value": value_wei,
-        "gas": 250_000,
+        "gas": gas,
         "gasPrice": int(gas_price_result["result"], 16),
         "nonce": int(nonce_result["result"], 16),
-        "chainId": 56,
+        "chainId": chain_id,
         "data": calldata,
     }
     signed = account.sign_transaction(tx)
@@ -915,7 +1097,7 @@ def _sign_and_send_bsc_tx(account, to_address: str, value_wei: int, calldata: st
     if not raw_hex.startswith("0x"):
         raw_hex = "0x" + raw_hex
 
-    send_result = rpc_call("bsc", "eth_sendRawTransaction", [raw_hex])
+    send_result = rpc_call(chain, "eth_sendRawTransaction", [raw_hex])
     if not send_result.get("ok"):
         return ExecutionResult(False, f"eth_sendRawTransaction failed: {send_result.get('reason')}")
     tx_hash = send_result.get("result")
