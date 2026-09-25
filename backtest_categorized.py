@@ -107,6 +107,14 @@ SOLANA_LABELED = [
     ("SHROOM", "robinhood_chain", "0xab093dEF657F15dF31b33922A95e047aDd645B29", "moonshot", False),
     ("USELESS COIN", "solana", "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk", "moonshot", False),
     ("Mooncat (MCAT)", "solana", "7EA8EStQETtKkqFW8rqj77nfkiLEniVag8Y2jNUTpump", "pump_dump", False),
+    # Added Sept 26 2026 -- Ali asked to "hunt for coin PONS, Paid, CASHCAT,
+    # MarsCoin". All three below confirmed live on DexScreener; Mars Coin
+    # NOT added -- same unresolved issue as backtest_named_coins.py's
+    # UNRESOLVED list, too many unrelated tokens share the name, no clean
+    # match even filtered to Robinhood Chain.
+    ("PAID", "solana", "98kfF7rmsg1QDUEoCqNE7g7M1FdrTt92TEp2CLzypump", "moonshot", False),
+    ("PONS", "robinhood_chain", "0x39dBED3a2bd333467115dE45665cC57F813C4571", "moonshot", False),
+    ("CASHCAT", "robinhood_chain", "0x020bfC650A365f8BB26819deAAbF3E21291018b4", "moonshot", False),
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
