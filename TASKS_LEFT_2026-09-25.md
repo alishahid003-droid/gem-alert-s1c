@@ -23,3 +23,5 @@
 19. [ ] Keep `EXECUTION_ENABLED=false` until tasks 13-16 all pass
 20. [x] `git push origin main` — all caught up as of Sept 25, ~4:48 PM PKT (through commit ba97dbd, includes #10b holder-growth-rate/vol-liq wiring and #11's GoPlus Solana fallback)
 21. [ ] Run `python backtest.py` once more now that #10b and #11 are both live, to see the real, now fully-differentiated elite/good vs. rising band distribution (no more identical 52/B for every token)
+
+22. [x] Real MadeOnSol daily call-budget gate added (not just a cron timing tweak): Layer 1 and Layer 8 now check/record actual calls against a 190/day tracked budget (safety margin under the real, confirmed 200/day BASIC-tier cap), bucketed by UTC day to match MadeOnSol's own reset time. When budget is low, Layer 8 re-queues tokens for a later cycle instead of burning doomed calls. Commit `3601589`, 306 tests passing. Cadence (poll-fast 10min / poll-slow 20min) left unchanged -- poll-fast is deliberately fast per your earlier entry-timing-speed direction, and this budget gate protects the quota regardless of cadence, so there's no need to trade off speed for safety anymore.
