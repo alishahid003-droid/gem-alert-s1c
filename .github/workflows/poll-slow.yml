@@ -32,4 +32,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          EXECUTION_ENABLED: ${{ secrets.EXECUTION_ENABLED }}
+          EXECUTION_SOLANA_PRIVATE_KEY: ${{ secrets.EXECUTION_SOLANA_PRIVATE_KEY }}
+          EXECUTION_BSC_PRIVATE_KEY: ${{ secrets.EXECUTION_BSC_PRIVATE_KEY }}
+          EXECUTION_RHC_PRIVATE_KEY: ${{ secrets.EXECUTION_RHC_PRIVATE_KEY }}
+          RHC_RPC_URL: ${{ secrets.RHC_RPC_URL }}
         run: python scheduler.py --poll-slow
