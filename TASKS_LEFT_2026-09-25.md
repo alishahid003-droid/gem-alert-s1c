@@ -8,7 +8,7 @@
 6. [x] Dashboard — backend trade-log addition feeding items 3–5
 7. [ ] Re-run Solana/RHC backtest once MadeOnSol's rate limit clears
 8. [x] Fix 和平熊猫 duplicate-contract display-name scoring bug
-9. [ ] Speed — switch Layer 0b from REST polling to Mobula's WebSocket stream
+9. [x] Speed — Layer 0b WebSocket client + worker built and wired into scheduler._handle_scored (commit 88bfc69, 10 mocked tests passing). NOT YET provably live: Mobula's Pulse Stream V2 is Growth/Enterprise-plan only (your key may be free tier) and BSC support on this endpoint is unconfirmed by Mobula's own docs -- run `python worker_pulse_websocket.py` once pushed to see the real accept/reject and the raw `init` message per chain.
 10. [ ] Build a real multi-coin backtest set (dozens of gems + rugs)
 11. [ ] Decide on MadeOnSol coverage: paid tier vs. second data source (your call)
 12. [x] `entrypoint.py` already wired into `scheduler.py`'s live poll loop (confirmed, not new work — was already true, docstring was just stale)
@@ -19,4 +19,4 @@
 17. [ ] Real test: 1 moonbag trim on a real live position — needs you, real money
 18. [ ] Real test: dashboard checked against real trade data (now unblocked — item 6 is done, just needs 13-17 to produce real data to look at)
 19. [ ] Keep `EXECUTION_ENABLED=false` until tasks 13-16 all pass
-20. [ ] `git push origin main` — 3 commits ready (9f69a9e, 94e18f3, 3bb763d) — needs your GitHub login, my sandbox has no credentials for it
+20. [ ] `git push origin main` — 1 new commit ready on top of your last push (88bfc69: the #9 WebSocket work) — needs your GitHub login, my sandbox has no credentials for it
