@@ -24,10 +24,12 @@ bundlersCount, noMintAuthority, balanceMutable, etc. -- confirmed against
 docs.mobula.io as of Sep 2026).
 """
 from dataclasses import dataclass
-from typing import Optional, Literal
+from typing import List, Optional, Literal, Tuple
 
 from config import CONFIG
 from utils.http import get_json, ApiUnreachable, describe_fetch_failure
+import state
+from links import DEXSCREENER_CHAIN_SLUG
 
 Chain = Literal["solana", "robinhood_chain", "base", "bsc", "ton", "ethereum"]
 
@@ -202,9 +204,28 @@ def score_token(sig: RawSignals) -> ScoreResult:
 # ---------------------------------------------------------------------------
 
 def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json: dict,
-                                 is_pregraduation: bool) -> RawSignals:
+                                 is_pregraduation: bool, vol_to_liq_ratio: Optional[float] = None,
+                                 liquidity_usd: Optional[float] = None,
+                                 holder_growth_rate_per_hr: Optional[float] = None) -> RawSignals:
     """risk_json from GET /tokens/{mint}/risk, holders_json from
-    /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle."""
+    /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle.
+
+    vol_to_liq_ratio/liquidity_usd/holder_growth_rate_per_hr: real values the
+    CALLER computes and passes in (this function stays pure/network-free,
+    same convention as signals_from_mobula_pulse) -- see
+    fetch_dexscreener_vol_liq and compute_holder_growth_rate_per_hr, wired
+    in by score_solana_mint below. Fixed Sept 25 2026: these 3 used to be
+    hardcoded None here always, with a comment claiming they were "wired in
+    scheduler" -- they never were (confirmed by grep before this fix). That
+    meant vol/liq (25pts) and holder growth (20pts) -- 45% of every Solana
+    score's total weight -- were permanently defaulted to fixed neutral
+    values regardless of any real per-token data. holder_growth_rate_per_hr
+    stays None here for now specifically -- MadeOnSol's /tokens/{mint}/holders
+    response only has a confirmed field for top10_share, not a total holder
+    count, and guessing an unconfirmed field name is exactly the class of
+    bug that caused Mobula bug #5 (see that function's docstring) -- so this
+    is left honestly unwired pending a real sample response, rather than
+    guessed."""
     factors = {f["key"]: f for f in risk_json.get("factors", [])} if risk_json else {}
     top10 = None
     if holders_json and "top10_share" in holders_json:
@@ -214,10 +235,10 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
         lp_locked_or_curve_healthy=None if is_pregraduation else _factor_ok(factors, "lp_lock"),
         mint_authority_revoked=_factor_ok(factors, "mint_authority"),
         freeze_authority_revoked=_factor_ok(factors, "freeze_authority"),
-        vol_to_liq_ratio=None,  # requires a volume+liquidity time series call, wired in scheduler
-        holder_growth_rate_per_hr=None,
+        vol_to_liq_ratio=vol_to_liq_ratio,
+        holder_growth_rate_per_hr=holder_growth_rate_per_hr,
         bundler_sniper_pct=(bundle_json.get("held_pct_of_supply", 0) / 100.0) if bundle_json else None,
-        liquidity_usd=None,
+        liquidity_usd=liquidity_usd,
         is_pregraduation_solana=is_pregraduation,
     )
 
@@ -227,6 +248,87 @@ def _factor_ok(factors: dict, key: str) -> Optional[bool]:
     if not f:
         return None
     return f.get("status") == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Holder growth rate -- real wiring, Sept 25 2026 (previously hardcoded to
+# None everywhere in this file -- 20% of every score's weight was a fixed
+# placeholder on every chain, every time, regardless of API access; see
+# README's "Event-triggered re-scoring" section, which already flagged this
+# as a known, honestly-scoped-out gap and named it "the natural next step").
+# Uses state.py's holder_history (same append-only capped-list pattern as
+# its existing mc_history) -- the caller is responsible for calling
+# state.record_holder_point once per poll cycle with the current holder
+# count, then state.get_holder_history + this function to turn that history
+# into a rate. Kept here as a pure function (no state/network access) so it
+# stays trivially testable, same as score_token.
+# ---------------------------------------------------------------------------
+
+# A single poll cycle's gap between two points is too short to trust as an
+# hourly rate (extrapolating a 30-second gap out to "per hour" massively
+# amplifies noise) -- require at least this much real elapsed time between
+# the oldest and newest retained point before computing a rate at all.
+HOLDER_GROWTH_MIN_ELAPSED_SECONDS = 5 * 60
+
+
+def compute_holder_growth_rate_per_hr(history: List[Tuple[float, float]]) -> Optional[float]:
+    """history: list of (ts, holder_count) tuples, any order, as returned by
+    state.get_holder_history. Returns net new holders/hr between the oldest
+    and newest retained point, or None if there's under 2 points yet, or the
+    real time span between them is too short to trust (see
+    HOLDER_GROWTH_MIN_ELAPSED_SECONDS) -- never fabricates a rate from too
+    little data."""
+    if len(history) < 2:
+        return None
+    points = sorted(history, key=lambda p: p[0])
+    oldest_ts, oldest_count = points[0]
+    newest_ts, newest_count = points[-1]
+    elapsed_seconds = newest_ts - oldest_ts
+    if elapsed_seconds < HOLDER_GROWTH_MIN_ELAPSED_SECONDS:
+        return None
+    return (newest_count - oldest_count) / (elapsed_seconds / 3600.0)
+
+
+# ---------------------------------------------------------------------------
+# Volume/liquidity ratio for Solana/RHC -- real wiring, Sept 25 2026.
+# signals_from_madeonsol_risk used to hardcode vol_to_liq_ratio=None with a
+# comment claiming it was "wired in scheduler" -- it never was anywhere in
+# this codebase (confirmed by grep before writing this). MadeOnSol's own
+# 3 endpoints this system calls (risk/holders/bundle) carry no volume or
+# liquidity figure at all, so this uses DexScreener's real, free, keyless
+# token-pairs endpoint instead -- confirmed against
+# docs.dexscreener.com/api/reference Sept 25 2026:
+#   GET https://api.dexscreener.com/token-pairs/v1/{chainId}/{tokenAddress}
+#   -> pairs[].volume.h24, pairs[].liquidity.usd
+# Reuses links.DEXSCREENER_CHAIN_SLUG, the same chain-slug mapping already
+# verified live for this codebase's DexScreener links (links.py), rather
+# than a second, separate guess at DexScreener's chain-id strings. This is
+# the same DexScreener API family already used elsewhere in this codebase
+# (layers/layer11_social_buzz.py's boost feed), just a different endpoint.
+# ---------------------------------------------------------------------------
+
+def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
+    """Picks the pair with the highest liquidity when a token has multiple
+    pools -- the deepest pool is the most representative of real trading,
+    not the first one returned. Never a hard dependency: any failure here
+    (unsupported chain, no pairs, network error) just leaves the caller's
+    vol_to_liq_ratio at None exactly as before this existed -- same
+    degrade-gracefully convention as fetch_goplus_security."""
+    slug = DEXSCREENER_CHAIN_SLUG.get(chain)
+    if not slug or not address:
+        return {"ok": False, "reason": f"no DexScreener chain slug for chain={chain!r}"}
+    result = get_json(f"https://api.dexscreener.com/token-pairs/v1/{slug}/{address}")
+    if not result.get("ok"):
+        return {"ok": False, "reason": describe_fetch_failure({"raw": result})}
+    pairs = result.get("json")
+    if not isinstance(pairs, list) or not pairs:
+        return {"ok": False, "reason": "no pairs returned"}
+    best = max(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
+    volume_24h = (best.get("volume") or {}).get("h24")
+    liquidity_usd = (best.get("liquidity") or {}).get("usd")
+    if volume_24h is None or liquidity_usd is None:
+        return {"ok": False, "reason": "pair missing volume/liquidity fields"}
+    return {"ok": True, "volume_24h": volume_24h, "liquidity_usd": liquidity_usd}
 
 
 GOPLUS_CHAIN_IDS = {"bsc": "56", "base": "8453", "ethereum": "1"}  # GoPlus's numeric chain ids
@@ -273,7 +375,8 @@ def fetch_goplus_security(chain: str, address: str) -> dict:
     return {"ok": True, "data": token}
 
 
-def signals_from_mobula_pulse(pulse_item: dict, chain: str = None) -> RawSignals:
+def signals_from_mobula_pulse(pulse_item: dict, chain: str = None,
+                               holder_growth_rate_per_hr: Optional[float] = None) -> RawSignals:
     """pulse_item is one token object from GET /api/2/pulse (Mobula), used for
     Base/BSC/TON/Ethereum. `chain` (e.g. "bsc"/"base") enables the GoPlus
     fallback below -- optional/backward-compatible, omit it to skip the
@@ -363,7 +466,13 @@ def signals_from_mobula_pulse(pulse_item: dict, chain: str = None) -> RawSignals
         mint_authority_revoked=mint_revoked,
         freeze_authority_revoked=freeze_revoked,
         vol_to_liq_ratio=_safe_div(pulse_item.get("volume_24h"), pulse_item.get("liquidity")),
-        holder_growth_rate_per_hr=None,  # needs a snapshot diff, wired in scheduler (holder census over time)
+        # Real wiring Sept 25 2026 -- caller (score_mobula_pulse_items) computes
+        # this from state.py's holder_history (holdersCount is a confirmed
+        # real Mobula field, already used above for bundler_sniper_pct) and
+        # passes it in. Previously hardcoded None here always, with a comment
+        # claiming it was "wired in scheduler" -- it never was anywhere in
+        # this codebase (confirmed by grep before this fix).
+        holder_growth_rate_per_hr=holder_growth_rate_per_hr,
         bundler_sniper_pct=bundler_sniper_pct,
         liquidity_usd=pulse_item.get("liquidity"),
         is_pregraduation_solana=False,
@@ -494,13 +603,31 @@ def score_mobula_pulse_items(chain: str, items: list) -> list:
     every mint even though one call already returns the whole list -- fine
     for its original small-scale use, but scheduler.py uses THIS function
     instead for the live Layer 0b discovery loop so the Pulse fetch stays at
-    one call per chain per cycle, not one call per token -- see README.)"""
+    one call per chain per cycle, not one call per token -- see README.)
+
+    Real holder-growth-rate wiring, Sept 25 2026 (see
+    compute_holder_growth_rate_per_hr's docstring): every call here records
+    the CURRENT holder count (Mobula's confirmed-real `holdersCount` field,
+    already used for bundler_sniper_pct above) into state.py's per-token
+    holder_history, then reads back whatever history has accumulated across
+    past cycles to compute a real rate. First time a token is seen there's
+    only 1 point yet, so the rate stays None (same "not enough data" path
+    compute_holder_growth_rate_per_hr already has) -- it fills in and starts
+    contributing real points once a token has been polled across at least
+    HOLDER_GROWTH_MIN_ELAPSED_SECONDS of wall-clock time, same natural
+    warm-up as Layer 8's mc_history momentum tracking."""
     results = []
     for item in items:
-        sig = signals_from_mobula_pulse(item, chain)
+        address = item.get("address")
+        holder_count = item.get("holdersCount")
+        holder_growth_rate_per_hr = None
+        if address and holder_count is not None:
+            state.record_holder_point(address, holder_count)
+            holder_growth_rate_per_hr = compute_holder_growth_rate_per_hr(state.get_holder_history(address))
+        sig = signals_from_mobula_pulse(item, chain, holder_growth_rate_per_hr=holder_growth_rate_per_hr)
         results.append({
             "chain": chain,
-            "address": item.get("address"),
+            "address": address,
             "score": score_token(sig),
             "raw": item,
         })
@@ -508,17 +635,32 @@ def score_mobula_pulse_items(chain: str, items: list) -> list:
 
 
 def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
-    """Single-mint MadeOnSol scoring -- 3 calls (risk/holders/bundle). Costly
-    enough per token that scheduler.py only calls this for a bounded subset
-    of Layer 1's deployer alerts (elite tier only, capped per cycle), not
-    every discovered mint -- see README's call-budget section for why."""
+    """Single-mint MadeOnSol scoring -- 3 calls (risk/holders/bundle) plus
+    one DexScreener call for real vol/liq data (see fetch_dexscreener_vol_liq
+    -- added Sept 25 2026, MadeOnSol's own 3 endpoints carry no volume or
+    liquidity figure). Costly enough per token that scheduler.py only calls
+    this for a bounded subset of Layer 1's deployer alerts (elite tier only,
+    capped per cycle), not every discovered mint -- see README's call-budget
+    section for why."""
     raw = fetch_madeonsol_token_risk(mint, chain)
     if not raw.get("ok"):
         return {"chain": chain, "address": mint, "error": raw.get("reason", "fetch failed")}
     d = raw["data"]
+
+    # Real vol/liq data (Sept 25 2026 fix, see fetch_dexscreener_vol_liq's
+    # docstring) -- never a hard dependency, any failure here just leaves
+    # vol_to_liq_ratio/liquidity_usd at None exactly as before this existed.
+    vol_to_liq_ratio = None
+    liquidity_usd = None
+    dex = fetch_dexscreener_vol_liq(chain, mint)
+    if dex.get("ok"):
+        liquidity_usd = dex["liquidity_usd"]
+        if liquidity_usd:
+            vol_to_liq_ratio = dex["volume_24h"] / liquidity_usd
+
     sig = signals_from_madeonsol_risk(
         d["risk"].get("json") or {}, d["holders"].get("json") or {}, d["bundle"].get("json") or {},
-        is_pregraduation,
+        is_pregraduation, vol_to_liq_ratio=vol_to_liq_ratio, liquidity_usd=liquidity_usd,
     )
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 

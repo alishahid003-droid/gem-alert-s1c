@@ -61,6 +61,33 @@ def test_mc_history_caps_at_max_points(tmp_path, monkeypatch):
     assert len(history) <= state_module.MC_HISTORY_MAX_POINTS
 
 
+def test_holder_history_records_and_trims_old_points(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    now = time.time()
+    state_module.record_holder_point("TOKEN_A", 100, ts=now - 3 * 60 * 60)  # 3hr old -- trimmed
+    state_module.record_holder_point("TOKEN_A", 250, ts=now)
+    history = state_module.get_holder_history("TOKEN_A")
+    assert len(history) == 1
+    assert history[0][1] == 250
+
+
+def test_holder_history_caps_at_max_points(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    now = time.time()
+    for i in range(30):
+        state_module.record_holder_point("TOKEN_B", 100 + i, ts=now - i)
+    history = state_module.get_holder_history("TOKEN_B")
+    assert len(history) <= state_module.HOLDER_HISTORY_MAX_POINTS
+
+
+def test_holder_history_is_keyed_per_token(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    now = time.time()
+    state_module.record_holder_point("TOKEN_C", 500, ts=now)
+    assert state_module.get_holder_history("TOKEN_D") == []
+    assert len(state_module.get_holder_history("TOKEN_C")) == 1
+
+
 def test_balance_roundtrip_and_prior_balances_map(tmp_path, monkeypatch):
     _reset_local_state(tmp_path, monkeypatch)
     assert state_module.get_prior_balance("W1", "TOKEN_A") is None

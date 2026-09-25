@@ -138,6 +138,32 @@ def get_mc_history(token: str) -> List[Tuple[float, float]]:
     return [(p[0], p[1]) for p in (get_value(f"mc_history:{token}") or [])]
 
 
+# --- Holder-count history per token (Sept 25, 2026) -- real wiring for
+# Layer 0/0b's holder_growth_rate_per_hr signal, which was previously
+# hardcoded to None everywhere (see layers/layer0_scoring.py's
+# compute_holder_growth_rate_per_hr) -- 20% of every score's total weight
+# was a fixed placeholder, not real per-token data, on every chain. Same
+# append-only capped-list pattern as record_mc_point/get_mc_history above,
+# just keyed on holder count instead of market cap -- deliberately generic
+# (works for any chain that can supply a current holder count).
+HOLDER_HISTORY_MAX_POINTS = 20
+HOLDER_HISTORY_MAX_AGE_SECONDS = 2 * 60 * 60  # matches MC_HISTORY_MAX_AGE_SECONDS
+
+
+def record_holder_point(token: str, holder_count: float, ts: Optional[float] = None):
+    ts = ts if ts is not None else time.time()
+    key = f"holder_history:{token}"
+    history = get_value(key) or []
+    history.append([ts, holder_count])
+    cutoff = time.time() - HOLDER_HISTORY_MAX_AGE_SECONDS
+    history = [p for p in history if p[0] >= cutoff][-HOLDER_HISTORY_MAX_POINTS:]
+    set_value(key, history)
+
+
+def get_holder_history(token: str) -> List[Tuple[float, float]]:
+    return [(p[0], p[1]) for p in (get_value(f"holder_history:{token}") or [])]
+
+
 # --- Layer 7: rolling alert-event log, for cross-layer correlation
 # (Ali, Sept 23 2026: wired tonight). One list per TOKEN (not global) so a
 # busy cycle across many tokens doesn't force scanning one huge shared list
