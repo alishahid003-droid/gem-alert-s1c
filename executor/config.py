@@ -191,7 +191,17 @@ class ExecutorConfig:
         if chain == "bsc":
             return bool(self.bsc_private_key)
         if chain == "robinhood_chain":
-            return bool(self.rhc_private_key) and bool(self.rhc_rpc_url)
+            # FIXED Sept 25 2026: this used to also require self.rhc_rpc_url,
+            # but that field has no default (see its own comment -- "no
+            # public default confirmed yet") and nothing sets the RHC_RPC_URL
+            # env var, so this would have permanently returned False here no
+            # matter what, even with a real key configured and
+            # execution_enabled=True. Real RPC calls for this chain go
+            # through executor.rpc_pool's confirmed-live pool instead (see
+            # that module's docstring), matching solana/bsc below, neither
+            # of which gate on their own *_rpc_url field either -- this was
+            # a stale leftover check from before rpc_pool.py existed.
+            return bool(self.rhc_private_key)
         return False
 
 

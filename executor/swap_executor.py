@@ -80,6 +80,9 @@ from config import CONFIG
 from utils.http import get_json, post_json
 from executor.config import EXECUTOR_CONFIG
 from executor.rpc_pool import rpc_call
+from executor.rhc_pool_discovery import find_v4_pool, NATIVE_CURRENCY as RHC_NATIVE_CURRENCY
+from executor.rhc_v4_swap import build_v4_exact_in_single_calldata
+from links import DEXSCREENER_CHAIN_SLUG
 
 PANCAKESWAP_V2_ROUTER_BSC = "0x10ED43C718714eb63d5aA57B78B54704E256024E"  # FIXED Sept 25, 2026: previous value was missing its trailing "E" (39 hex chars instead of 40 -- an invalid address that would have failed every BSC buy). Re-verified against PancakeSwap's own official npm package (@pancakeswap/smart-router, V2_ROUTER_ADDRESS[ChainId.BSC]), not a web summary -- confirmed via is_address() == True and Web3.to_checksum_address() round-tripping to this exact casing.
 WBNB_BSC = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"  # wrapped BNB, re-verified against @pancakeswap/tokens npm package source (same "one char short" trap as the router address above)
@@ -405,7 +408,7 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
     if not confirmed.get("ok"):
         return ExecutionResult(False, f"sent but could not confirm (check hash manually): "
                                        f"{confirmed.get('reason')}", tx_signature=tx_hash)
-    filled_tokens = _get_bsc_fill_amount(confirmed.get("receipt") or {}, token_checksum, account.address)
+    filled_tokens = _get_evm_fill_amount("bsc", confirmed.get("receipt") or {}, token_checksum, account.address)
     result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
                               filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
     _log_trade("buy", "bsc", token_checksum, result)
@@ -415,15 +418,22 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # keccak256("Transfer(address,address,uint256)"), verified via Web3.keccak
 
 
-def _get_bsc_fill_amount(receipt: dict, token_address: str, wallet_address: str) -> Optional[float]:
+def _get_evm_fill_amount(chain: str, receipt: dict, token_address: str, wallet_address: str) -> Optional[float]:
     """Reads the REAL number of tokens received in a confirmed buy, by
     scanning the receipt's Transfer event logs for one emitted BY the
     token contract, TO our wallet -- not amountOutMin (which is
-    deliberately 0, since this router call has no slippage floor of its
-    own) and not a pre-trade estimate. Needs real on-chain decimals to
-    convert the raw log value, so this queries them fresh rather than
+    deliberately 0, since neither router call here has a slippage floor
+    of its own) and not a pre-trade estimate. Needs real on-chain decimals
+    to convert the raw log value, so this queries them fresh rather than
     assuming 18 (most BEP-20s are 18, but the field itself is per-token
-    and assuming wrong here would corrupt every downstream trim calc)."""
+    and assuming wrong here would corrupt every downstream trim calc).
+
+    chain: which RPC pool to query for decimals -- FIXED Sept 25 2026,
+    this used to be hardcoded to "bsc" (as the old _get_bsc_fill_amount) even
+    though it was about to be reused for Robinhood Chain buys, which
+    would have queried the wrong chain's RPC pool entirely for an RHC
+    token's decimals and silently returned None (or, worse, another
+    chain's coincidentally-valid-looking decimals value) forever."""
     from web3 import Web3  # type: ignore
     logs = receipt.get("logs") or []
     token_lower = token_address.lower()
@@ -446,7 +456,7 @@ def _get_bsc_fill_amount(receipt: dict, token_address: str, wallet_address: str)
 
     token = Web3().eth.contract(address=Web3.to_checksum_address(token_lower), abi=ERC20_ABI)
     decimals_calldata = _encode_router_call(token, "decimals", [])
-    decimals_result = rpc_call("bsc", "eth_call", [{"to": token_address, "data": decimals_calldata}, "latest"])
+    decimals_result = rpc_call(chain, "eth_call", [{"to": token_address, "data": decimals_calldata}, "latest"])
     if not decimals_result.get("ok"):
         return None
     try:
@@ -462,7 +472,7 @@ def _confirm_evm_tx(chain: str, tx_hash: str, attempts: int = 10, delay_seconds:
     sell-blocking transfer, or slippage). A revert must never be reported
     as a successful buy even though it was successfully SUBMITTED. On
     success, also returns the full receipt (under "receipt") so callers
-    that need the real logs (e.g. _get_bsc_fill_amount) don't have to
+    that need the real logs (e.g. _get_evm_fill_amount) don't have to
     re-fetch it."""
     import time
     for _ in range(attempts):
@@ -477,24 +487,153 @@ def _confirm_evm_tx(chain: str, tx_hash: str, attempts: int = 10, delay_seconds:
     return {"ok": False, "reason": f"not confirmed after {attempts} polls ({attempts * delay_seconds:.0f}s)"}
 
 
+def _rhc_native_price_usd(token_address: str) -> Optional[float]:
+    """Derives native RHC ether's real USD price from DexScreener's own
+    pair data for token_address -- same public endpoint layer0_scoring.py's
+    fetch_dexscreener_vol_liq already uses (links.DEXSCREENER_CHAIN_SLUG's
+    "robinhood" slug, confirmed live earlier this session via a real
+    diagnostic run). DexScreener reports both priceUsd (the token's price
+    in USD) and priceNative (the token's price in units of the pair's
+    quote currency) for a pair -- when that quote currency IS native RHC
+    ether (quoteToken.address == address(0), confirmed live Sept 25 2026
+    via a real ROBINHOOD/ETH sample pair), priceUsd / priceNative is
+    exactly native RHC ether's own USD price, derived from a real trading
+    pair rather than a separate, unconfirmed price API. Picks the
+    highest-liquidity native-quoted pair when several exist, for the same
+    "deepest pool is most representative" reasoning fetch_dexscreener_vol_liq
+    already uses. Returns None (never a guess) if no native-quoted pair
+    exists for this token or the fields can't be parsed."""
+    slug = DEXSCREENER_CHAIN_SLUG.get("robinhood_chain")
+    if not slug:
+        return None
+    result = get_json(f"https://api.dexscreener.com/token-pairs/v1/{slug}/{token_address}")
+    if not result.get("ok"):
+        return None
+    pairs = result.get("json")
+    if not isinstance(pairs, list) or not pairs:
+        return None
+    native_quoted = [
+        p for p in pairs
+        if (p.get("quoteToken") or {}).get("address", "").lower() == RHC_NATIVE_CURRENCY.lower()
+    ]
+    if not native_quoted:
+        return None
+    best = max(native_quoted, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
+    try:
+        price_usd = float(best["priceUsd"])
+        price_native = float(best["priceNative"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if price_native <= 0:
+        return None
+    return price_usd / price_native
+
+
 def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> ExecutionResult:
-    """Router address confirmed Sept 22, 2026 (see module docstring) --
-    this is no longer the NotImplementedError guard it used to be. Same
-    honest status as the Solana and BSC paths above: written, guarded, but
-    UNTESTED against a live network. Do not fund a wallet against this path
-    without first (1) checking UNISWAP_V4_UNIVERSAL_ROUTER_RHC has real
-    contract bytecode on a Robinhood Chain block explorer, and (2) running
-    one small real test swap."""
+    """Real Uniswap v4 buy via Robinhood Chain's Universal Router, built
+    Sept 25 2026 on top of rhc_pool_discovery.find_v4_pool (real on-chain
+    pool lookup) and rhc_v4_swap.build_v4_exact_in_single_calldata (real
+    ABI-encoded swap calldata, confirmed byte-for-byte against official
+    Uniswap sources -- see that module's docstring). Router address
+    confirmed Sept 22, 2026 (see module docstring above). Pays with native
+    RHC ether via the transaction's own msg.value, so no Permit2/approve
+    step is needed here (that's only required for an ERC20 input, i.e.
+    the sell side -- not yet built).
+
+    Same honest status as every other chain here until a real send
+    confirms it: written, guarded, but UNTESTED against a live network.
+    Do not fund a wallet against this path without first running one
+    small real test buy."""
     guard = _refuse_unless_ready("robinhood_chain")
     if guard:
         return guard
     try:
         from web3 import Web3  # type: ignore
+        from eth_account import Account  # type: ignore
     except ImportError:
         return ExecutionResult(False, "web3.py not installed -- add to requirements.txt before enabling")
-    return ExecutionResult(False, "Uniswap v4 Universal Router path on Robinhood Chain is written but "
-                                   "UNTESTED against a live network -- do not treat this as a working "
-                                   "execution path until a real run confirms it")
+
+    try:
+        token_checksum = Web3.to_checksum_address(token_address.lower())
+    except ValueError:
+        return ExecutionResult(False, f"'{token_address}' is not a valid Robinhood Chain address -- "
+                                       f"refusing to build a tx to it")
+
+    native_price = _rhc_native_price_usd(token_checksum)
+    if native_price is None or native_price <= 0:
+        return ExecutionResult(False, "could not derive a live RHC-native/USD price from DexScreener -- "
+                                       "refusing to size a buy on a guess")
+    amount_in_wei = int((usd_amount / native_price) * 10 ** 18)
+    if amount_in_wei <= 0:
+        return ExecutionResult(False, f"usd_amount ${usd_amount} converts to 0 wei at derived price "
+                                       f"${native_price} -- refusing a zero-size buy")
+
+    pool = find_v4_pool(token_checksum, quote_currency=RHC_NATIVE_CURRENCY)
+    if not pool.get("ok"):
+        return ExecutionResult(False, f"no Uniswap v4 pool found for this token: {pool.get('reason')}")
+    pool_key = pool["pool_key"]
+    # Native currency address(0) always sorts as currency0 (uint160(0) is
+    # the smallest possible value) -- confirmed by rhc_pool_discovery.py's
+    # own sort-rule docstring -- so paying with native RHC ether is always
+    # a currency0 -> currency1 swap here.
+    zero_for_one = pool_key["currency0"].lower() == RHC_NATIVE_CURRENCY.lower()
+    if not zero_for_one:
+        # Should not happen given find_v4_pool was called with native as
+        # quote_currency, but refuse rather than silently swap the wrong
+        # direction if the sort assumption is ever wrong.
+        return ExecutionResult(False, "pool_key's currency0 was not native RHC ether -- refusing to "
+                                       "guess swap direction")
+
+    account = Account.from_key(EXECUTOR_CONFIG.rhc_private_key)
+    deadline = int(__import__("time").time()) + 300
+    try:
+        calldata = build_v4_exact_in_single_calldata(
+            pool_key, zero_for_one=True, amount_in=amount_in_wei, amount_out_minimum=0, deadline=deadline,
+        )
+    except ValueError as exc:
+        return ExecutionResult(False, f"could not build v4 swap calldata: {exc}")
+
+    nonce_result = rpc_call("robinhood_chain", "eth_getTransactionCount", [account.address, "pending"])
+    if not nonce_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch nonce: {nonce_result.get('reason')}")
+    gas_price_result = rpc_call("robinhood_chain", "eth_gasPrice", [])
+    if not gas_price_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
+
+    tx = {
+        "to": Web3.to_checksum_address(UNISWAP_V4_UNIVERSAL_ROUTER_RHC),
+        "value": amount_in_wei,
+        "gas": 500_000,  # conservative fixed limit, same reasoning as BSC's buy path: no estimate_gas
+                          # against an untrusted new token contract pre-buy. v4 swaps do more work per
+                          # call than a v2 router hop, so this is higher than BSC's 400_000.
+        "gasPrice": int(gas_price_result["result"], 16),
+        "nonce": int(nonce_result["result"], 16),
+        "chainId": ROBINHOOD_CHAIN_ID,
+        "data": calldata.hex() if not calldata.hex().startswith("0x") else calldata.hex(),
+    }
+    if not tx["data"].startswith("0x"):
+        tx["data"] = "0x" + tx["data"]
+    signed = account.sign_transaction(tx)
+    raw_hex = signed.raw_transaction.hex()
+    if not raw_hex.startswith("0x"):
+        raw_hex = "0x" + raw_hex
+
+    send_result = rpc_call("robinhood_chain", "eth_sendRawTransaction", [raw_hex])
+    if not send_result.get("ok"):
+        return ExecutionResult(False, f"eth_sendRawTransaction failed: {send_result.get('reason')}")
+    tx_hash = send_result.get("result")
+    if not isinstance(tx_hash, str):
+        return ExecutionResult(False, f"eth_sendRawTransaction returned no usable hash: {send_result}")
+
+    confirmed = _confirm_evm_tx("robinhood_chain", tx_hash)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sent but could not confirm (check hash manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=tx_hash)
+    filled_tokens = _get_evm_fill_amount("robinhood_chain", confirmed.get("receipt") or {}, token_checksum, account.address)
+    result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
+                              filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+    _log_trade("buy", "robinhood_chain", token_checksum, result)
+    return result
 
 
 def execute_sell(chain: str, token_address: str, amount_tokens: float, reason: str) -> ExecutionResult:
