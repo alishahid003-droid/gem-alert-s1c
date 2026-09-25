@@ -21,4 +21,5 @@
 17. [ ] Real test: 1 moonbag trim on a real live position — needs you, real money
 18. [ ] Real test: dashboard checked against real trade data (now unblocked — item 6 is done, just needs 13-17 to produce real data to look at)
 19. [ ] Keep `EXECUTION_ENABLED=false` until tasks 13-16 all pass
-20. [ ] `git push origin main` — new commits ready since your last push, most recent first: 6edd36a (#10b holder-growth-rate/vol-liq real wiring, 290 tests), 05f107e (backtest.py tier-vocabulary methodology fix), 571a400/a04b144/109271a/35740be/a662046/2c53284 (#9 WebSocket work + #10 backtest fixes + the Layer 1 deployer-alerts production bug fix) — needs your GitHub login, my sandbox has no credentials for it
+20. [x] `git push origin main` — all caught up as of Sept 25, ~4:48 PM PKT (through commit ba97dbd, includes #10b holder-growth-rate/vol-liq wiring and #11's GoPlus Solana fallback)
+21. [ ] Run `python backtest.py` once more now that #10b and #11 are both live, to see the real, now fully-differentiated elite/good vs. rising band distribution (no more identical 52/B for every token)
