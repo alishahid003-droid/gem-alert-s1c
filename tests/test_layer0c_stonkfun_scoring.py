@@ -1,9 +1,22 @@
 import json
 import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import state
+
+
+def _recent_iso(hours_ago: float = 1.0) -> str:
+    """A createdAt timestamp relative to whenever the test actually runs,
+    not a hardcoded date. FIXED Sept 25, 2026 -- the two run_one_cycle
+    tests below used a literal "2026-09-23T00:00:00.000Z" createdAt, which
+    silently started failing once real time moved more than
+    MOMENTUM_LOOKBACK_HOURS (48h) past that date: the worker's own age
+    filter (not a state-isolation bug) dropped the fixture candidate
+    before it ever reached the buy/dry-run logic these tests exist to
+    check. A relative timestamp keeps the test meaningful indefinitely."""
+    return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 from layers.layer0c_stonkfun_scoring import (
     parse_stonkfun_token_detail,
     compute_momentum,
@@ -238,16 +251,17 @@ def test_snipe_worker_dry_run_cycle_does_not_call_real_execution():
     import worker_stonkfun_snipe as w
 
     mint = "SnipeTestMint1111111111111111111111111111"
+    created_at = _recent_iso(hours_ago=1.0)  # well inside the 48h lookback, whenever this runs
 
     def fake_fetch_listing(limit):
         return {"ok": True, "raw": {"json": {"data": [
-            {"mint": mint, "createdAt": "2026-09-23T00:00:00.000Z"}
+            {"mint": mint, "createdAt": created_at}
         ]}}}
 
     def fake_fetch_detail(m):
         return {"ok": True, "raw": {"json": {"data": {
             "token": {"mint": m, "symbol": "SNIPE", "name": "Snipe Test",
-                      "quote": {"symbol": "SOL"}, "createdAt": "2026-09-23T00:00:00.000Z",
+                      "quote": {"symbol": "SOL"}, "createdAt": created_at,
                       "market": {"marketCapUsd": 20_000, "peakMarketCapUsd": 20_000,
                                  "liquidityUsd": 10_000}, "status": "new"},
             "launch": {"creator": "TestCreatorWallet1111111111111111111111111",
@@ -256,7 +270,7 @@ def test_snipe_worker_dry_run_cycle_does_not_call_real_execution():
 
     def fake_fetch_launches(creator, limit=50):
         return {"ok": True, "raw": {"json": {"data": [
-            {"mint": mint, "startMarketCapUsd": 4_000, "createdAt": "2026-09-23T00:00:00.000Z"}
+            {"mint": mint, "startMarketCapUsd": 4_000, "createdAt": created_at}
         ]}}}
 
     orig_listing, orig_detail, orig_launches = w.fetch_new_stonkfun_tokens, w.fetch_stonkfun_token_detail, w.fetch_stonkfun_launches_by_creator
@@ -326,7 +340,7 @@ def test_manage_open_positions_reprices_and_fires_moonbag_trim():
     def fake_fetch_detail(m):
         return {"ok": True, "raw": {"json": {"data": {
             "token": {"mint": m, "symbol": "MANAGE", "name": "Manage Test",
-                      "quote": {"symbol": "SOL"}, "createdAt": "2026-09-23T00:00:00.000Z",
+                      "quote": {"symbol": "SOL"}, "createdAt": _recent_iso(hours_ago=1.0),
                       "market": {"marketCapUsd": 40_000, "peakMarketCapUsd": 40_000,
                                  "liquidityUsd": 12_000}, "status": "new"},
             "launch": {"creator": "TestCreatorWallet1111111111111111111111111",
