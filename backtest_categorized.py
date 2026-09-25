@@ -38,16 +38,39 @@ entries this code cannot actually score -- adding an old BSC token here
 would just print "not in current Pulse snapshot" for every run, which is
 noise, not a result.
 
-HONEST LIMITATION #2: SOLANA_LABELED below currently has only ONE real,
-independently-verified entry per Sept 25 2026 -- SHROOM, Ali's own real
-Robinhood Chain trade (moonshot, ~$391 -> $1M+ unrealized, already used in
-backtest_named_coins.py). A real category-vs-category credibility number
-needs many more labeled tokens per category to mean anything statistically
-(n=1 proves nothing about "the system's credibility"). Two honest ways to
-grow this, NOT guessed/fabricated addresses:
+HONEST LIMITATION #2: SOLANA_LABELED below has THREE real,
+independently-verified entries per Sept 25 2026 -- still too few per
+category for the credibility % to be statistically meaningful, but growing:
+  - SHROOM (moonshot): Ali's own real Robinhood Chain trade, ~$391 ->
+    $1M+ unrealized, already used in backtest_named_coins.py.
+  - USELESS COIN (moonshot): mint Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk,
+    already independently verified in backtest_named_coins.py's own
+    SOLANA_RHC_COINS list ("resolved live via DexScreener"). Re-confirmed
+    live on DexScreener Sept 25 2026: ~1 year old, ~$298M market cap,
+    sustained (not a fresh/reversible pump) -- a real settled moonshot.
+  - MCAT / "Mooncat" (pump_dump): mint
+    7EA8EStQETtKkqFW8rqj77nfkiLEniVag8Y2jNUTpump, confirmed live on
+    DexScreener Sept 25 2026 via its own "Copy token address" control (a
+    first-party DexScreener UI element, not a guess) -- 7 days old, was
+    trading with real volume/liquidity, then fell -72.6% in 24h while
+    liquidity stayed real ($78K), i.e. exactly the "gained momentum and
+    fell" pattern Ali asked for, not a stale/dead pool.
+  One candidate was found and DISCARDED rather than added: SPCX (a
+  tokenized-SpaceX-stock token on Meteora) showed -99.99%/$0 mcap when
+  first checked, which looked like a rug -- but re-checking the same pair
+  ~3 hours later showed it back at a real $148 price, meaning the earlier
+  reading was a stale/broken pool snapshot, not a real collapse. Not
+  used, since this list only takes settled, real outcomes.
+  No genuine RUG example (LP fully drained, not just a hard dump) has
+  been independently verified and added yet -- DexScreener's own filters
+  don't expose "current liquidity ~$0 but had real liquidity historically"
+  directly, and guessing one from memory is against this session's
+  standing no-guessing rule. Two honest ways to keep growing this list,
+  NOT guessed/fabricated addresses:
   1. Ali pastes more real coins he knows the outcome of (same as he did for
      the Sept 24 2026 named-coin backtest) -- fastest, and he has direct
-     first-hand knowledge of real addresses and real outcomes.
+     first-hand knowledge of real addresses and real outcomes, especially
+     for a genuine rug.
   2. Further web research per candidate token, cross-verified against an
      independent source before being added here (same two-source-plus
      discipline used for every contract address/selector in this codebase
@@ -82,6 +105,8 @@ from utils.http import describe_fetch_failure
 # why this list is short today and how to grow it honestly.
 SOLANA_LABELED = [
     ("SHROOM", "robinhood_chain", "0xab093dEF657F15dF31b33922A95e047aDd645B29", "moonshot", False),
+    ("USELESS COIN", "solana", "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk", "moonshot", False),
+    ("Mooncat (MCAT)", "solana", "7EA8EStQETtKkqFW8rqj77nfkiLEniVag8Y2jNUTpump", "pump_dump", False),
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
