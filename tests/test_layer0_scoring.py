@@ -2,6 +2,9 @@ import json
 import os
 import time
 
+import pytest
+
+import state
 from layers.layer0_scoring import (
     signals_from_madeonsol_risk, signals_from_mobula_pulse, score_token,
     PREGRAD_SOL_BANDS, GRADUATED_OR_OTHER_BANDS, score_mobula_pulse_items,
@@ -9,6 +12,18 @@ from layers.layer0_scoring import (
     HOLDER_GROWTH_MIN_ELAPSED_SECONDS, fetch_goplus_security,
     parse_goplus_solana_security,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(tmp_path, monkeypatch):
+    # Added Sept 25 2026: fetch_madeonsol_token_risk now checks/records real
+    # MadeOnSol call-budget state (see state.py's madeonsol_budget_remaining
+    # docstring) -- without this, every test run here would write into the
+    # real on-device state file and falsely deplete the live system's daily
+    # budget tracker. Same isolation pattern as tests/test_madeonsol_gating.py.
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
+    monkeypatch.setattr(state.CONFIG, "upstash_redis_rest_url", None)
+    monkeypatch.setattr(state.CONFIG, "upstash_redis_rest_token", None)
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -445,3 +460,29 @@ def test_score_solana_mint_does_not_call_goplus_when_madeonsol_risk_succeeds(mon
     result = l0.score_solana_mint("MINT123", "solana", is_pregraduation=True)
     assert "error" not in result
     assert not any("gopluslabs" in c or "solana/token_security" in c for c in calls)
+
+
+def test_fetch_madeonsol_token_risk_fails_closed_when_budget_below_3(monkeypatch):
+    import layers.layer0_scoring as l0
+    state.record_madeonsol_calls(state.MADEONSOL_DAILY_BUDGET - 2)  # only 2 slots left, need 3
+
+    def unexpected_call(*a, **kw):
+        raise AssertionError("get_json should not be called when budget can't cover all 3 calls")
+
+    monkeypatch.setattr(l0, "get_json", unexpected_call)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l0.fetch_madeonsol_token_risk("MINT123", "solana")
+    assert result["ok"] is False
+    assert "budget" in result["reason"].lower()
+
+
+def test_fetch_madeonsol_token_risk_records_3_calls_on_success(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    monkeypatch.setattr(l0, "get_json", lambda *a, **kw: {"ok": True, "status_code": 200, "json": {}})
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    assert state.madeonsol_calls_today() == 0
+    l0.fetch_madeonsol_token_risk("MINT123", "solana")
+    assert state.madeonsol_calls_today() == 3

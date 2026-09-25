@@ -14,6 +14,7 @@ itself is reachable).
 """
 from config import CONFIG
 from utils.http import get_json, describe_fetch_failure
+import state
 
 ALERT_TIERS = {"elite", "good"}
 
@@ -44,6 +45,13 @@ def chain_for_cycle(now_ts: float, cycle_seconds: int = FAST_CYCLE_SECONDS) -> s
 def fetch_deployer_alerts(chain: str = "solana", since: str = None) -> dict:
     if not CONFIG.madeonsol_api_key:
         return {"ok": False, "reason": "MADEONSOL_API_KEY not configured"}
+    # Real daily-budget gate added Sept 25 2026 -- see state.py's
+    # madeonsol_budget_remaining() docstring for why (a confirmed real
+    # 200/day BASIC-tier cap, hit live today). Fails closed with a clear
+    # reason rather than spending a call MadeOnSol would just reject anyway.
+    if state.madeonsol_budget_remaining() < 1:
+        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted "
+                                        f"({state.madeonsol_calls_today()}/{state.MADEONSOL_DAILY_BUDGET})"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
     # FIXED Sept 25, 2026 -- real bug found live-testing backtest.py's
@@ -61,6 +69,7 @@ def fetch_deployer_alerts(chain: str = "solana", since: str = None) -> dict:
         params["since"] = since
     result = get_json(f"{CONFIG.madeonsol_base_url}{prefix}/deployer-hunter/alerts",
                        headers=headers, params=params)
+    state.record_madeonsol_calls(1)
     return {"ok": result["ok"], "raw": result}
 
 

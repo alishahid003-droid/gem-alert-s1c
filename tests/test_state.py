@@ -88,6 +88,38 @@ def test_holder_history_is_keyed_per_token(tmp_path, monkeypatch):
     assert len(state_module.get_holder_history("TOKEN_C")) == 1
 
 
+def test_madeonsol_budget_starts_full_and_decrements(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    assert state_module.madeonsol_calls_today() == 0
+    assert state_module.madeonsol_budget_remaining() == state_module.MADEONSOL_DAILY_BUDGET
+    state_module.record_madeonsol_calls(3)
+    assert state_module.madeonsol_calls_today() == 3
+    assert state_module.madeonsol_budget_remaining() == state_module.MADEONSOL_DAILY_BUDGET - 3
+
+
+def test_madeonsol_budget_never_goes_negative(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    state_module.record_madeonsol_calls(state_module.MADEONSOL_DAILY_BUDGET + 50)
+    assert state_module.madeonsol_budget_remaining() == 0
+
+
+def test_madeonsol_budget_key_is_bucketed_by_utc_calendar_day(tmp_path, monkeypatch):
+    # Real MadeOnSol quota resets at midnight UTC (confirmed live Sept 25
+    # 2026: "Resets at midnight UTC") -- the local tracker's key must be
+    # bucketed the same way so calls recorded "yesterday" (by UTC) don't
+    # count against "today"'s budget.
+    _reset_local_state(tmp_path, monkeypatch)
+    monkeypatch.setattr(state_module.time, "gmtime", lambda *a: __import__("time").strptime(
+        "2026-09-25 23:59:00", "%Y-%m-%d %H:%M:%S"))
+    state_module.record_madeonsol_calls(10)
+    assert state_module.madeonsol_calls_today() == 10
+
+    monkeypatch.setattr(state_module.time, "gmtime", lambda *a: __import__("time").strptime(
+        "2026-09-26 00:01:00", "%Y-%m-%d %H:%M:%S"))
+    assert state_module.madeonsol_calls_today() == 0  # new UTC day, fresh budget
+    assert state_module.madeonsol_budget_remaining() == state_module.MADEONSOL_DAILY_BUDGET
+
+
 def test_balance_roundtrip_and_prior_balances_map(tmp_path, monkeypatch):
     _reset_local_state(tmp_path, monkeypatch)
     assert state_module.get_prior_balance("W1", "TOKEN_A") is None

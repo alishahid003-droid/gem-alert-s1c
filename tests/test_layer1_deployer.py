@@ -1,9 +1,24 @@
 import json
 import os
 
+import pytest
+
+import state
 from layers.layer1_deployer import parse_deployer_alerts, chain_for_cycle, poll_layer1
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(tmp_path, monkeypatch):
+    # Added Sept 25 2026: fetch_deployer_alerts now checks/records real
+    # MadeOnSol call-budget state (see state.py's madeonsol_budget_remaining
+    # docstring) -- without this, every test run here would write into the
+    # real on-device state file and falsely deplete the live system's daily
+    # budget tracker. Same isolation pattern as tests/test_madeonsol_gating.py.
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
+    monkeypatch.setattr(state.CONFIG, "upstash_redis_rest_url", None)
+    monkeypatch.setattr(state.CONFIG, "upstash_redis_rest_token", None)
 
 
 def test_parses_and_filters_to_elite_and_good_only():
@@ -86,3 +101,29 @@ def test_fetch_deployer_alerts_sends_tier_as_repeated_param_not_comma_joined(mon
     )
     assert set(tier_value) == {"elite", "good"}
     assert "," not in "".join(tier_value)
+
+
+def test_fetch_deployer_alerts_fails_closed_when_daily_budget_exhausted(monkeypatch):
+    import layers.layer1_deployer as l1
+    state.record_madeonsol_calls(state.MADEONSOL_DAILY_BUDGET)  # exhaust it
+
+    def unexpected_call(*a, **kw):
+        raise AssertionError("get_json should not be called when budget is exhausted")
+
+    monkeypatch.setattr(l1, "get_json", unexpected_call)
+    monkeypatch.setattr(l1.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l1.fetch_deployer_alerts("solana")
+    assert result["ok"] is False
+    assert "budget" in result["reason"].lower()
+
+
+def test_fetch_deployer_alerts_records_a_call_on_success(monkeypatch):
+    import layers.layer1_deployer as l1
+
+    monkeypatch.setattr(l1, "get_json", lambda *a, **kw: {"ok": True, "status_code": 200, "json": {"alerts": []}})
+    monkeypatch.setattr(l1.CONFIG, "madeonsol_api_key", "msk_test")
+
+    assert state.madeonsol_calls_today() == 0
+    l1.fetch_deployer_alerts("solana")
+    assert state.madeonsol_calls_today() == 1

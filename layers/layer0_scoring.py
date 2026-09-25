@@ -602,6 +602,16 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     one."""
     if not CONFIG.madeonsol_api_key:
         return {"ok": False, "reason": "MADEONSOL_API_KEY not configured"}
+    # Real daily-budget gate added Sept 25 2026 -- this call spends 3 real
+    # MadeOnSol calls at once (risk+holders+bundle), so it needs 3 full
+    # slots of headroom, not just 1 -- see state.py's
+    # madeonsol_budget_remaining() docstring for the confirmed real 200/day
+    # BASIC-tier cap this protects against. Fails closed rather than
+    # partially spending the day's remaining budget on a call that would
+    # get rejected anyway.
+    if state.madeonsol_budget_remaining() < 3:
+        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted "
+                                        f"({state.madeonsol_calls_today()}/{state.MADEONSOL_DAILY_BUDGET})"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
     out = {}
@@ -612,6 +622,7 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
         ("bundle", f"{prefix}/tokens/{mint}/bundle"),
     ]:
         result = get_json(f"{CONFIG.madeonsol_base_url}{path}", headers=headers)
+        state.record_madeonsol_calls(1)
         out[name] = result
         if not result.get("ok"):
             failures.append(f"{name}: {describe_fetch_failure({'raw': result})}")

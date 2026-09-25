@@ -82,3 +82,95 @@ def test_run_poll_madeonsol_runs_all_three_regardless_of_github_actions_flag(mon
     monkeypatch.setattr(scheduler, "fetch_boost_board", lambda: {"ok": False})
     scheduler.run_poll_madeonsol()
     assert calls == ["layer1", "layer8", "fomo"]
+
+
+def test_run_layer8_cycle_requeues_pending_tokens_when_budget_insufficient(monkeypatch):
+    # Real production scenario, Sept 25 2026: MadeOnSol's BASIC-tier key has
+    # a confirmed real 200/day cap. When the day's budget can't cover a
+    # full 3-call score_solana_mint attempt, _run_layer8_cycle must defer
+    # that token to a later cycle (state.queue_rescan) instead of burning a
+    # doomed call -- see scheduler.py's budget-check comment.
+    monkeypatch.setattr(scheduler.CONFIG, "madeonsol_api_key", "msk_test")
+    state.queue_rescan("MINTA", "solana", False)
+    state.queue_rescan("MINTB", "solana", False)
+
+    # Leave only 2 slots of real budget -- not enough for even one 3-call attempt.
+    state.record_madeonsol_calls(state.MADEONSOL_DAILY_BUDGET - 2)
+
+    scored_calls = []
+    monkeypatch.setattr(scheduler, "score_solana_mint",
+                         lambda *a, **kw: scored_calls.append(a) or {"error": "should not be called"})
+
+    alerts_sent, madeonsol_calls = scheduler._run_layer8_cycle(board={})
+
+    assert scored_calls == []  # never attempted -- budget was insufficient
+    assert madeonsol_calls == 0
+    assert alerts_sent == 0
+    # both tokens re-queued, not dropped
+    assert state.pending_rescan_count() == 2
+
+
+def test_run_layer8_cycle_scores_normally_when_budget_is_healthy(monkeypatch):
+    monkeypatch.setattr(scheduler.CONFIG, "madeonsol_api_key", "msk_test")
+    state.queue_rescan("MINTA", "solana", False)
+
+    scored_calls = []
+
+    def fake_score(mint, chain, is_pregraduation):
+        scored_calls.append(mint)
+        return {"chain": chain, "address": mint, "score": None}
+
+    monkeypatch.setattr(scheduler, "score_solana_mint", fake_score)
+    monkeypatch.setattr(scheduler, "_handle_scored", lambda *a, **kw: False)
+
+    alerts_sent, madeonsol_calls = scheduler._run_layer8_cycle(board={})
+
+    assert scored_calls == ["MINTA"]
+    assert madeonsol_calls == 3
+    assert state.pending_rescan_count() == 0
+
+
+def test_run_layer8_cycle_requeues_pending_tokens_when_budget_insufficient(monkeypatch):
+    # Real production scenario, Sept 25 2026: MadeOnSol's BASIC-tier key has
+    # a confirmed real 200/day cap. When the day's budget can't cover a
+    # full 3-call score_solana_mint attempt, _run_layer8_cycle must defer
+    # that token to a later cycle (state.queue_rescan) instead of burning a
+    # doomed call -- see scheduler.py's budget-check comment.
+    monkeypatch.setattr(scheduler.CONFIG, "madeonsol_api_key", "msk_test")
+    state.queue_rescan("MINTA", "solana", False)
+    state.queue_rescan("MINTB", "solana", False)
+
+    # Leave only 2 slots of real budget -- not enough for even one 3-call attempt.
+    state.record_madeonsol_calls(state.MADEONSOL_DAILY_BUDGET - 2)
+
+    scored_calls = []
+    monkeypatch.setattr(scheduler, "score_solana_mint",
+                         lambda *a, **kw: scored_calls.append(a) or {"error": "should not be called"})
+
+    alerts_sent, madeonsol_calls = scheduler._run_layer8_cycle(board={})
+
+    assert scored_calls == []  # never attempted -- budget was insufficient
+    assert madeonsol_calls == 0
+    assert alerts_sent == 0
+    # both tokens re-queued, not dropped
+    assert state.pending_rescan_count() == 2
+
+
+def test_run_layer8_cycle_scores_normally_when_budget_is_healthy(monkeypatch):
+    monkeypatch.setattr(scheduler.CONFIG, "madeonsol_api_key", "msk_test")
+    state.queue_rescan("MINTA", "solana", False)
+
+    scored_calls = []
+
+    def fake_score(mint, chain, is_pregraduation):
+        scored_calls.append(mint)
+        return {"chain": chain, "address": mint, "score": None}
+
+    monkeypatch.setattr(scheduler, "score_solana_mint", fake_score)
+    monkeypatch.setattr(scheduler, "_handle_scored", lambda *a, **kw: False)
+
+    alerts_sent, madeonsol_calls = scheduler._run_layer8_cycle(board={})
+
+    assert scored_calls == ["MINTA"]
+    assert madeonsol_calls == 3
+    assert state.pending_rescan_count() == 0

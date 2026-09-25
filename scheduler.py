@@ -801,6 +801,18 @@ def _run_layer8_cycle(board):
             for p in overflow:
                 state.queue_rescan(p["token"], p["chain"], p["is_pregraduation"])
             for p in to_process:
+                # Real daily-budget check added Sept 25 2026 -- see
+                # state.py's madeonsol_budget_remaining() docstring. If the
+                # day's real 200/day BASIC-tier quota is nearly spent,
+                # re-queue this token for a later cycle instead of burning
+                # a call attempt that fetch_madeonsol_token_risk would just
+                # refuse anyway -- same re-queue mechanism already used for
+                # per-cycle overflow above, so nothing here is lost, just
+                # deferred to whenever budget frees up (next UTC day, or a
+                # quieter cycle).
+                if state.madeonsol_budget_remaining() < 3:
+                    state.queue_rescan(p["token"], p["chain"], p["is_pregraduation"])
+                    continue
                 scored = _safe(score_solana_mint, p["token"], chain, is_pregraduation=p["is_pregraduation"])
                 madeonsol_calls += 3  # risk + holders + bundle
                 if _handle_scored(scored, chain, source="madeonsol", board=board):

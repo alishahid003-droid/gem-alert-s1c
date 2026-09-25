@@ -164,6 +164,49 @@ def get_holder_history(token: str) -> List[Tuple[float, float]]:
     return [(p[0], p[1]) for p in (get_value(f"holder_history:{token}") or [])]
 
 
+# ---------------------------------------------------------------------------
+# MadeOnSol daily call budget -- added Sept 25 2026, real production bug
+# caught live: Ali's BASIC-tier key has a real, confirmed 200-calls/day cap
+# ("Daily rate limit exceeded -- 200/day for BASIC tier. Resets at midnight
+# UTC.", seen live running backtest.py). Layer 1 (poll-fast.yml, every 10
+# min, 1 real MadeOnSol call/cycle after chain_for_cycle's alternation) is
+# ~144 calls/day on its own. Layer 8's deep-scoring (poll-slow.yml, every 20
+# min, up to LAYER8_MAX_DEEP_SCORES_PER_SLOW_CYCLE=3 tokens/chain * 3 calls
+# each * up to 2 chains) can burst as high as 18 calls/cycle -- worst case,
+# fully saturated every cycle, that alone is ~1296 calls/day. Extending cron
+# cadence alone doesn't cap this (alert volume is bursty, not steady), so
+# this is a real per-day budget gate every MadeOnSol-calling function checks
+# before spending calls, not a guess based on timing.
+#
+# Bucketed by UTC calendar day to match MadeOnSol's own stated reset time
+# exactly (confirmed live: "Resets at midnight UTC") -- so this tracker's
+# reset always lines up with the real one, not an approximation.
+# ---------------------------------------------------------------------------
+MADEONSOL_DAILY_BUDGET = 190  # safety margin under the real, confirmed 200/day BASIC-tier cap
+
+
+def _madeonsol_budget_key() -> str:
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    return f"madeonsol_calls:{day}"
+
+
+def record_madeonsol_calls(n: int = 1):
+    """Call once per REAL MadeOnSol HTTP request actually sent (success or
+    failure -- a rejected/errored call still counts against the real quota,
+    same as any other API rate limit)."""
+    key = _madeonsol_budget_key()
+    count = get_value(key) or 0
+    set_value(key, count + n)
+
+
+def madeonsol_calls_today() -> int:
+    return get_value(_madeonsol_budget_key()) or 0
+
+
+def madeonsol_budget_remaining() -> int:
+    return max(0, MADEONSOL_DAILY_BUDGET - madeonsol_calls_today())
+
+
 # --- Layer 7: rolling alert-event log, for cross-layer correlation
 # (Ali, Sept 23 2026: wired tonight). One list per TOKEN (not global) so a
 # busy cycle across many tokens doesn't force scanning one huge shared list
