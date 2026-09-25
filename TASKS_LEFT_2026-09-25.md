@@ -1,7 +1,7 @@
 # Tasks Left — Sept 25, 2026
 
-1. [ ] Robinhood Chain — auto-buy (blocked: needs Uniswap v4 pool key data not yet fetched)
-2. [ ] Robinhood Chain — auto-sell (same block)
+1. [ ] Robinhood Chain — auto-buy: pool-discovery piece done (executor/rhc_pool_discovery.py, commit b34c888, 12 new tests, 318 total passing) -- real on-chain lookup of Uniswap v4's PoolKey (fee/tickSpacing/hooks) via PoolManager's own Initialize event logs, since DexScreener doesn't expose that data for v4 pools. PoolManager address independently confirmed by you on robinhoodchain.blockscout.com; event signature/topic0 confirmed against two official Uniswap sources and computed live via keccak256, not guessed. STILL NOT DONE: the actual swap-calldata construction (V4Router command encoding, ExactInputSingle params, Permit2) that uses this pool data to build and send a real transaction, and wiring it into execute_buy_robinhood_chain() (currently still the stub it always was). That's the next real chunk of this item.
+2. [ ] Robinhood Chain — auto-sell (same block, same next step)
 3. [x] Dashboard — trade/fill history table (tx hash, filled amount, timestamp)
 4. [x] Dashboard — realized P&L display (fixed the real bug behind it: sells never set filled_usd)
 5. [x] Dashboard — closed-positions history table
