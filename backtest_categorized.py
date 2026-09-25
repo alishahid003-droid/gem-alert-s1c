@@ -183,11 +183,59 @@ SOLANA_LABELED = [
     # SOL down to 6.55 SOL, ~$796), 24h change -100%. Classic LP-drain
     # pump-and-dump signature.
     ("AROS", "solana", "12PUFAUzgLj1onv3wSqX9ZagZBiaxofEjTd24CnQpump", "rug", False),
+    # Added Sept 26 2026 -- Ali asked to add TRUMP, plus 5-6 rug examples
+    # from the last week's launches, plus coins that pumped and got
+    # dumped quickly, all real/self-sourced from DexScreener, no guesses.
+    #
+    # TRUMP: added as moonshot. OFFICIAL TRUMP
+    # (6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN) -- 1y8mo old, real,
+    # sustained ~$418M mcap across multiple pairs/DEXs with real
+    # liquidity ($8.5M+ in the USDC pair alone). Not a fresh/reversible
+    # pump -- a genuinely settled, sustained moonshot.
+    ("TRUMP", "solana", "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN", "moonshot", False),
+    #
+    # 5 real rugs from the last ~2 days of launches, found by sorting
+    # Solana pairs on DexScreener by 24h price change ascending with a
+    # liquidity floor (same method as AROS above), picking ones with
+    # real, substantial trading volume/trader counts followed by a
+    # near-total liquidity collapse (not tiny dust-level launches):
+    ("JEANCOIN", "solana", "4WECKfvfgEiojyZJq5Xm12Hvk76rhM4VHQAZGaELpump", "rug", False),
+    # A COPYCAT token reusing the "Super Inu" name/branding (real "Super
+    # Inu" SI/NVDAx at ~$13M mcap is a separate, currently-pumping token,
+    # already flagged ambiguous above) -- this clone (SI/STONK pair) did
+    # $212K real volume across 515 traders then collapsed -92.45% in 24h,
+    # liquidity down to $9.6K. A real example of a scam clone riding a
+    # trending name.
+    ("Super Inu clone (SI/STONK)", "solana", "FVbxaZtT5crMVkzttKbwojcoSZKfcbYmyRittduLMyPb", "rug", False),
+    ("ELONCOIN", "solana", "2sztT8K9Xu3cfp6WTEEB44Hdibmj3Pv6G2pWGM1vqzXP", "rug", False),
+    ("MEMESTONK", "solana", "E767cZXeubGKNo6foSaBWdUHLxKBiUjMPGSx5SUuoG7r", "rug", False),
+    ("Trader", "solana", "E2rTYWpcD8MS6Bg36VYuE2CNsRP4ugYQchLxFvY39Cws", "rug", False),
+    #
+    # 3 real "pumped, held a level, then dumped" examples -- same search,
+    # but picked for MODERATE liquidity retention (tens of thousands of $
+    # still in the pool, not drained to dust like the rugs above) and a
+    # visible pump-then-cliff shape in the 1h/6h/24h numbers (flat or
+    # small 1h change but a huge negative 6h change -- i.e. the dump
+    # already happened a few hours ago and has since stabilized):
+    ("RICH OFF GTA 6", "solana", "Ddd4Qy8N5nNtteaHfESfmjsynz5qEGFQZMLQuLj49EzL", "pump_dump", False),
+    ("StonkBlend", "solana", "2Ngvnnkwrwq5u4RYV5WYKJ2wiQoEkKaVCc4LuuhYSTNK", "pump_dump", False),
+    ("ROBUX", "solana", "Hdky1Lz84WL7cPWVk7StFWrXVXvdXwPrAcfjJoUrpump", "pump_dump", False),
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
 # with tokens this code cannot actually score.
-BSC_LABELED = []
+BSC_LABELED = [
+    # Added Sept 26 2026 -- Ali asked to add "laptop" coin. Real,
+    # established "LAPTOP" (Hunter Biden's Laptop project) on Base,
+    # ~$25.6M mcap, $1.3M liquidity, consistent across 3 separate pairs
+    # (USDC, AAPLc, WETH) all pointing to the same token address --
+    # a real, sustained token, filed as moonshot. NOTE: same limitation
+    # as every BSC/Base entry in this file (see module docstring) -- this
+    # can only be scored if LAPTOP is still in Mobula's LIVE Pulse
+    # trending snapshot at run time; if not, it will print "not in
+    # current Pulse snapshot" and be skipped rather than fail.
+    ("LAPTOP", "base", "0xB095274743941e953c746F9C228DA9c18Bb6ec29", "moonshot", False),
+]
 
 CATEGORY_EXPECTATION = {
     # category -> set of bands that count as a "hit" (system did the right thing)
