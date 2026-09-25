@@ -61,11 +61,18 @@ category for the credibility % to be statistically meaningful, but growing:
   ~3 hours later showed it back at a real $148 price, meaning the earlier
   reading was a stale/broken pool snapshot, not a real collapse. Not
   used, since this list only takes settled, real outcomes.
-  No genuine RUG example (LP fully drained, not just a hard dump) has
-  been independently verified and added yet -- DexScreener's own filters
-  don't expose "current liquidity ~$0 but had real liquidity historically"
-  directly, and guessing one from memory is against this session's
-  standing no-guessing rule.
+  UPDATE Sept 26 2026: a genuine RUG example has now been found and
+  added -- AROS / "American Reserved Oil Supply"
+  (12PUFAUzgLj1onv3wSqX9ZagZBiaxofEjTd24CnQpump). Ali said he had no rug
+  example of his own and asked me to pull real data from DexScreener
+  myself for this. Found it by sorting Solana pairs on DexScreener by 24h
+  price change ascending with a liquidity floor (filters out pairs that
+  never had real trading), then verified the specific candidate is a real
+  LP-drain and not a stale snapshot (re-checked the same pair ~4 seconds
+  apart -- identical numbers both times, unlike the SPCX false-positive
+  discarded earlier tonight). See SOLANA_LABELED below for the exact
+  numbers that make this a real rug (real buy-in volume/traders followed
+  by a liquidity drain to near-zero), not a guess.
 
   Sept 26 2026 -- Ali asked to check 8 more names: SI, ZCAT, JEANPHIL,
   Stonk, BUTTCOIN, AMC, Moniter, GO. All 8 were researched live on
@@ -163,6 +170,19 @@ SOLANA_LABELED = [
     # labeled entry -- see the long note above for why the other 7 were
     # NOT added.
     ("Monitor", "solana", "G8dUSvywefr4GvfFZBZiLHmbjnwjrrJPAnVifjj7pump", "flat", False),
+    # Added Sept 26 2026 -- Ali said he has no rug example of his own and
+    # asked me to pull one from DexScreener myself. Found by sorting
+    # Solana pairs by 24h price change ascending with a liquidity floor
+    # (filters out dead/never-traded pairs) -- a real, internally
+    # consistent rug, not a stale snapshot (re-checked ~4s apart, same
+    # numbers both times, unlike the SPCX false-positive discarded
+    # earlier). AROS / "American Reserved Oil Supply": 2d20h old, lifetime
+    # volume $3.3M across 10,787 txns / 2,938 traders, BUY VOL $111K vs
+    # SELL VOL $3.1M (10,282 buys vs only 505 sells -- a small number of
+    # huge sells against broad real buy-in), liquidity now $3.7K (pooled
+    # SOL down to 6.55 SOL, ~$796), 24h change -100%. Classic LP-drain
+    # pump-and-dump signature.
+    ("AROS", "solana", "12PUFAUzgLj1onv3wSqX9ZagZBiaxofEjTd24CnQpump", "rug", False),
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
