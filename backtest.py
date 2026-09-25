@@ -56,7 +56,18 @@ def fetch_tier_sample(chain: str, tiers: set, sample_size: int) -> list:
     """Reuses the same /deployer-hunter/alerts endpoint Layer 1 already
     calls, but asks for the opposite tier set (spammer) as well as the
     normal elite/good set -- MadeOnSol's own tier data is the ground truth
-    here, same endpoint family, just a different `tier` query param."""
+    here, same endpoint family, just a different `tier` query param.
+
+    FIXED Sept 25, 2026: this used to also send a `limit` query param
+    (`sample_size * 3`, meant as an over-fetch-then-dedupe hint). A real
+    run against MadeOnSol returned 400 "Invalid query parameters" for
+    BOTH tier combinations tried -- and layers/layer1_deployer.py's
+    fetch_deployer_alerts() sends this exact same endpoint with the exact
+    same `tier` param shape (`{"tier": "elite,good"}`) successfully every
+    poll-fast.yml cycle, with no `limit` param. `limit` was the only
+    difference, so it's almost certainly the query param MadeOnSol's
+    validator was rejecting -- removed. Sample-size capping now happens
+    entirely client-side in the loop below instead."""
     if not CONFIG.madeonsol_api_key:
         print(f"BLOCKED: MADEONSOL_API_KEY not configured -- cannot pull {tiers} sample for {chain}")
         return []
@@ -69,7 +80,7 @@ def fetch_tier_sample(chain: str, tiers: set, sample_size: int) -> list:
     result = get_json(
         f"{CONFIG.madeonsol_base_url}{prefix}/deployer-hunter/alerts",
         headers=headers,
-        params={"tier": tier_param, "limit": sample_size * 3},  # over-fetch, dedupe below
+        params={"tier": tier_param},
     )
     if not result.get("ok"):
         print(f"FAILED fetching tier={tier_param} chain={chain}: "
