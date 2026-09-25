@@ -46,7 +46,17 @@ def fetch_deployer_alerts(chain: str = "solana", since: str = None) -> dict:
         return {"ok": False, "reason": "MADEONSOL_API_KEY not configured"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
-    params = {"tier": "elite,good"}
+    # FIXED Sept 25, 2026 -- real bug found live-testing backtest.py's
+    # sibling call: MadeOnSol's /deployer-hunter/alerts endpoint rejects a
+    # comma-joined tier value ("tier=elite,good" -> 400 "Invalid query
+    # parameters") -- it wants the tier param repeated once per value
+    # ("tier=elite&tier=good"), confirmed against the real API. requests
+    # encodes a list value that way automatically. This means Layer 1's
+    # elite/good deployer alerts have almost certainly been silently
+    # 400ing on every single poll-fast.yml cycle since this was built --
+    # poll_layer1 just returns ok=False on any non-2xx, so this never
+    # surfaced as a loud error, just permanently empty deployer alerts.
+    params = {"tier": sorted(ALERT_TIERS)}
     if since:
         params["since"] = since
     result = get_json(f"{CONFIG.madeonsol_base_url}{prefix}/deployer-hunter/alerts",

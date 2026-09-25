@@ -54,3 +54,35 @@ def test_poll_layer1_surfaces_real_http_error_not_generic_fetch_failed(monkeypat
     assert result["ok"] is False
     assert "429" in result["reason"]
     assert "ip_rotation" in result["reason"]
+
+
+def test_fetch_deployer_alerts_sends_tier_as_repeated_param_not_comma_joined(monkeypatch):
+    # Regression test for the Sept 25 2026 production bug: MadeOnSol's
+    # /deployer-hunter/alerts endpoint returns 400 "Invalid query parameters"
+    # for a comma-joined tier value ("tier=elite,good") -- confirmed live
+    # against the real API. It wants the tier param repeated once per value
+    # instead, which requests encodes automatically from a list value. This
+    # bug meant Layer 1's elite/good deployer alerts were silently 400ing
+    # on every single poll-fast.yml cycle in production. Locks in the list
+    # shape so this can't silently regress back to a comma-joined string.
+    import layers.layer1_deployer as layer1_deployer
+
+    captured = {}
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        captured["params"] = params
+        return {"ok": True, "status_code": 200, "url": url, "json": {"alerts": []}}
+
+    monkeypatch.setattr(layer1_deployer, "get_json", fake_get_json)
+    monkeypatch.setattr(layer1_deployer.CONFIG, "madeonsol_api_key", "msk_test")
+
+    layer1_deployer.fetch_deployer_alerts("solana")
+
+    tier_value = captured["params"]["tier"]
+    assert isinstance(tier_value, (list, tuple)), (
+        "tier must be a list/tuple so requests encodes it as repeated params "
+        "(tier=elite&tier=good), not a single comma-joined string -- MadeOnSol "
+        "rejects the comma-joined form with 400 Invalid query parameters"
+    )
+    assert set(tier_value) == {"elite", "good"}
+    assert "," not in "".join(tier_value)

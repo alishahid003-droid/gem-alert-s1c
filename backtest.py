@@ -58,16 +58,16 @@ def fetch_tier_sample(chain: str, tiers: set, sample_size: int) -> list:
     normal elite/good set -- MadeOnSol's own tier data is the ground truth
     here, same endpoint family, just a different `tier` query param.
 
-    FIXED Sept 25, 2026: this used to also send a `limit` query param
-    (`sample_size * 3`, meant as an over-fetch-then-dedupe hint). A real
-    run against MadeOnSol returned 400 "Invalid query parameters" for
-    BOTH tier combinations tried -- and layers/layer1_deployer.py's
-    fetch_deployer_alerts() sends this exact same endpoint with the exact
-    same `tier` param shape (`{"tier": "elite,good"}`) successfully every
-    poll-fast.yml cycle, with no `limit` param. `limit` was the only
-    difference, so it's almost certainly the query param MadeOnSol's
-    validator was rejecting -- removed. Sample-size capping now happens
-    entirely client-side in the loop below instead."""
+    FIXED Sept 25, 2026, in two rounds: (1) this used to also send a
+    `limit` query param (`sample_size * 3`) which turned out to be
+    harmless -- removed anyway since it's unused by the API; sample-size
+    capping happens entirely client-side in the loop below. (2) the real
+    bug: a live diagnostic against MadeOnSol (see git history) proved the
+    endpoint rejects a comma-joined `tier` value ("tier=elite,good" -> 400
+    "Invalid query parameters") and wants the tier param repeated once per
+    value instead ("tier=elite&tier=good") -- see the tier_list fix below.
+    layers/layer1_deployer.py's fetch_deployer_alerts() had this exact
+    same comma-join bug live in production; fixed there too."""
     if not CONFIG.madeonsol_api_key:
         print(f"BLOCKED: MADEONSOL_API_KEY not configured -- cannot pull {tiers} sample for {chain}")
         return []
@@ -76,13 +76,21 @@ def fetch_tier_sample(chain: str, tiers: set, sample_size: int) -> list:
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
     from utils.http import get_json
 
-    tier_param = ",".join(sorted(tiers))
+    # FIXED Sept 25, 2026 (round 3): confirmed live against the real API
+    # (diagnostic run in Ali's own terminal) that MadeOnSol's endpoint
+    # rejects a comma-joined tier value with 400 "Invalid query parameters"
+    # and wants the tier param repeated once per value instead
+    # (tier=elite&tier=good) -- requests encodes a list value that way
+    # automatically. Same fix applied to layers/layer1_deployer.py, which
+    # had this exact bug live in production (see that file's comment).
+    tier_list = sorted(tiers)
     result = get_json(
         f"{CONFIG.madeonsol_base_url}{prefix}/deployer-hunter/alerts",
         headers=headers,
-        params={"tier": tier_param},
+        params={"tier": tier_list},
     )
     if not result.get("ok"):
+        tier_param = ",".join(tier_list)
         print(f"FAILED fetching tier={tier_param} chain={chain}: "
               f"status={result.get('status_code')} body={str(result.get('json'))[:300]}")
         return []
