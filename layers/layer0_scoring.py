@@ -340,7 +340,16 @@ def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
     not the first one returned. Never a hard dependency: any failure here
     (unsupported chain, no pairs, network error) just leaves the caller's
     vol_to_liq_ratio at None exactly as before this existed -- same
-    degrade-gracefully convention as fetch_goplus_security."""
+    degrade-gracefully convention as fetch_goplus_security.
+
+    Also returns launch_ts_ms (DexScreener's real pairCreatedAt field,
+    confirmed present on the pairs endpoint response per
+    docs.dexscreener.com/api/reference Sept 26 2026) -- the actual
+    real-world creation time of the deepest pool, added for
+    backtest_point_in_time.py so a point-in-time backtest has a real
+    anchor date instead of guessing. None if DexScreener didn't return it
+    for this pair (nullable per their own schema) -- never a hard
+    dependency, same as volume_24h/liquidity_usd above."""
     slug = DEXSCREENER_CHAIN_SLUG.get(chain)
     if not slug or not address:
         return {"ok": False, "reason": f"no DexScreener chain slug for chain={chain!r}"}
@@ -353,9 +362,11 @@ def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
     best = max(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
     volume_24h = (best.get("volume") or {}).get("h24")
     liquidity_usd = (best.get("liquidity") or {}).get("usd")
+    launch_ts_ms = best.get("pairCreatedAt")
     if volume_24h is None or liquidity_usd is None:
         return {"ok": False, "reason": "pair missing volume/liquidity fields"}
-    return {"ok": True, "volume_24h": volume_24h, "liquidity_usd": liquidity_usd}
+    return {"ok": True, "volume_24h": volume_24h, "liquidity_usd": liquidity_usd,
+            "launch_ts_ms": launch_ts_ms}
 
 
 GOPLUS_CHAIN_IDS = {"bsc": "56", "base": "8453", "ethereum": "1"}  # GoPlus's numeric chain ids

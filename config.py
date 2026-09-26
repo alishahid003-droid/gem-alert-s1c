@@ -91,6 +91,14 @@ class Config:
         "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
     )
     coinbase_products_url: str = "https://api.exchange.coinbase.com/products"
+    # Birdeye Data Services -- free Standard tier ($0/mo, 30K compute
+    # units, 1 req/sec, no card), used only by backtest_point_in_time.py
+    # for historical OHLCV around a token's real launch window. See that
+    # file's docstring for the honest caveat: Birdeye's own docs disagree
+    # with themselves on whether /defi/ohlcv is included at the free
+    # Standard tier or Starter+ only -- unconfirmed until Ali's real free
+    # key hits it.
+    birdeye_base_url: str = "https://public-api.birdeye.so"
 
     http_timeout_seconds: int = 20
 
