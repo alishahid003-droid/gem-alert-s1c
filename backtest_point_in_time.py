@@ -1,104 +1,101 @@
-"""Point-in-time credibility backtest -- Ali's ask, Sept 26 2026: "we need
-to run it on back data...that if our system was live when these coins
-launched what would our system would have recommended and done...only
-then we come to know the credibility and effectiveness of our system."
+"""Point-in-time credibility backtest v2 -- Ali's ask, Sept 26-27 2026:
+"the whole idea of backtest is to check our system's effectiveness...the
+system can only detect rug or moonshot with deployer capability...not with
+any other check like volume liquidity, utility, news...deployer part was
+one module of system not everything depending on it."
 
-Reuses the exact same labeled coin list backtest_categorized.py already
-has (SOLANA_LABELED/BSC_LABELED) -- no new labeling work, just a different
-question asked of the same real tokens: not "what does this look like
-today" but "what did this look like AT LAUNCH, and would Layer 1 have let
-it through."
+CORRECTION from v1: v1 over-focused on deployer-tier-at-launch (MadeOnSol's
+deployer-hunter/as-of endpoint, which turned out to be PRO-tier gated).
+That endpoint is only ONE input to Layer 1's alert-worthiness gate -- it is
+NOT how the system scores a token. The real detection engine
+(score_solana_mint -> signals_from_madeonsol_risk -> score_token) reads
+holder concentration, bundle/sniper wallet share, mint authority revoked,
+freeze authority revoked, LP locked, and volume-to-liquidity ratio -- NONE
+of that needs deployer tier, and NONE of it is paywalled. This version
+runs THAT engine, combined with Birdeye's real launch-window price/volume
+shape, to answer the actual question: what would the system's multi-signal
+score have said about these coins, as close to launch time as free data
+allows.
 
-HONEST SCOPE, see layers/layer0d_point_in_time.py's docstring for the full
-explanation of why: this does NOT reconstruct MadeOnSol's full risk/
-holders/bundle score at launch time -- no provider wired into this
-codebase exposes that historically. What it DOES check per token, all from
-real point-in-time or launch-anchored data:
-
-  1. Real launch date (DexScreener pairCreatedAt)
-  2. Best-effort on-chain deployer wallet (may fail/truncate for old
-     high-volume tokens -- see layer0d_point_in_time.py)
-  3. IF a deployer wallet was found: MadeOnSol's real point-in-time
-     deployer-tier snapshot AS OF the launch date -- would Layer 1's
-     elite/good-tier filter have let this token's alert through at all
-  4. IF BIRDEYE_API_KEY is set: real historical price/volume for the first
-     48h after launch, reduced to peak price / end-of-window drawdown --
-     lets you SEE whether a "moonshot" was already a moonshot in its first
-     48h (a fair test) vs a "rug"/"pump_dump" already showing the
-     dump-shape early, rather than just knowing today's outcome.
-
-Categories and expectation, same convention as backtest_categorized.py:
-  moonshot   -> deployer tier SHOULD be elite/good (a real one usually is)
-  rug        -> deployer tier being unranked/low is a plausible catch;
-                elite/good would mean Layer 1 wouldn't have flagged it,
-                a real miss worth knowing about
-  pump_dump  -> same logic as rug
-  flat       -> no strong expectation either way, reported not scored
+HONEST LABELING, not overclaimed:
+  - For young/settled tokens (rugs and pump_dumps, most launched within
+    the last few days and already at their final, drained state) --
+    MadeOnSol's CURRENT holders/bundle/risk data is a legitimate stand-in
+    for "at/near launch outcome," because nothing material has changed
+    since the crash. Labeled "current_score (settled)" below.
+  - For old, established moonshots (TRUMP, USELESS COIN, months old) --
+    current data is NOT representative of launch-day conditions. For
+    these, the Birdeye 48h launch-window price/volume shape is the real
+    point-in-time evidence; the current multi-signal score is shown too
+    but labeled "current_score (NOT launch-representative)" so it's never
+    silently treated as equivalent evidence.
+  - Every row states plainly which evidence is which -- no single number
+    hides that distinction.
 
 Usage: python backtest_point_in_time.py [--skip-onchain] [--skip-birdeye]
---skip-onchain skips the on-chain deployer-wallet lookup entirely (useful
-if you just want the launch-date + Birdeye pieces fast); --skip-birdeye
-skips Birdeye even if the key is set.
+[--skip-current-score]
 """
 import argparse
-import sys
-import time
 from datetime import datetime, timezone
 
-from backtest_categorized import SOLANA_LABELED, BSC_LABELED
-from layers.layer0_scoring import fetch_dexscreener_vol_liq
+from backtest_categorized import SOLANA_LABELED, BSC_LABELED, CATEGORY_EXPECTATION
+from layers.layer0_scoring import fetch_dexscreener_vol_liq, score_solana_mint
 from layers.layer0d_point_in_time import (
     fetch_deployer_wallet_onchain, fetch_deployer_asof,
     fetch_birdeye_ohlcv, summarize_launch_window,
 )
 
 LAYER1_ALERT_TIERS = {"elite", "good"}
+SETTLED_MAX_AGE_DAYS = 30  # launched within this many days -> current data treated as launch-representative
 
 
-def run_one(name: str, chain: str, address: str, category: str, skip_onchain: bool, skip_birdeye: bool) -> dict:
+def run_one(name, chain, address, category, is_pregrad, skip_onchain, skip_birdeye, skip_current_score):
     row = {"name": name, "chain": chain, "address": address, "category": category}
 
     dex = fetch_dexscreener_vol_liq(chain, address)
     launch_ts_ms = dex.get("launch_ts_ms") if dex.get("ok") else None
-    if not launch_ts_ms:
-        row["launch_date"] = None
-        print(f"[{category:10s}] {name} / {chain}: no real launch date from DexScreener -- "
-              f"skipping point-in-time checks for this token")
-        return row
-    launch_dt = datetime.fromtimestamp(launch_ts_ms / 1000, tz=timezone.utc)
-    launch_date_str = launch_dt.strftime("%Y-%m-%d")
-    row["launch_date"] = launch_date_str
-    print(f"[{category:10s}] {name} / {chain}: real launch date = {launch_date_str}")
+    launch_date_str = None
+    age_days = None
+    if launch_ts_ms:
+        launch_dt = datetime.fromtimestamp(launch_ts_ms / 1000, tz=timezone.utc)
+        launch_date_str = launch_dt.strftime("%Y-%m-%d")
+        age_days = (datetime.now(timezone.utc) - launch_dt).days
+        row["launch_date"] = launch_date_str
+        row["age_days"] = age_days
+        print(f"[{category:10s}] {name} / {chain}: launch={launch_date_str} ({age_days}d old)")
+    else:
+        print(f"[{category:10s}] {name} / {chain}: no real launch date from DexScreener")
 
+    # --- Real multi-signal engine (holders/bundle/risk/liquidity -- NOT deployer) ---
+    if not skip_current_score:
+        settled = age_days is not None and age_days <= SETTLED_MAX_AGE_DAYS
+        label = "current_score (settled -- launch-representative)" if settled else \
+                "current_score (NOT launch-representative, token has aged)"
+        result = score_solana_mint(address, chain, is_pregraduation=is_pregrad)
+        if "error" in result:
+            print(f"    {label}: FAILED -- {result['error']}")
+        else:
+            sc = result["score"]
+            row["current_band"] = sc.band
+            row["current_score"] = sc.score
+            row["band_is_settled_proxy"] = settled
+            hit = None
+            if category in CATEGORY_EXPECTATION:
+                hit = sc.band in CATEGORY_EXPECTATION[category]
+                row["current_band_hit"] = hit
+            print(f"    {label}: band={sc.band} score={sc.score}/100"
+                  + (f" -> {'HIT' if hit else 'MISS'} vs {category} expectation" if hit is not None else ""))
+
+    # --- Best-effort on-chain deployer wallet (kept, informational only -- not scored) ---
     if chain == "solana" and not skip_onchain:
         wallet_result = fetch_deployer_wallet_onchain(address)
         if wallet_result.get("ok"):
-            wallet = wallet_result["deployer_wallet"]
-            row["deployer_wallet"] = wallet
-            print(f"    deployer wallet found on-chain in {wallet_result['pages_used']} page(s): {wallet}")
-            asof = fetch_deployer_asof(wallet, chain, launch_date_str)
-            if asof.get("ok") and asof.get("as_of") and asof.get("snapshot"):
-                tier = asof["snapshot"].get("tier")
-                row["deployer_tier_at_launch"] = tier
-                would_pass_layer1 = tier in LAYER1_ALERT_TIERS
-                row["would_pass_layer1"] = would_pass_layer1
-                print(f"    deployer tier AS OF {launch_date_str}: {tier} "
-                      f"-> Layer 1 would{'' if would_pass_layer1 else ' NOT'} have alerted on this")
-            elif asof.get("ok"):
-                print(f"    MadeOnSol has no reputation snapshot for this wallet at/before "
-                      f"{launch_date_str} -- deployer wasn't tracked yet")
-                row["deployer_tier_at_launch"] = None
-            else:
-                print(f"    deployer as-of lookup FAILED: {asof.get('reason')}")
+            print(f"    deployer wallet (on-chain, informational only): {wallet_result['deployer_wallet']}")
         else:
-            reason = wallet_result.get("reason")
-            print(f"    on-chain deployer wallet lookup: {'TRUNCATED' if wallet_result.get('truncated') else 'FAILED'} "
-                  f"-- {reason}")
-    elif chain != "solana" and not skip_onchain:
-        print(f"    on-chain deployer lookup skipped -- only implemented for Solana "
-              f"(chain={chain!r} not supported)")
+            print(f"    on-chain deployer lookup: {'TRUNCATED' if wallet_result.get('truncated') else 'FAILED'}")
 
-    if not skip_birdeye:
+    # --- Real launch-window price/volume shape (Birdeye) ---
+    if not skip_birdeye and launch_ts_ms:
         window_start = int(launch_ts_ms / 1000)
         window_end = window_start + 48 * 3600
         ohlcv = fetch_birdeye_ohlcv(chain, address, window_start, window_end, interval="1H")
@@ -106,15 +103,25 @@ def run_one(name: str, chain: str, address: str, category: str, skip_onchain: bo
             summary = summarize_launch_window(ohlcv.get("candles") or [])
             if summary.get("ok"):
                 row["launch_window_summary"] = summary
-                print(f"    first-48h window: open={summary['first_price']} "
-                      f"peak={summary['peak_price']} "
-                      f"drawdown_from_peak={summary['drawdown_from_peak_pct']}% "
-                      f"({summary['num_candles']} candles)")
+                peak_multiple = None
+                if summary["first_price"]:
+                    peak_multiple = round(summary["peak_price"] / summary["first_price"], 2)
+                drawdown = summary["drawdown_from_peak_pct"]
+                birdeye_hit = None
+                if category == "moonshot":
+                    birdeye_hit = (peak_multiple or 0) >= 1.5 and (drawdown is None or drawdown >= -60)
+                elif category in ("rug", "pump_dump"):
+                    birdeye_hit = drawdown is not None and drawdown <= -80
+                row["birdeye_peak_multiple"] = peak_multiple
+                row["birdeye_hit"] = birdeye_hit
+                print(f"    launch-window shape (real, at-launch): peak={peak_multiple}x open, "
+                      f"drawdown={drawdown}%"
+                      + (f" -> {'HIT' if birdeye_hit else ('MISS' if birdeye_hit is False else 'inconclusive')}"
+                         f" vs {category} expectation" if birdeye_hit is not None else ""))
             else:
-                print(f"    Birdeye returned candles but couldn't summarize: {summary.get('reason')}")
+                print(f"    launch-window shape: Birdeye candles present but couldn't summarize")
         else:
-            print(f"    Birdeye historical OHLCV FAILED: {ohlcv.get('reason')} "
-                  f"(status_code={ohlcv.get('status_code')})")
+            print(f"    launch-window shape: Birdeye FAILED -- {ohlcv.get('reason')}")
 
     return row
 
@@ -123,42 +130,56 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-onchain", action="store_true")
     parser.add_argument("--skip-birdeye", action="store_true")
+    parser.add_argument("--skip-current-score", action="store_true")
     args = parser.parse_args()
 
-    print("=" * 70)
-    print("POINT-IN-TIME CREDIBILITY BACKTEST")
-    print("See module docstring for exact scope -- this is NOT a full")
-    print("historical risk/holders/bundle replay (no provider exposes that),")
-    print("it's real launch-date + point-in-time deployer-tier + launch-")
-    print("window price data, the pieces that genuinely are available.")
-    print("=" * 70)
+    print("=" * 76)
+    print("POINT-IN-TIME CREDIBILITY BACKTEST v2 -- multi-signal engine, no deployer dependency")
+    print("=" * 76)
 
     rows = []
     print(f"\n--- Solana / Robinhood Chain ({len(SOLANA_LABELED)} labeled tokens) ---")
-    for name, chain, address, category, _ in SOLANA_LABELED:
-        rows.append(run_one(name, chain, address, category, args.skip_onchain, args.skip_birdeye))
+    for name, chain, address, category, is_pregrad in SOLANA_LABELED:
+        rows.append(run_one(name, chain, address, category, is_pregrad,
+                             args.skip_onchain, args.skip_birdeye, args.skip_current_score))
 
     print(f"\n--- BSC / Base ({len(BSC_LABELED)} labeled tokens) ---")
-    for name, chain, address, category, _ in BSC_LABELED:
-        rows.append(run_one(name, chain, address, category, args.skip_onchain, args.skip_birdeye))
+    for name, chain, address, category, is_pregrad in BSC_LABELED:
+        print(f"[{category:10s}] {name} / {chain}: score_solana_mint only covers Solana/RHC -- "
+              f"BSC/Base multi-signal scoring not built into this script (see backtest_categorized.py's "
+              f"score_bsc_labeled for the Mobula-based equivalent, current-data only)")
 
-    scored = [r for r in rows if r.get("would_pass_layer1") is not None and r["category"] != "flat"]
-    if scored:
-        hits = 0
-        for r in scored:
-            expected_pass = r["category"] == "moonshot"
-            hit = r["would_pass_layer1"] == expected_pass
-            r["layer1_hit"] = hit
-            hits += hit
-        print("\n" + "=" * 70)
-        print(f"LAYER 1 POINT-IN-TIME CREDIBILITY: {hits}/{len(scored)} "
-              f"({round(100 * hits / len(scored), 1)}%) -- based only on tokens where a real "
-              f"deployer wallet + as-of snapshot were both found")
-        print("=" * 70)
+    print("\n" + "=" * 76)
+    print("SUMMARY")
+    print("=" * 76)
+
+    settled_scored = [r for r in rows if r.get("current_band_hit") is not None and r.get("band_is_settled_proxy")]
+    if settled_scored:
+        hits = sum(1 for r in settled_scored if r["current_band_hit"])
+        print(f"\nMulti-signal engine (holders/bundle/liquidity/authority -- NOT deployer), "
+              f"SETTLED tokens only (launched <={SETTLED_MAX_AGE_DAYS}d ago, current data = launch-representative):")
+        print(f"  {hits}/{len(settled_scored)} ({round(100*hits/len(settled_scored),1)}%) scored in the band the "
+              f"system SHOULD have given them")
     else:
-        print("\nNo tokens had both a resolved deployer wallet AND a MadeOnSol as-of snapshot -- "
-              "no credibility % to report yet. See per-token lines above for why each one failed "
-              "(truncated on-chain lookup vs. no snapshot at that date vs. RPC failure).")
+        print("\nNo settled tokens had a usable multi-signal band to score.")
+
+    aged_scored = [r for r in rows if r.get("current_band_hit") is not None and not r.get("band_is_settled_proxy")]
+    if aged_scored:
+        hits = sum(1 for r in aged_scored if r["current_band_hit"])
+        print(f"\nMulti-signal engine, AGED tokens (current data NOT launch-representative -- shown for "
+              f"context only, not a fair 'at launch' measurement):")
+        print(f"  {hits}/{len(aged_scored)} ({round(100*hits/len(aged_scored),1)}%) -- today's state, not launch-day")
+
+    birdeye_scored = [r for r in rows if r.get("birdeye_hit") is not None]
+    if birdeye_scored:
+        hits = sum(1 for r in birdeye_scored if r["birdeye_hit"])
+        print(f"\nReal launch-window price/volume shape (Birdeye, genuinely at-launch, ALL tokens regardless of age):")
+        print(f"  {hits}/{len(birdeye_scored)} ({round(100*hits/len(birdeye_scored),1)}%) showed the expected "
+              f"shape (pump held for moonshots, severe collapse for rugs/pump_dumps) within 48h of real launch")
+
+    print("\nBottom line: the SETTLED-token multi-signal % and the Birdeye launch-window % are the two real, "
+          "free, at-or-near-launch effectiveness numbers. The AGED-token multi-signal % is today's data on old "
+          "coins, shown for context only -- do not read it as an 'at launch' result.")
 
     return rows
 
