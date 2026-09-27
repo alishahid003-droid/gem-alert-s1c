@@ -761,3 +761,113 @@ def test_score_solana_mint_records_holder_point_and_computes_growth(monkeypatch)
     history_after_second = state.get_holder_history(mint)
     assert len(history_after_second) == 2
     assert "error" not in result
+
+
+def test_fetch_solana_token_deployer_returns_oldest_tx_fee_payer(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    captured = {}
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        captured.setdefault("calls", []).append((method, params))
+        assert chain == "solana"
+        if method == "getSignaturesForAddress":
+            assert params[0] == "MINT123"
+            assert params[1] == {"limit": 1000}
+            # newest-first, as the real RPC returns them
+            return {"ok": True, "result": [
+                {"signature": "sig_newest"},
+                {"signature": "sig_middle"},
+                {"signature": "sig_oldest"},
+            ]}
+        if method == "getTransaction":
+            assert params[0] == "sig_oldest"
+            assert params[1] == {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+            return {"ok": True, "result": {
+                "transaction": {"message": {"accountKeys": [
+                    {"pubkey": "DEPLOYER_WALLET_ABC", "signer": True},
+                    {"pubkey": "OTHER_ACCOUNT", "signer": False},
+                ]}}
+            }}
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    deployer = l0.fetch_solana_token_deployer("MINT123")
+    assert deployer == "DEPLOYER_WALLET_ABC"
+    methods_called = [c[0] for c in captured["calls"]]
+    assert methods_called == ["getSignaturesForAddress", "getTransaction"]
+
+
+def test_fetch_solana_token_deployer_none_on_no_signatures(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": True, "result": []})
+    assert l0.fetch_solana_token_deployer("MINT123") is None
+
+
+def test_fetch_solana_token_deployer_none_on_rpc_failure(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": False, "reason": "down"})
+    assert l0.fetch_solana_token_deployer("MINT123") is None
+
+
+def test_fetch_solana_token_deployer_none_on_malformed_transaction(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        if method == "getSignaturesForAddress":
+            return {"ok": True, "result": [{"signature": "sig1"}]}
+        return {"ok": True, "result": {"unexpected": "shape"}}
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    assert l0.fetch_solana_token_deployer("MINT123") is None
+
+
+def test_fetch_solana_dev_holding_pct_computes_real_percentage(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    captured = {}
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        captured.setdefault("calls", []).append((method, params))
+        if method == "getTokenAccountsByOwner":
+            assert params[0] == "DEPLOYER_WALLET_ABC"
+            assert params[1] == {"mint": "MINT123"}
+            assert params[2] == {"encoding": "jsonParsed"}
+            return {"ok": True, "result": {"value": [
+                {"account": {"data": {"parsed": {"info": {"tokenAmount": {"uiAmount": 150000000.0}}}}}},
+            ]}}
+        if method == "getTokenSupply":
+            return {"ok": True, "result": {"value": {"uiAmount": 1000000000.0}}}
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    pct = l0.fetch_solana_dev_holding_pct("MINT123", "DEPLOYER_WALLET_ABC")
+    assert pct == pytest.approx(0.15)
+
+
+def test_fetch_solana_dev_holding_pct_none_without_deployer_wallet(monkeypatch):
+    import layers.layer0_scoring as l0
+    # No RPC call should even be attempted -- guard clause, not a wasted call.
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not be called")))
+    assert l0.fetch_solana_dev_holding_pct("MINT123", None) is None
+
+
+def test_fetch_solana_dev_holding_pct_none_on_rpc_failure(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": False, "reason": "down"})
+    assert l0.fetch_solana_dev_holding_pct("MINT123", "DEPLOYER_WALLET_ABC") is None
+
+
+def test_fetch_solana_dev_holding_pct_zero_when_deployer_holds_nothing(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        if method == "getTokenAccountsByOwner":
+            return {"ok": True, "result": {"value": []}}
+        if method == "getTokenSupply":
+            return {"ok": True, "result": {"value": {"uiAmount": 1000000000.0}}}
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    pct = l0.fetch_solana_dev_holding_pct("MINT123", "DEPLOYER_WALLET_ABC")
+    assert pct == 0.0

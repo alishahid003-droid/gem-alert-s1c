@@ -60,16 +60,32 @@ that reset, except step 0.
   craters in that window. Not started yet — this is a real, named gap,
   not a nice-to-have, because right now a flagged token that rugs 10
   minutes later still shows as a live alert with no correction.
-- [ ] Build a deployer rug-history check (confirmed missing Sept 27,
-  2026 -- grepped the whole layers/ folder, nothing checks this today).
-  Free, on-chain, buildable: for a new deployer wallet, look up its past
-  token launches (Solana RPC getSignaturesForAddress on the deployer, or
-  pump.fun's own public API for "tokens created by this wallet") and
-  check how those earlier tokens performed -- a wallet with a pattern of
-  launch-then-rug is a real red flag Layer 1 currently has no way to
-  see; a wallet with a track record of real graduations is a real green
-  flag the same way Layer 2b's smart-money roster works, but on
-  deployers instead of buyers.
+- [x] CORRECTION Sept 28 2026: a deployer rug-history check already
+  existed for StonkFun (compute_stonkfun_deployer_tier in
+  layer0c_stonkfun_scoring.py) -- my earlier "confirmed missing, grepped
+  layers/" claim was wrong, bad grep keywords. Real gap: it was never
+  built for Layer 1 (MadeOnSol/pump.fun), the path that actually matters
+  most. Root blocker found: MadeOnSol's own /deployer-hunter/alerts
+  response has NO deployer wallet address field, only a tier label + SOL
+  balance (confirmed by reading the real fixture file) -- so neither this
+  nor dev-holding-% could be built without first solving that.
+- [x] Built + tested (8 new tests, 376/376 passing, commit pending push):
+  `fetch_solana_token_deployer(mint)` -- finds a mint's real deployer
+  wallet via its own oldest on-chain transaction (pure Solana RPC, no
+  unconfirmed third-party API), and `fetch_solana_dev_holding_pct(mint,
+  deployer_wallet)` -- the actual dev-holdings-% signal, via
+  getTokenAccountsByOwner (the precise RPC method, not reusing
+  top10's getTokenLargestAccounts which returns token accounts not
+  wallets). Both fail closed (None) on any RPC issue, same convention as
+  every other optional signal in this file. NOT YET wired into the live
+  score or into Layer 1's alert flow -- that's a real decision about
+  score weights that should happen with Ali reviewing it, not done solo
+  overnight. Next: wire fetch_solana_token_deployer's result into
+  score_solana_mint, then either build the StonkFun-style launch-history
+  heuristic against it (deployer rug-history) or confirm a pump.fun
+  creator-launches endpoint exists for the same purpose (unconfirmed --
+  couldn't verify a real pump.fun endpoint live tonight, don't guess at
+  one).
 - [ ] Build a dev-wallet current-holding-% check (confirmed missing
   Sept 27, 2026, second research pass against real paid sniper-bot
   feature lists -- GMGN, BullX, Photon, Trojan, Axiom all publish "dev

@@ -737,6 +737,107 @@ def fetch_solana_holder_count(mint: str) -> Optional[int]:
     return len(accounts)
 
 
+
+def fetch_solana_token_deployer(mint: str) -> Optional[str]:
+    """Finds a Solana mint's real deployer wallet from its own oldest
+    on-chain transaction -- unblocks the deployer rug-history and
+    dev-holding-% signals (checklist Sept 27 2026), since MadeOnSol's own
+    /deployer-hunter/alerts response carries only a tier label + SOL
+    balance, never the deployer's actual wallet address (confirmed by
+    reading the real fixture,
+    tests/fixtures/madeonsol_deployer_alerts_sample.json -- no
+    deployer_address/deployer_wallet field exists on that endpoint).
+
+    Uses getSignaturesForAddress against the MINT account itself (not the
+    pump.fun program -- a mint's own transaction history is short and
+    specific to it), taking the OLDEST signature in the returned page as
+    the mint-creation transaction, then getTransaction (jsonParsed) on it
+    -- the transaction's first account (accountKeys[0]) is the fee payer,
+    which for a token-creation transaction is the deployer.
+
+    Real limitation, stated plainly: getSignaturesForAddress returns
+    newest-first, and this fetches ONE page (limit=1000, the RPC max) --
+    if a mint somehow already has more than 1000 transactions by the time
+    this runs (very unlikely for a fresh Layer 1 alert, the only real
+    caller), the true oldest signature would be missed and this would
+    return a wrong wallet. Fine for its actual use case (brand-new tokens
+    from Layer 1's real-time deployer alerts), not safe to reuse for an
+    old, already-active token without adding real pagination first.
+
+    Returns None (never a guessed wallet) on any RPC failure, an empty
+    signature list, or a malformed transaction."""
+    sigs_resp = rpc_call("solana", "getSignaturesForAddress", [mint, {"limit": 1000}])
+    if not sigs_resp.get("ok"):
+        return None
+    sigs = sigs_resp.get("result") or []
+    if not sigs:
+        return None
+    oldest = sigs[-1].get("signature") if isinstance(sigs[-1], dict) else None
+    if not oldest:
+        return None
+    tx_resp = rpc_call("solana", "getTransaction",
+                        [oldest, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+    if not tx_resp.get("ok"):
+        return None
+    tx = tx_resp.get("result")
+    if not tx:
+        return None
+    try:
+        account_keys = tx["transaction"]["message"]["accountKeys"]
+        first = account_keys[0]
+        return first.get("pubkey") if isinstance(first, dict) else first
+    except (KeyError, TypeError, IndexError):
+        return None
+
+
+def fetch_solana_dev_holding_pct(mint: str, deployer_wallet: Optional[str]) -> Optional[float]:
+    """Real dev-wallet current-holding-% (checklist Sept 27 2026 -- GMGN,
+    BullX, Photon, Trojan, Axiom all publish "dev holdings" as a tracked
+    signal; this repo didn't have it before tonight). NOT the same lookup
+    as fetch_solana_top10_holder_pct's getTokenLargestAccounts -- that
+    returns top TOKEN ACCOUNTS, not owner wallets, so it can't directly
+    answer "does the deployer hold X%" without an extra getAccountInfo
+    per account. This instead calls getTokenAccountsByOwner directly for
+    the deployer's own wallet + this mint -- the precise, correct RPC
+    method for "how much of this mint does this wallet hold," one call,
+    no extra lookups needed.
+
+    Needs a real deployer wallet address -- see
+    fetch_solana_token_deployer's docstring for why MadeOnSol's own alert
+    data doesn't carry one; pass None (e.g. deployer lookup itself
+    failed) and this returns None rather than guessing. NOT a flat 20%
+    cutoff when this gets wired into scoring -- on pump.fun's bonding-
+    curve launch there's no team pre-mine by default, so a "normal" dev
+    holding is usually low single digits or 0%; graduate any future
+    scoring the same way top10_holder_pct already is, not one arbitrary
+    threshold (see FINAL_CHECKLIST_2026-09-27.md).
+
+    Returns None (never a guessed %) on any RPC failure, missing supply,
+    or zero total supply."""
+    if not mint or not deployer_wallet:
+        return None
+    accounts_resp = rpc_call("solana", "getTokenAccountsByOwner",
+                              [deployer_wallet, {"mint": mint}, {"encoding": "jsonParsed"}])
+    if not accounts_resp.get("ok"):
+        return None
+    accounts = (accounts_resp.get("result") or {}).get("value") or []
+    held = 0.0
+    for acc in accounts:
+        try:
+            ui_amount = acc["account"]["data"]["parsed"]["info"]["tokenAmount"]["uiAmount"]
+            held += float(ui_amount or 0)
+        except (KeyError, TypeError):
+            continue
+    supply_resp = rpc_call("solana", "getTokenSupply", [mint])
+    if not supply_resp.get("ok"):
+        return None
+    supply_value = (supply_resp.get("result") or {}).get("value") or {}
+    total_supply = supply_value.get("uiAmount")
+    if not total_supply:
+        return None
+    return min(1.0, held / total_supply)
+
+
 def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     """Real bug caught live Sept 24 2026: this used to always return
     ok=True no matter what, even when all 3 sub-calls failed (e.g.
