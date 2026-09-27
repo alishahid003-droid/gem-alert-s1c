@@ -141,3 +141,44 @@ monitoring pass) is a real correctness gap in the detection layer itself,
 so it belongs before go-live, not after. Nothing in step 4 should start
 until 1-3 are done and the backtest numbers are something you'd actually
 be willing to risk money on.
+
+## Advanced Upgrades — Later, Only If The System Earns Its Way There
+Not for now. Only worth touching once Track B (go-live) has run for real and
+actually made money -- upgrade from real profit, never from debt or hope.
+Money doesn't buy "one of a kind" -- the free signal set is already broad
+(see Sept 27 comparison against GMGN/BullX/Photon/Trojan/Axiom). What money
+buys is closing the ONE real structural weakness: speed. This system is
+poll-based; the paid retail bots (Axiom, Photon, GMGN, Trojan) push via
+real-time streams and can act within milliseconds of a launch -- that gap
+doesn't close for free.
+
+Real clarification (checked live, Sept 28 2026): Axiom/Photon/BullX/Trojan
+are NOT autonomous bots with built-in advanced scoring logic you can just
+subscribe to for $50/mo -- they're execution interfaces. You look at their
+data (new pairs, holder stats, wallet alerts) and click buy yourself, or
+set a simple manual filter. They charge a per-trade fee (~0.75-0.95%), not
+a subscription, and they make the DECISION support minimal on purpose --
+our layered scoring engine (structural + holders + smart-money + insider +
+rug-history, combined into one score) is a genuinely different, more
+sophisticated category than what they offer. What they have that we don't
+is raw execution speed. So the upgrade path is closing OUR speed gap, not
+buying THEIR decision-making -- we don't need it, ours is better already.
+
+Tiers, cheapest to most expensive, only spend from real profit:
+- [ ] ~$50-100/month: paid low-latency RPC/geyser stream (Helius, Triton,
+  or QuickNode paid tiers) -- replaces polling with a real push feed, the
+  single highest-leverage upgrade available. This is the real floor for
+  taking latency seriously.
+- [ ] ~$150-250/month: add MadeOnSol PRO (~$43-49/mo, own risk factors
+  beyond GoPlus fallback) + a small always-on VPS (~$20-50/mo) instead of
+  GitHub Actions cold-starts each cycle -- removes startup delay entirely.
+- [ ] $500+/month: real institutional-grade edge -- colocated servers near
+  validators, Jito bundle infrastructure, enterprise data feeds. This is
+  what the top commercial bots actually run on. Naming it so the ceiling
+  is known, not because it's a near-term target.
+- [ ] If ever worth revisiting: check whether any retail bot (Axiom,
+  Trojan, etc.) exposes an API/webhook that lets an external script
+  trigger a trade through THEIR execution infra -- most are closed
+  consumer apps and don't, but if one does, that combination (our
+  scoring + their speed) could be cheaper than building our own
+  low-latency infra from scratch. Not confirmed either way yet.
