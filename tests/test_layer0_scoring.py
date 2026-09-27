@@ -135,6 +135,7 @@ def test_score_solana_mint_wires_real_birdeye_launch_shape(monkeypatch):
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
     monkeypatch.setattr(l0, "fetch_birdeye_ohlcv", fake_fetch_birdeye_ohlcv)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
     result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
@@ -264,6 +265,7 @@ def test_score_solana_mint_uses_all_three_madeonsol_endpoints_plus_dexscreener(m
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
     result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
@@ -317,6 +319,7 @@ def test_score_solana_mint_degrades_gracefully_on_partial_madeonsol_failure(monk
         return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
     result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
@@ -568,6 +571,7 @@ def test_score_solana_mint_falls_back_to_goplus_when_madeonsol_risk_is_tier_gate
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
     result = l0.score_solana_mint(mint, "solana", is_pregraduation=False)
@@ -598,6 +602,7 @@ def test_score_solana_mint_does_not_call_goplus_when_madeonsol_risk_succeeds(mon
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
     result = l0.score_solana_mint("MINT123", "solana", is_pregraduation=True)
@@ -629,3 +634,130 @@ def test_fetch_madeonsol_token_risk_records_3_calls_on_success(monkeypatch):
     assert state.madeonsol_calls_today() == 0
     l0.fetch_madeonsol_token_risk("MINT123", "solana")
     assert state.madeonsol_calls_today() == 3
+
+
+def test_fetch_solana_top10_holder_pct_computes_real_concentration(monkeypatch):
+    # Free RPC alternative to MadeOnSol's PRO-gated /holders (Sept 27 2026).
+    import layers.layer0_scoring as l0
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        assert chain == "solana"
+        if method == "getTokenLargestAccounts":
+            return {"ok": True, "result": {"value": [
+                {"uiAmount": 100.0}, {"uiAmount": 50.0}, {"uiAmount": 25.0},
+            ]}}
+        if method == "getTokenSupply":
+            return {"ok": True, "result": {"value": {"uiAmount": 1000.0}}}
+        raise AssertionError(f"unexpected method: {method}")
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    pct = l0.fetch_solana_top10_holder_pct("MINT123")
+    # top 10 (only 3 accounts exist here) = 175/1000 = 0.175
+    assert pct == 0.175
+
+
+def test_fetch_solana_top10_holder_pct_none_on_rpc_failure(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": False, "reason": "rate limited"})
+    assert l0.fetch_solana_top10_holder_pct("MINT123") is None
+
+
+def test_fetch_solana_top10_holder_pct_none_when_supply_unknown(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        if method == "getTokenLargestAccounts":
+            return {"ok": True, "result": {"value": [{"uiAmount": 10.0}]}}
+        return {"ok": True, "result": {"value": {"uiAmount": None}}}
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    assert l0.fetch_solana_top10_holder_pct("MINT123") is None
+
+
+def test_fetch_solana_holder_count_returns_real_account_count(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    captured = {}
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        captured["method"] = method
+        captured["params"] = params
+        assert chain == "solana"
+        assert method == "getProgramAccounts"
+        return {"ok": True, "result": [{"pubkey": "a"}, {"pubkey": "b"}, {"pubkey": "c"}]}
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    count = l0.fetch_solana_holder_count("MINT123")
+    assert count == 3
+    # confirm it filtered by dataSize 165 + memcmp on the real mint, not a guess
+    assert captured["params"][0] == l0.SPL_TOKEN_PROGRAM_ID
+    filters = captured["params"][1]["filters"]
+    assert {"dataSize": 165} in filters
+    assert {"memcmp": {"offset": 0, "bytes": "MINT123"}} in filters
+
+
+def test_fetch_solana_holder_count_none_on_rpc_failure(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": False, "reason": "down"})
+    assert l0.fetch_solana_holder_count("MINT123") is None
+
+
+def test_signals_from_madeonsol_risk_uses_rpc_top10_fallback_only_when_madeonsol_missing(monkeypatch):
+    # Real MadeOnSol holders data must always win when present; the free
+    # RPC value only fills the gap when MadeOnSol's own data is absent.
+    risk = _load("madeonsol_risk_sample.json")
+
+    # MadeOnSol present -> RPC fallback ignored even if passed
+    sig = signals_from_madeonsol_risk(
+        risk, holders_json={"top10_share": 34.0}, bundle_json={"bundle": {"held_pct_of_supply": 0.06}},
+        is_pregraduation=True, rpc_top10_holder_pct=0.99,
+    )
+    assert sig.top10_holder_pct == 0.34
+
+    # MadeOnSol absent -> RPC fallback used
+    sig2 = signals_from_madeonsol_risk(
+        risk, holders_json={}, bundle_json={"bundle": {"held_pct_of_supply": 0.06}},
+        is_pregraduation=True, rpc_top10_holder_pct=0.21,
+    )
+    assert sig2.top10_holder_pct == 0.21
+
+
+def test_score_solana_mint_records_holder_point_and_computes_growth(monkeypatch):
+    # Real wiring check: score_solana_mint should feed state.record_holder_point
+    # with the free RPC holder count, so holder_growth_rate_per_hr -- 20 of
+    # every score's 100 points -- actually gets real Solana data over time
+    # instead of staying permanently None.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/risk"):
+            return {"ok": True, "status_code": 200, "url": url, "json": _load("madeonsol_risk_sample.json")}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
+        if url.endswith("/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    holder_counts = iter([10, 40])  # simulate real growth across two cycles
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: next(holder_counts))
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    mint = "GROWTHMINT"
+    now = time.time()
+    # First cycle: only 1 point recorded so far -- rate stays None (needs >=2).
+    monkeypatch.setattr(l0.time, "time", lambda: now)
+    l0.score_solana_mint(mint, "solana", is_pregraduation=True)
+    history_after_first = state.get_holder_history(mint)
+    assert len(history_after_first) == 1
+    assert history_after_first[0][1] == 10
+
+    # Second cycle, 1 real hour later -- rate should now compute for real.
+    monkeypatch.setattr(l0.time, "time", lambda: now + 3600)
+    result = l0.score_solana_mint(mint, "solana", is_pregraduation=True)
+    history_after_second = state.get_holder_history(mint)
+    assert len(history_after_second) == 2
+    assert "error" not in result

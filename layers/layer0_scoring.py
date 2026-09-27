@@ -32,6 +32,7 @@ from utils.http import get_json, ApiUnreachable, describe_fetch_failure
 import state
 from links import DEXSCREENER_CHAIN_SLUG
 from layers.layer0d_point_in_time import fetch_birdeye_ohlcv, summarize_launch_window
+from executor.rpc_pool import rpc_call
 
 Chain = Literal["solana", "robinhood_chain", "base", "bsc", "ton", "ethereum"]
 
@@ -249,7 +250,8 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
                                  goplus_mint_authority_revoked: Optional[bool] = None,
                                  goplus_freeze_authority_revoked: Optional[bool] = None,
                                  goplus_lp_locked: Optional[bool] = None,
-                                 price_drawdown_from_peak_pct: Optional[float] = None) -> RawSignals:
+                                 price_drawdown_from_peak_pct: Optional[float] = None,
+                                 rpc_top10_holder_pct: Optional[float] = None) -> RawSignals:
     """risk_json from GET /tokens/{mint}/risk, holders_json from
     /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle.
 
@@ -284,6 +286,12 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
     top10 = None
     if holders_json and "top10_share" in holders_json:
         top10 = holders_json["top10_share"] / 100.0
+    if top10 is None:
+        # Free RPC fallback (Sept 27 2026, see fetch_solana_top10_holder_pct's
+        # docstring) -- only reached when MadeOnSol's own /holders data was
+        # missing/paywalled. Real MadeOnSol data always wins when present,
+        # same convention as the GoPlus authority fallbacks below.
+        top10 = rpc_top10_holder_pct
 
     lp_locked_or_curve_healthy = None if is_pregraduation else _factor_ok(factors, "lp_lock")
     if lp_locked_or_curve_healthy is None and not is_pregraduation:
@@ -653,6 +661,82 @@ def _safe_div(a, b):
 # Live fetchers
 # ---------------------------------------------------------------------------
 
+SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+
+def fetch_solana_top10_holder_pct(mint: str) -> Optional[float]:
+    """Free alternative to MadeOnSol's PRO-gated /holders endpoint (403
+    tier_required on Ali's BASIC key, confirmed live Sept 27 2026, no free
+    fix on MadeOnSol's own side). Solana's own getTokenLargestAccounts
+    RPC method returns the top 20 holder token accounts for any mint,
+    no signup, no key -- via the same free RPC pool already used
+    elsewhere in this repo (executor/rpc_pool.py, live-tested by Ali Sept
+    23 2026). Combined with getTokenSupply for the real total, this
+    reproduces top10 holder concentration -- the exact signal the PRO
+    paywall blocks -- for $0/month instead of $43-49/month.
+
+    Returns None (never a fabricated 0%) on any failure: RPC pool
+    exhausted/rate-limited, mint not found, or zero/unknown supply --
+    same "missing data stays unknown, never fakes safe" convention as
+    every other optional signal in this module."""
+    largest = rpc_call("solana", "getTokenLargestAccounts", [mint])
+    if not largest.get("ok"):
+        return None
+    accounts = (largest.get("result") or {}).get("value") or []
+    if not accounts:
+        return None
+    supply_resp = rpc_call("solana", "getTokenSupply", [mint])
+    if not supply_resp.get("ok"):
+        return None
+    supply_value = (supply_resp.get("result") or {}).get("value") or {}
+    total_supply = supply_value.get("uiAmount")
+    if not total_supply:
+        return None
+    top10_amount = sum(float(a.get("uiAmount") or 0) for a in accounts[:10])
+    return min(1.0, top10_amount / total_supply)
+
+
+def fetch_solana_holder_count(mint: str) -> Optional[int]:
+    """Free real per-cycle holder-count signal (Sept 27 2026) -- feeds
+    state.record_holder_point/get_holder_history so
+    compute_holder_growth_rate_per_hr (above) finally gets real Solana
+    data. Previously this was permanently None for Solana: MadeOnSol's
+    own /holders response has no confirmed total-holder-count field (see
+    signals_from_madeonsol_risk's docstring), so 20 of every score's 100
+    points -- holder growth, arguably the single most direct "real humans
+    are buying this right now" moonshot-early signal -- sat unused for
+    every Solana token, every time.
+
+    Uses getProgramAccounts on the SPL Token program, filtered to this
+    mint's token accounts (dataSize 165 = a standard SPL token account;
+    memcmp at offset 0 matches the mint pubkey), with dataSlice length 0
+    so only account metadata (not each account's data payload) comes
+    back -- keeps the response small even for a token with many holders.
+    One token account is a close proxy for one holder on a fresh launch
+    (the case this system scores), not a perfect count (a wallet can hold
+    more than one token account for the same mint in rare setups) -- good
+    enough for a growth RATE, which only needs relative change over time,
+    not an exact headcount. Returns None on any RPC failure."""
+    params = [
+        SPL_TOKEN_PROGRAM_ID,
+        {
+            "encoding": "base64",
+            "dataSlice": {"offset": 0, "length": 0},
+            "filters": [
+                {"dataSize": 165},
+                {"memcmp": {"offset": 0, "bytes": mint}},
+            ],
+        },
+    ]
+    result = rpc_call("solana", "getProgramAccounts", params)
+    if not result.get("ok"):
+        return None
+    accounts = result.get("result")
+    if accounts is None:
+        return None
+    return len(accounts)
+
+
 def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     """Real bug caught live Sept 24 2026: this used to always return
     ok=True no matter what, even when all 3 sub-calls failed (e.g.
@@ -878,13 +962,38 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
                 if summary.get("ok"):
                     price_drawdown_from_peak_pct = summary["drawdown_from_peak_pct"]
 
+    # Free RPC fallback for top10 holder concentration (Sept 27 2026, see
+    # fetch_solana_top10_holder_pct's docstring) -- only spent when
+    # MadeOnSol's own /holders call actually failed (real symptom of the
+    # PRO-tier paywall on Ali's BASIC key), so real MadeOnSol data is never
+    # second-guessed, same convention as the GoPlus fallback above.
+    rpc_top10_holder_pct = None
+    if chain == "solana" and not d["holders"].get("ok"):
+        rpc_top10_holder_pct = fetch_solana_top10_holder_pct(mint)
+
+    # Free real holder-count -> real holder_growth_rate_per_hr (Sept 27
+    # 2026, see fetch_solana_holder_count's docstring) -- previously always
+    # None for Solana. Records this cycle's real count, then computes the
+    # rate from whatever history has accumulated across previous cycles
+    # (needs >=2 points spaced far enough apart -- see
+    # compute_holder_growth_rate_per_hr -- so this signal fills in over the
+    # first couple of poll cycles a token is tracked, not instantly).
+    holder_growth_rate_per_hr = None
+    if chain == "solana":
+        holder_count = fetch_solana_holder_count(mint)
+        if holder_count is not None:
+            state.record_holder_point(mint, holder_count)
+        holder_growth_rate_per_hr = compute_holder_growth_rate_per_hr(state.get_holder_history(mint))
+
     sig = signals_from_madeonsol_risk(
         d["risk"].get("json") or {}, d["holders"].get("json") or {}, d["bundle"].get("json") or {},
         is_pregraduation, vol_to_liq_ratio=vol_to_liq_ratio, liquidity_usd=liquidity_usd,
+        holder_growth_rate_per_hr=holder_growth_rate_per_hr,
         goplus_mint_authority_revoked=goplus_mint_authority_revoked,
         goplus_freeze_authority_revoked=goplus_freeze_authority_revoked,
         goplus_lp_locked=goplus_lp_locked,
         price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
+        rpc_top10_holder_pct=rpc_top10_holder_pct,
     )
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 
