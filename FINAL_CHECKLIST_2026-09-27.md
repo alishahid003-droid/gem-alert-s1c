@@ -70,6 +70,25 @@ that reset, except step 0.
   see; a wallet with a track record of real graduations is a real green
   flag the same way Layer 2b's smart-money roster works, but on
   deployers instead of buyers.
+- [ ] Build a dev-wallet current-holding-% check (confirmed missing
+  Sept 27, 2026, second research pass against real paid sniper-bot
+  feature lists -- GMGN, BullX, Photon, Trojan, Axiom all publish "dev
+  holdings" as a tracked signal, this repo doesn't have it). Cheap to
+  add: reuses the SAME getTokenLargestAccounts RPC call already built
+  for top10 holder concentration -- just check whether the deployer's
+  own address appears in that list and what % it holds. A deployer
+  sitting on 20%+ of supply is a real dump risk independent of rug
+  history.
+- [ ] Acknowledged, real, PAID-ONLY gap (confirmed no free path exists
+  after a second research pass Sept 27, 2026): real KOL/Twitter-
+  influencer buy tracking (what GMGN calls "KOL Activity" -- resolving
+  a buying wallet to a known influencer identity). Needs either
+  Twitter/X's own API (Basic ~$200/mo, no search access; Pro
+  ~$5,000/mo) or a paid on-chain intelligence service (Nansen, Arkham)
+  that maps wallets to known identities -- no free tier covers this.
+  Not building a Twitter scraper (fragile, ToS violation). If budget
+  ever allows one paid add-on, this is probably the highest-leverage
+  one -- but there is no free substitute, so it stays out for now.
 - [ ] Decide (optional, not blocking): MadeOnSol PRO tier ($43-49/mo) for
   its own risk `factors` (mint/freeze authority, lp_lock) beyond what
   GoPlus's fallback already covers. Not urgent since the free RPC signals
