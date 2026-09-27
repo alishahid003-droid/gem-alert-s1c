@@ -546,3 +546,61 @@ def record_adanos_quota(remaining: Optional[int]):
 
 def get_adanos_quota() -> Optional[dict]:
     return get_value("adanos_quota")
+
+
+# --- Poll-fast self-loop lock (Sept 27 2026) -----------------------------
+# GitHub's own `schedule:` cron trigger for poll-fast.yml is declared as
+# every 10 minutes but was confirmed live (Sept 27 2026) to actually fire
+# every 2.5-5.5 hours in practice -- a GitHub Actions platform throttle on
+# scheduled events, not a bug in this code. Fix: poll-fast now loops
+# internally with a real wall-clock sleep(600) instead of relying on
+# GitHub to re-trigger it (see run_poll_fast_loop in scheduler.py). This
+# lock stops two loops from running at once if GitHub's `schedule:` does
+# fire again while a previous loop from an earlier run is still going --
+# without it, a double-fire would silently double the MadeOnSol call rate.
+
+def _upstash_set_raw_opts(key: str, value_str: str, query: str) -> Optional[dict]:
+    """Low-level SET with Upstash REST query-string options (EX=, NX=, etc).
+    Returns the parsed response body, or None if unreachable."""
+    try:
+        url = f"{CONFIG.upstash_redis_rest_url}/set/{key}?{query}"
+        result = post_json(url, headers=_upstash_headers(), data=value_str)
+    except ApiUnreachable:
+        return None
+    if not result["ok"]:
+        return None
+    return result.get("json") or {}
+
+
+def acquire_lock(key: str, ttl_seconds: int, owner: str = "1") -> bool:
+    """True if the lock was newly acquired (key didn't already exist).
+    Local-file backend has no cross-process concept of this, so it always
+    grants the lock there -- local mode is never the overlapping-schedule
+    case this exists for."""
+    if backend() != "upstash":
+        return True
+    body = _upstash_set_raw_opts(key, owner, f"EX={int(ttl_seconds)}&NX=true")
+    if body is None:
+        # Upstash unreachable -- fail open rather than silently never polling;
+        # worst case is a rare double-run, not a stuck system.
+        return True
+    return body.get("result") is not None
+
+
+def refresh_lock(key: str, ttl_seconds: int, owner: str = "1") -> bool:
+    """Re-affirms the TTL on a lock this process already holds. Returns
+    False on any failure to reach Upstash -- caller should treat that as
+    lock-lost and stop looping rather than assume it still holds."""
+    if backend() != "upstash":
+        return True
+    body = _upstash_set_raw_opts(key, owner, f"EX={int(ttl_seconds)}")
+    return body is not None
+
+
+def release_lock(key: str):
+    if backend() != "upstash":
+        return
+    try:
+        get_json(f"{CONFIG.upstash_redis_rest_url}/del/{key}", headers=_upstash_headers())
+    except ApiUnreachable:
+        pass
