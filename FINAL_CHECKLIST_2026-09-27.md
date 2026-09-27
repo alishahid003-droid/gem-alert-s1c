@@ -76,9 +76,12 @@ that reset, except step 0.
   holdings" as a tracked signal, this repo doesn't have it). Cheap to
   add: reuses the SAME getTokenLargestAccounts RPC call already built
   for top10 holder concentration -- just check whether the deployer's
-  own address appears in that list and what % it holds. A deployer
-  sitting on 20%+ of supply is a real dump risk independent of rug
-  history.
+  own address appears in that list and what % it holds. NOT a flat 20%
+  cutoff -- on pump.fun's bonding-curve launch there's no team pre-mine
+  by default, so a "normal" dev holding is usually low single digits or
+  0%; graduate the flag the same way top10_holder_pct already is (low
+  single digits = normal, mid-single-digits-to-~10% = worth noting,
+  above that = real concentration risk), not one arbitrary threshold.
 - [ ] Acknowledged, real, PAID-ONLY gap (confirmed no free path exists
   after a second research pass Sept 27, 2026): real KOL/Twitter-
   influencer buy tracking (what GMGN calls "KOL Activity" -- resolving
