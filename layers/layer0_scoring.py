@@ -264,7 +264,23 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
         freeze_authority_revoked=freeze_authority_revoked,
         vol_to_liq_ratio=vol_to_liq_ratio,
         holder_growth_rate_per_hr=holder_growth_rate_per_hr,
-        bundler_sniper_pct=(bundle_json.get("held_pct_of_supply", 0) / 100.0) if bundle_json else None,
+        # Fixed Sept 27 2026 -- caught live via Ali's rug-score diagnostic:
+        # the real MadeOnSol /bundle response nests this under a "bundle"
+        # object (confirmed live: {"bundle": {"held_pct_of_supply": 0.1027,
+        # ...}, "wallets": [...]}), not as a flat top-level key. Reading
+        # bundle_json.get("held_pct_of_supply", 0) at the top level always
+        # missed, silently defaulting to 0 (= "verified zero bundler
+        # share", the single largest false-safe signal in the score, worth
+        # 20/100 points) for every token, even ones with real, sizeable
+        # bundler holdings (ELONCOIN, a labeled rug, actually had 10.27%
+        # held by same-slot bundler wallets). Also fixed a second bug in
+        # the same line: held_pct_of_supply is already a 0-1 fraction per
+        # MadeOnSol's own docs and the confirmed live value above -- the
+        # old code then divided by 100 again, which (even after the path
+        # fix) would have shrunk a real 10.27% down to 0.1027%. Missing
+        # data now correctly falls through to None (scored low-neutral by
+        # score_token), never a false 0.
+        bundler_sniper_pct=(bundle_json.get("bundle", {}) or {}).get("held_pct_of_supply") if bundle_json else None,
         liquidity_usd=liquidity_usd,
         is_pregraduation_solana=is_pregraduation,
     )

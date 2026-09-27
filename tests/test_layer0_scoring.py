@@ -33,9 +33,50 @@ def _load(name):
         return json.load(f)
 
 
+def test_bundler_sniper_pct_reads_real_nested_bundle_shape():
+    # Regression test for the real bug caught live Sept 27 2026 via Ali's
+    # rug-score diagnostic: MadeOnSol's actual /bundle response nests the
+    # headline field under a "bundle" object and returns it as a 0-1
+    # fraction already -- confirmed live against a real labeled rug
+    # (ELONCOIN): {"bundle": {"held_pct_of_supply": 0.1027, ...},
+    # "wallets": [...]}. The old code read bundle_json.get(
+    # "held_pct_of_supply", 0) at the TOP level (always missing -> silent
+    # 0 = "verified zero bundler risk", full 20/20 points) and then divided
+    # by 100 again (which would have shrunk a real 10.27% to 0.1027% even
+    # after fixing the path). This locks in the real, confirmed shape so a
+    # future refactor can't silently reintroduce either half of the bug.
+    risk = _load("madeonsol_risk_sample.json")
+    real_bundle_response = {
+        "mint": "2sztT8K9Xu3cfp6WTEEB44Hdibmj3Pv6G2pWGM1vqzXP",
+        "bundle": {
+            "wallet_count": 10,
+            "bundle_kind": "same_slot",
+            "held_ratio": 0.3376,
+            "held_pct_of_supply": 0.1027,
+            "fully_exited": False,
+            "buy_volume": 304256531.57748,
+            "tokens_held": 102732035.865665,
+        },
+        "wallets": [],
+    }
+    sig = signals_from_madeonsol_risk(risk, holders_json={}, bundle_json=real_bundle_response,
+                                       is_pregraduation=True)
+    assert sig.bundler_sniper_pct == 0.1027
+
+
+def test_bundler_sniper_pct_none_when_bundle_json_empty():
+    # An empty/missing bundle response must stay None (-> scored
+    # low-neutral by score_token) rather than silently reading as a false
+    # "verified zero" the way the pre-fix top-level lookup did.
+    risk = _load("madeonsol_risk_sample.json")
+    sig = signals_from_madeonsol_risk(risk, holders_json={}, bundle_json={},
+                                       is_pregraduation=True)
+    assert sig.bundler_sniper_pct is None
+
+
 def test_madeonsol_risk_parses_and_scores():
     risk = _load("madeonsol_risk_sample.json")
-    sig = signals_from_madeonsol_risk(risk, holders_json={"top10_share": 34.0}, bundle_json={"held_pct_of_supply": 6.0},
+    sig = signals_from_madeonsol_risk(risk, holders_json={"top10_share": 34.0}, bundle_json={"bundle": {"held_pct_of_supply": 0.06}},
                                        is_pregraduation=True)
     assert sig.mint_authority_revoked is True
     assert sig.freeze_authority_revoked is True
@@ -113,7 +154,7 @@ def test_score_solana_mint_uses_all_three_madeonsol_endpoints_plus_dexscreener(m
         if url.endswith("/holders"):
             return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
         if url.endswith("/bundle"):
-            return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+            return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
         if "dexscreener" in url:
             return {"ok": True, "status_code": 200, "url": url, "json": [
                 {"volume": {"h24": 50000.0}, "liquidity": {"usd": 20000.0}},
@@ -171,7 +212,7 @@ def test_score_solana_mint_degrades_gracefully_on_partial_madeonsol_failure(monk
             return {"ok": False, "status_code": 429, "url": url, "json": {"error": "rate_limit_exceeded"}}
         if url.endswith("/holders"):
             return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
-        return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+        return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
@@ -414,7 +455,7 @@ def test_score_solana_mint_falls_back_to_goplus_when_madeonsol_risk_is_tier_gate
         if url.endswith("/holders"):
             return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
         if url.endswith("/bundle"):
-            return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+            return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
         if "dexscreener" in url:
             return {"ok": True, "status_code": 200, "url": url, "json": []}
         if url.endswith("/solana/token_security"):
@@ -449,7 +490,7 @@ def test_score_solana_mint_does_not_call_goplus_when_madeonsol_risk_succeeds(mon
         if url.endswith("/holders"):
             return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
         if url.endswith("/bundle"):
-            return {"ok": True, "status_code": 200, "url": url, "json": {"held_pct_of_supply": 5.0}}
+            return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
         if "dexscreener" in url:
             return {"ok": True, "status_code": 200, "url": url, "json": []}
         raise AssertionError(f"unexpected URL: {url}")
