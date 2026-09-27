@@ -81,12 +81,28 @@ that reset, except step 0.
   score or into Layer 1's alert flow -- that's a real decision about
   score weights that should happen with Ali reviewing it, not done solo
   overnight (at the time -- superseded below, Ali came back before this
-  session ended and said to go ahead). Still open: build the
-  StonkFun-style launch-history heuristic against
-  fetch_solana_token_deployer's result (deployer rug-history) or confirm
-  a pump.fun creator-launches endpoint exists for the same purpose
-  (unconfirmed -- couldn't verify a real pump.fun endpoint live tonight,
-  don't guess at one).
+  session ended and said to go ahead). Literal deployer rug-history
+  (past-launch outcomes) still NOT built -- needs decoding pump.fun's
+  own "create" instruction, and this codebase has a deliberate existing
+  rule against guessing a discriminator without confirmed real traffic
+  (see pumpfun_trades.py's docstring -- built that way on purpose after
+  getting burned by exactly that mistake before). Not breaking that
+  discipline solo overnight.
+- [x] BUILT + WIRED LIVE Sept 28 2026 instead: deployer wallet
+  age/freshness -- the safe, verifiable adjacent signal (a wallet
+  funded and first used minutes before deploying is a classic burner
+  pattern real rug-checkers already track). Same technique as
+  fetch_solana_token_deployer (oldest getSignaturesForAddress entry),
+  applied to the deployer wallet itself, reading blockTime directly off
+  that entry. Wired into the exact same `_handle_scored` path as
+  dev-holding, reusing the already-found deployer_wallet (no extra
+  lookup), same ApiUnreachable guard, rides as a `[Deployer age: ...]`
+  tag (fresh <1hr / new <24hr / no tag if established >24hr) -- not
+  folded into the 100-point score, same reasoning as dev-holding above.
+  388/388 tests passing (was 368 at the start of tonight, +20 across
+  everything built this session). If literal rug-history ever gets
+  built later, it needs real confirmed pump.fun instruction data first
+  -- not guessed.
 - [x] WIRED LIVE Sept 28 2026 (Ali: "if you feel it needs to be plugged
   in for betterment of the system just do it"): dev-holding-% now runs
   for real on every live Solana deep-score. Lands in `_run_layer8_cycle`
