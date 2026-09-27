@@ -80,24 +80,44 @@ that reset, except step 0.
   every other optional signal in this file. NOT YET wired into the live
   score or into Layer 1's alert flow -- that's a real decision about
   score weights that should happen with Ali reviewing it, not done solo
-  overnight. Next: wire fetch_solana_token_deployer's result into
-  score_solana_mint, then either build the StonkFun-style launch-history
-  heuristic against it (deployer rug-history) or confirm a pump.fun
-  creator-launches endpoint exists for the same purpose (unconfirmed --
-  couldn't verify a real pump.fun endpoint live tonight, don't guess at
-  one).
-- [ ] Build a dev-wallet current-holding-% check (confirmed missing
-  Sept 27, 2026, second research pass against real paid sniper-bot
-  feature lists -- GMGN, BullX, Photon, Trojan, Axiom all publish "dev
-  holdings" as a tracked signal, this repo doesn't have it). Cheap to
-  add: reuses the SAME getTokenLargestAccounts RPC call already built
-  for top10 holder concentration -- just check whether the deployer's
-  own address appears in that list and what % it holds. NOT a flat 20%
-  cutoff -- on pump.fun's bonding-curve launch there's no team pre-mine
-  by default, so a "normal" dev holding is usually low single digits or
-  0%; graduate the flag the same way top10_holder_pct already is (low
-  single digits = normal, mid-single-digits-to-~10% = worth noting,
-  above that = real concentration risk), not one arbitrary threshold.
+  overnight (at the time -- superseded below, Ali came back before this
+  session ended and said to go ahead). Still open: build the
+  StonkFun-style launch-history heuristic against
+  fetch_solana_token_deployer's result (deployer rug-history) or confirm
+  a pump.fun creator-launches endpoint exists for the same purpose
+  (unconfirmed -- couldn't verify a real pump.fun endpoint live tonight,
+  don't guess at one).
+- [x] WIRED LIVE Sept 28 2026 (Ali: "if you feel it needs to be plugged
+  in for betterment of the system just do it"): dev-holding-% now runs
+  for real on every live Solana deep-score. Lands in `_run_layer8_cycle`
+  -> `_handle_scored` (scheduler.py) -- the same path that already calls
+  score_solana_mint wrapped in `_safe`, confirmed by reading the real
+  call site, not assumed. Rides as a `[Dev holding: ...]` tag on the
+  alert (same convention as `[Backing: ...]`/`[Buzz: ...]`), graduated
+  per classify_dev_holding_pct (none/<5%, notable/5-10%, risk/>10%) --
+  NOT folded into the 100-point structural score itself, deliberately:
+  that score's weights were rebalanced once already (Sept 25 2026) off
+  real backtest evidence, and touching it again without the same kind
+  of evidence isn't a call to make solo overnight. A visible tag gets
+  this in front of Ali on every real alert without risking the
+  already-tuned score.
+  Caught and fixed a real regression while wiring this in: both RPC
+  calls can raise ApiUnreachable on a genuine network-level failure
+  (not just an ordinary API error), and the call site had no guard for
+  that -- would have crashed a real poll cycle over an optional tag.
+  Fixed with the same try/except pattern `_safe()` already uses
+  elsewhere in scheduler.py. Also fixed telegram_alert.py's tag render
+  order, which didn't include "Dev holding" yet (would have silently
+  dropped the tag from the actual Telegram message even though it was
+  set). 380/380 tests passing (was 368 at the start of tonight) -- 12
+  new tests added across the deployer/dev-holding fetch functions and
+  this wiring.
+- [x] Dev-wallet current-holding-% -- DONE, see the WIRED LIVE entry
+  above. (Turned out to need its own RPC helper,
+  getTokenAccountsByOwner, not a reuse of top10's
+  getTokenLargestAccounts as first guessed here -- that call returns
+  token ACCOUNTS not owner wallets, so it can't directly answer "does
+  the deployer hold X%" without an extra lookup per account.)
 - [ ] Twitter/X itself confirmed genuinely paid-only (checked twice,
   Sept 27 2026): free tier is a one-time ~100-request trial or
   restricted to government/public-service accounts; real read/search
