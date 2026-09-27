@@ -524,31 +524,32 @@ def _run_layer1_cycle(_summary_path=None):
 
 def run_poll_fast_loop():
     """Wraps run_poll_fast() in a real wall-clock loop so discovery actually
-    runs every ~10 minutes, instead of relying on GitHub's `schedule:`
+    runs on a real cadence, instead of relying on GitHub's `schedule:`
     trigger to re-invoke this process -- confirmed live (Sept 27 2026) that
     GitHub only actually fires poll-fast.yml's declared */10 cron every
     2.5-5.5 hours in practice (a platform-side scheduling throttle, not a
     bug here). One job now keeps polling on its own for up to ~5h45m
     (comfortably under GitHub's 6h per-job ceiling on this repo), which in
     practice overlaps or nearly touches the next real schedule fire, giving
-    close to true 10-min coverage without needing GitHub to cooperate.
+    close to continuous coverage without needing GitHub to cooperate.
 
     Guarded by an Upstash lock (state.acquire_lock) so that if GitHub's
     schedule DOES fire a second time while a loop from an earlier run is
     still going, the second process exits immediately instead of running a
     duplicate loop and silently doubling the MadeOnSol call rate.
 
-    HONEST NUMBER (unchanged from the poll-fast.yml comment, now actually
-    reachable): Layer 1's 2 MadeOnSol calls/cycle at a genuine 10-min
-    cadence is ~288 calls/day, over the stated 200/day BASIC cap. Previously
-    GitHub's own throttling accidentally kept real usage under that; a true
-    10-min cadence means the cap can now actually be hit some days. Not a
-    reason to hold this back -- madeonsol_budget_remaining() already gates
-    calls elsewhere in the pipeline (see layer1_deployer.py) -- but worth
-    knowing this is now a live constraint, not just a documented one."""
+    CADENCE (Ali's call, Sept 27 2026): deliberately set to 20 min, not the
+    originally-declared 10 min in the cron comment. Layer 1's 2 MadeOnSol
+    calls/cycle at a genuine 10-min cadence is ~288 calls/day, over the
+    200/day BASIC cap; at 20 min it's ~144/day, comfortably under it with
+    real headroom left for diagnostics/backtests run the same day.
+    madeonsol_budget_remaining() still gates calls downstream regardless
+    (see layer1_deployer.py) -- this cadence choice is about staying under
+    the cap on a normal day, not a hard dependency on that gate."""
+    INTERVAL_SECONDS = 20 * 60  # 20 min -- see CADENCE note above
     LOOP_CEILING_SECONDS = 5 * 3600 + 45 * 60  # 5h45m
     LOCK_KEY = "poll_fast_loop_lock"
-    LOCK_TTL_SECONDS = 900  # 15 min -- comfortably longer than one poll-fast cycle
+    LOCK_TTL_SECONDS = INTERVAL_SECONDS + 5 * 60  # covers one full interval + a slow cycle, so the lock never expires between refreshes
 
     if not state.acquire_lock(LOCK_KEY, ttl_seconds=LOCK_TTL_SECONDS):
         print("poll-fast loop lock already held by another run -- exiting immediately, no duplicate loop.")
@@ -575,7 +576,7 @@ def run_poll_fast_loop():
                 print(f"poll-fast loop: ceiling reached ({int(elapsed)}s) -- exiting cleanly for the next scheduled run to take over.")
                 break
 
-            time.sleep(600)
+            time.sleep(INTERVAL_SECONDS)
     finally:
         state.release_lock(LOCK_KEY)
 
@@ -1245,7 +1246,7 @@ if __name__ == "__main__":
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--poll", action="store_true", help="fast + slow in one process (local/manual only)")
     parser.add_argument("--seed-pumpfun-wallets", action="store_true", help="one-off: writes PUMPFUN_MANUAL_SEED_BATCHES into the live roster")
-    parser.add_argument("--poll-fast", action="store_true", help="discovery only, looped every ~10min internally -- runs on the fast cron (see run_poll_fast_loop)")
+    parser.add_argument("--poll-fast", action="store_true", help="discovery only, looped every ~20min internally -- runs on the fast cron (see run_poll_fast_loop)")
     parser.add_argument("--poll-fast-once", action="store_true", help="discovery only, single cycle, no loop -- for manual/local testing")
     parser.add_argument("--poll-slow", action="store_true", help="expensive layers only -- runs on the slow cron")
     parser.add_argument("--poll-madeonsol", action="store_true", help="Layer 1 + Layer 8 + Layer 2+9 only -- run on your OWN PC via Task Scheduler, never on GitHub Actions (MadeOnSol free-key rate limit)")
