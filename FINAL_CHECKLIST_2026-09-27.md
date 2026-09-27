@@ -82,16 +82,34 @@ that reset, except step 0.
   0%; graduate the flag the same way top10_holder_pct already is (low
   single digits = normal, mid-single-digits-to-~10% = worth noting,
   above that = real concentration risk), not one arbitrary threshold.
-- [ ] Acknowledged, real, PAID-ONLY gap (confirmed no free path exists
-  after a second research pass Sept 27, 2026): real KOL/Twitter-
-  influencer buy tracking (what GMGN calls "KOL Activity" -- resolving
-  a buying wallet to a known influencer identity). Needs either
-  Twitter/X's own API (Basic ~$200/mo, no search access; Pro
-  ~$5,000/mo) or a paid on-chain intelligence service (Nansen, Arkham)
-  that maps wallets to known identities -- no free tier covers this.
-  Not building a Twitter scraper (fragile, ToS violation). If budget
-  ever allows one paid add-on, this is probably the highest-leverage
-  one -- but there is no free substitute, so it stays out for now.
+- [ ] Twitter/X itself confirmed genuinely paid-only (checked twice,
+  Sept 27 2026): free tier is a one-time ~100-request trial or
+  restricted to government/public-service accounts; real read/search
+  needs Basic ~$200/mo (no search) or Pro ~$5,000/mo; scraping
+  workarounds get IP-blocked within hours and break on every frontend
+  change -- not building that. This item stays paid-only, no free
+  substitute for Twitter specifically.
+- [ ] Build instead (Ali's push Sept 27 2026 -- right call, there IS a
+  free path for the same underlying goal, just not via Twitter):
+  monitor public Telegram channels via Telegram's own official, free
+  Bot API or Telethon -- this is where most real pump.fun
+  "caller"/signal activity actually lives, more than Twitter for this
+  specific niche, and it's ToS-compliant (unlike scraping X). Track
+  which known caller channels post a buy call and which wallets act
+  right after -- same purpose as "KOL activity," different free
+  source. Needs: pick 3-5 real, established Solana/pump.fun caller
+  channels to start with (not guessed at -- find ones with an actual
+  track record), a Telegram bot/client reading their public messages,
+  and a way to correlate a post to the token's contract address.
+- [ ] Check Dune Analytics' free API tier for pulling community-built
+  Solana "smart money" wallet-labeling dashboards programmatically
+  (one exists live: dune.com/wallet_dig/smart-money-solana) -- free to
+  view in-browser, exact free API credit limit not yet confirmed live
+  (Dune isn't reachable from this session's sandbox, same restriction
+  as MadeOnSol/Birdeye/DexScreener -- needs checking from Ali's own PC
+  or browser). If the free API tier covers enough query volume, this
+  is a free, no-build-required source of wallet labels rather than
+  something we'd have to construct ourselves.
 - [ ] Decide (optional, not blocking): MadeOnSol PRO tier ($43-49/mo) for
   its own risk `factors` (mint/freeze authority, lp_lock) beyond what
   GoPlus's fallback already covers. Not urgent since the free RPC signals
