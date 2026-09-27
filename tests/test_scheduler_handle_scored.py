@@ -58,3 +58,55 @@ def test_missing_mint_does_not_crash():
                "score": ScoreResult(score=90, band="A", liquidity_flag="deep", reasons=[])}
     # just must not raise -- mint-less scored items are skipped entirely
     scheduler._handle_scored(scored, "bsc", source="test", mc=50000.0)
+
+
+def test_dev_holding_tag_set_on_solana_alert_when_risk(monkeypatch):
+    # Real RPC calls must never run in a test -- mock both new helpers,
+    # same pattern as every other RPC signal test in this repo.
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "fetch_solana_token_deployer", lambda mint: "DEPLOYER_XYZ")
+    monkeypatch.setattr(l0, "fetch_solana_dev_holding_pct", lambda mint, wallet: 0.22)
+    # scheduler imported these by name, so patch scheduler's own references too
+    monkeypatch.setattr(scheduler, "fetch_solana_token_deployer", lambda mint: "DEPLOYER_XYZ")
+    monkeypatch.setattr(scheduler, "fetch_solana_dev_holding_pct", lambda mint, wallet: 0.22)
+
+    captured = {}
+    def fake_send_alert(alert):
+        captured["alert"] = alert
+        return {"sent": False}
+    monkeypatch.setattr(scheduler, "send_alert", fake_send_alert)
+
+    scored = _scored("token-dev-risk", "C")  # band C -> takes the else branch, still tags Dev holding
+    scheduler._handle_scored(scored, "solana", source="test", mc=50000.0)
+
+    assert "alert" in captured
+    assert captured["alert"].tags.get("Dev holding") == "risk (22.0%)"
+
+
+def test_dev_holding_tag_absent_when_normal(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(scheduler, "fetch_solana_token_deployer", lambda mint: "DEPLOYER_XYZ")
+    monkeypatch.setattr(scheduler, "fetch_solana_dev_holding_pct", lambda mint, wallet: 0.02)
+
+    captured = {}
+    def fake_send_alert(alert):
+        captured["alert"] = alert
+        return {"sent": False}
+    monkeypatch.setattr(scheduler, "send_alert", fake_send_alert)
+
+    scored = _scored("token-dev-normal", "C")
+    scheduler._handle_scored(scored, "solana", source="test", mc=50000.0)
+
+    assert "alert" in captured
+    assert "Dev holding" not in captured["alert"].tags
+
+
+def test_dev_holding_not_checked_on_non_solana_chain(monkeypatch):
+    # BSC/RHC must not trigger these Solana-only RPC calls at all.
+    def boom(*a, **kw):
+        raise AssertionError("should not be called for a non-solana chain")
+    monkeypatch.setattr(scheduler, "fetch_solana_token_deployer", boom)
+    monkeypatch.setattr(scheduler, "fetch_solana_dev_holding_pct", boom)
+
+    scored = _scored("token-bsc", "C")
+    scheduler._handle_scored(scored, "bsc", source="test", mc=50000.0)

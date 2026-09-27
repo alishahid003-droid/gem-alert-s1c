@@ -838,6 +838,28 @@ def fetch_solana_dev_holding_pct(mint: str, deployer_wallet: Optional[str]) -> O
     return min(1.0, held / total_supply)
 
 
+
+def classify_dev_holding_pct(pct: Optional[float]) -> str:
+    """Graduated classification for fetch_solana_dev_holding_pct's result
+    -- deliberately NOT a flat 20% cutoff (Ali asked whether 20% was
+    normal Sept 27 2026; it isn't). On pump.fun's bonding-curve launch
+    there's no team pre-mine by default, so a "normal" dev holding is
+    usually low single digits or 0%. Returns "none" (no tag warranted),
+    "notable" (worth surfacing, not alarming), or "risk" (real
+    concentration concern) -- mirrors the same tag convention as
+    Layer 3's backing check and Layer 11's buzz check (scheduler.py:
+    alert.set_tag(...), only when tag != "none"). Returns "unknown" if
+    pct itself is None (RPC failure upstream -- never silently treated
+    as "none/safe")."""
+    if pct is None:
+        return "unknown"
+    if pct < 0.05:
+        return "none"
+    if pct <= 0.10:
+        return "notable"
+    return "risk"
+
+
 def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     """Real bug caught live Sept 24 2026: this used to always return
     ok=True no matter what, even when all 3 sub-calls failed (e.g.

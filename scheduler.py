@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -390,6 +390,38 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             buzz_tag = buzz.tag
             print(f"[layer11] {mint[:8]} buzz={buzz_tag} (total_amount={buzz.total_amount})")
 
+    # -- Dev-wallet current-holding-% (Ali, Sept 28 2026 -- checklist item,
+    # built same night as fetch_solana_token_deployer/
+    # fetch_solana_dev_holding_pct in layer0_scoring.py). Solana only --
+    # both RPC helpers are Solana-specific (see their docstrings), and this
+    # rides as a tag on the alert same as Backing/Buzz above, NOT folded
+    # into the 100-point structural score -- that score's weights were
+    # deliberately rebalanced Sept 25 2026 off real backtest evidence, and
+    # changing it again without the same kind of evidence isn't a call to
+    # make solo overnight. A visible tag gets this in front of Ali on every
+    # real alert without touching a score that's already been tuned once
+    # for a documented reason. Only costs 2 extra RPC calls, both free,
+    # both already used elsewhere tonight -- no MadeOnSol budget spent. --
+    dev_tag = None
+    if mint and chain == "solana":
+        try:
+            deployer_wallet = fetch_solana_token_deployer(mint)
+            dev_pct = fetch_solana_dev_holding_pct(mint, deployer_wallet)
+        except ApiUnreachable as e:
+            # Same real gap _safe() exists for elsewhere in this file --
+            # both RPC helpers can raise on a genuine network-level failure
+            # (not just an ordinary API error, which they already handle),
+            # and this call site had no guard for that until now. Caught
+            # here rather than letting one network blip crash the whole
+            # poll cycle over an optional tag.
+            print(f"[layer0] {mint[:8]} dev-holding check skipped: network unreachable ({e})")
+            deployer_wallet = None
+            dev_pct = None
+        dev_tier = classify_dev_holding_pct(dev_pct)
+        if dev_tier in ("notable", "risk"):
+            dev_tag = f"{dev_tier} ({dev_pct*100:.1f}%)"
+            print(f"[layer0] {mint[:8]} dev_holding={dev_tag}")
+
     if sr.band == "D":
         mc_hist = state.get_mc_history(mint) if mint else []
         mom = detect_momentum_override(sr.band, mc_hist)
@@ -405,6 +437,8 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         alert.set_tag("Backing", backing_tag)
     if buzz_tag:
         alert.set_tag("Buzz", buzz_tag)
+    if dev_tag:
+        alert.set_tag("Dev holding", dev_tag)
     layer_name = "layer0b" if source == "mobula" else "layer0"
     send_res = _alert(alert, layer_name)
     print(f"[layer0/8:{chain}] {mint} band {sr.band} -> {send_res}")

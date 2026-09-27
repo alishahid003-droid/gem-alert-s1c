@@ -871,3 +871,14 @@ def test_fetch_solana_dev_holding_pct_zero_when_deployer_holds_nothing(monkeypat
     monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
     pct = l0.fetch_solana_dev_holding_pct("MINT123", "DEPLOYER_WALLET_ABC")
     assert pct == 0.0
+
+
+def test_classify_dev_holding_pct_tiers():
+    import layers.layer0_scoring as l0
+    assert l0.classify_dev_holding_pct(None) == "unknown"
+    assert l0.classify_dev_holding_pct(0.0) == "none"
+    assert l0.classify_dev_holding_pct(0.049) == "none"
+    assert l0.classify_dev_holding_pct(0.05) == "notable"
+    assert l0.classify_dev_holding_pct(0.10) == "notable"
+    assert l0.classify_dev_holding_pct(0.101) == "risk"
+    assert l0.classify_dev_holding_pct(0.30) == "risk"
