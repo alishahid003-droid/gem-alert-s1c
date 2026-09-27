@@ -47,13 +47,29 @@ that reset, except step 0.
   field parsed, etc.), fix it now — this is a real correctness check, not
   optional polish, since both signals are already wired into the live
   score.
+- [ ] Validate whether Layer 2b (pump.fun smart-money roster) and Layer 10
+  (insider funding-chain tracing) convergence actually correlates with
+  real winners, once there's enough real trade history for Layer 2b's
+  roster to promote any wallets (it starts empty -- cold start, not a
+  bug). Until it's been checked against real outcomes, treat any
+  Layer2b/10 signal as unvalidated like everything else.
 
-## 3. Close the one acknowledged detection gap
+## 3. Close acknowledged detection gaps
 - [ ] Build the post-alert monitoring pass: re-check price/liquidity
   15-60 min after a coin is flagged, downgrade or cancel the alert if it
   craters in that window. Not started yet — this is a real, named gap,
   not a nice-to-have, because right now a flagged token that rugs 10
   minutes later still shows as a live alert with no correction.
+- [ ] Build a deployer rug-history check (confirmed missing Sept 27,
+  2026 -- grepped the whole layers/ folder, nothing checks this today).
+  Free, on-chain, buildable: for a new deployer wallet, look up its past
+  token launches (Solana RPC getSignaturesForAddress on the deployer, or
+  pump.fun's own public API for "tokens created by this wallet") and
+  check how those earlier tokens performed -- a wallet with a pattern of
+  launch-then-rug is a real red flag Layer 1 currently has no way to
+  see; a wallet with a track record of real graduations is a real green
+  flag the same way Layer 2b's smart-money roster works, but on
+  deployers instead of buyers.
 - [ ] Decide (optional, not blocking): MadeOnSol PRO tier ($43-49/mo) for
   its own risk `factors` (mint/freeze authority, lp_lock) beyond what
   GoPlus's fallback already covers. Not urgent since the free RPC signals
