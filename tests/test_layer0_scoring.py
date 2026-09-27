@@ -882,3 +882,51 @@ def test_classify_dev_holding_pct_tiers():
     assert l0.classify_dev_holding_pct(0.10) == "notable"
     assert l0.classify_dev_holding_pct(0.101) == "risk"
     assert l0.classify_dev_holding_pct(0.30) == "risk"
+
+
+def test_fetch_solana_wallet_first_seen_ts_returns_oldest_blocktime(monkeypatch):
+    import layers.layer0_scoring as l0
+
+    def fake_rpc_call(chain, method, params, timeout=15):
+        assert chain == "solana"
+        assert method == "getSignaturesForAddress"
+        assert params[0] == "WALLET_ABC"
+        assert params[1] == {"limit": 1000}
+        return {"ok": True, "result": [
+            {"signature": "sig_newest", "blockTime": 1900000000},
+            {"signature": "sig_oldest", "blockTime": 1700000000},
+        ]}
+
+    monkeypatch.setattr(l0, "rpc_call", fake_rpc_call)
+    assert l0.fetch_solana_wallet_first_seen_ts("WALLET_ABC") == 1700000000
+
+
+def test_fetch_solana_wallet_first_seen_ts_none_on_empty_history(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": True, "result": []})
+    assert l0.fetch_solana_wallet_first_seen_ts("WALLET_ABC") is None
+
+
+def test_fetch_solana_wallet_first_seen_ts_none_on_rpc_failure(monkeypatch):
+    import layers.layer0_scoring as l0
+    monkeypatch.setattr(l0, "rpc_call", lambda *a, **kw: {"ok": False, "reason": "down"})
+    assert l0.fetch_solana_wallet_first_seen_ts("WALLET_ABC") is None
+
+
+def test_classify_deployer_wallet_age_tiers():
+    import layers.layer0_scoring as l0
+    now = 2_000_000_000.0
+    assert l0.classify_deployer_wallet_age(None, now) == "unknown"
+    assert l0.classify_deployer_wallet_age(now - 60, now) == "fresh"           # 1 min old
+    assert l0.classify_deployer_wallet_age(now - 3599, now) == "fresh"         # just under 1hr
+    assert l0.classify_deployer_wallet_age(now - 3600 * 2, now) == "new"       # 2hr old
+    assert l0.classify_deployer_wallet_age(now - 3600 * 23, now) == "new"      # 23hr old
+    assert l0.classify_deployer_wallet_age(now - 3600 * 25, now) == "established"  # 25hr old
+
+
+def test_classify_deployer_wallet_age_uses_real_wallclock_by_default(monkeypatch):
+    import layers.layer0_scoring as l0
+    fixed_now = 2_000_000_000.0
+    monkeypatch.setattr(l0.time, "time", lambda: fixed_now)
+    # first_seen 30 minutes before "now" -> fresh, without passing now_ts explicitly
+    assert l0.classify_deployer_wallet_age(fixed_now - 1800) == "fresh"

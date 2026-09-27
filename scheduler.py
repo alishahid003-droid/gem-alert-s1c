@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -403,6 +403,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     # for a documented reason. Only costs 2 extra RPC calls, both free,
     # both already used elsewhere tonight -- no MadeOnSol budget spent. --
     dev_tag = None
+    age_tag = None
     if mint and chain == "solana":
         try:
             deployer_wallet = fetch_solana_token_deployer(mint)
@@ -422,6 +423,27 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             dev_tag = f"{dev_tier} ({dev_pct*100:.1f}%)"
             print(f"[layer0] {mint[:8]} dev_holding={dev_tag}")
 
+        # -- Deployer wallet age/freshness (Ali, Sept 28 2026 -- the safe
+        # adjacent signal to literal deployer rug-history, see
+        # fetch_solana_wallet_first_seen_ts's docstring for why the literal
+        # version (past-launch outcomes) isn't built tonight: it needs
+        # decoding pump.fun's own "create" instruction, and this codebase
+        # has a deliberate existing rule against guessing a discriminator
+        # without confirmed real traffic. Reuses the already-found
+        # deployer_wallet from the dev-holding check above -- no extra
+        # deployer lookup needed. --
+        if deployer_wallet:
+            try:
+                first_seen = fetch_solana_wallet_first_seen_ts(deployer_wallet)
+            except ApiUnreachable as e:
+                print(f"[layer0] {mint[:8]} deployer-age check skipped: network unreachable ({e})")
+                first_seen = None
+            age_tier = classify_deployer_wallet_age(first_seen)
+            if age_tier in ("fresh", "new"):
+                age_hours = (time.time() - first_seen) / 3600.0 if first_seen else None
+                age_tag = f"{age_tier} wallet ({age_hours:.1f}h old)" if age_hours is not None else age_tier
+                print(f"[layer0] {mint[:8]} deployer_age={age_tag}")
+
     if sr.band == "D":
         mc_hist = state.get_mc_history(mint) if mint else []
         mom = detect_momentum_override(sr.band, mc_hist)
@@ -439,6 +461,8 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         alert.set_tag("Buzz", buzz_tag)
     if dev_tag:
         alert.set_tag("Dev holding", dev_tag)
+    if age_tag:
+        alert.set_tag("Deployer age", age_tag)
     layer_name = "layer0b" if source == "mobula" else "layer0"
     send_res = _alert(alert, layer_name)
     print(f"[layer0/8:{chain}] {mint} band {sr.band} -> {send_res}")

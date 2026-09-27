@@ -110,3 +110,58 @@ def test_dev_holding_not_checked_on_non_solana_chain(monkeypatch):
 
     scored = _scored("token-bsc", "C")
     scheduler._handle_scored(scored, "bsc", source="test", mc=50000.0)
+
+
+def test_deployer_age_tag_set_when_wallet_is_fresh(monkeypatch):
+    monkeypatch.setattr(scheduler, "fetch_solana_token_deployer", lambda mint: "DEPLOYER_FRESH")
+    monkeypatch.setattr(scheduler, "fetch_solana_dev_holding_pct", lambda mint, wallet: 0.01)
+    fixed_now = 2_000_000_000.0
+    monkeypatch.setattr(scheduler.time, "time", lambda: fixed_now)
+    # wallet's first transaction was 20 minutes ago
+    monkeypatch.setattr(scheduler, "fetch_solana_wallet_first_seen_ts", lambda wallet: fixed_now - 1200)
+
+    captured = {}
+    def fake_send_alert(alert):
+        captured["alert"] = alert
+        return {"sent": False}
+    monkeypatch.setattr(scheduler, "send_alert", fake_send_alert)
+
+    scored = _scored("token-fresh-deployer", "C")
+    scheduler._handle_scored(scored, "solana", source="test", mc=50000.0)
+
+    assert "alert" in captured
+    assert captured["alert"].tags.get("Deployer age") == "fresh wallet (0.3h old)"
+
+
+def test_deployer_age_tag_absent_for_established_wallet(monkeypatch):
+    monkeypatch.setattr(scheduler, "fetch_solana_token_deployer", lambda mint: "DEPLOYER_OLD")
+    monkeypatch.setattr(scheduler, "fetch_solana_dev_holding_pct", lambda mint, wallet: 0.01)
+    fixed_now = 2_000_000_000.0
+    monkeypatch.setattr(scheduler.time, "time", lambda: fixed_now)
+    # wallet's first transaction was 500 hours ago -- well established
+    monkeypatch.setattr(scheduler, "fetch_solana_wallet_first_seen_ts", lambda wallet: fixed_now - 500 * 3600)
+
+    captured = {}
+    def fake_send_alert(alert):
+        captured["alert"] = alert
+        return {"sent": False}
+    monkeypatch.setattr(scheduler, "send_alert", fake_send_alert)
+
+    scored = _scored("token-old-deployer", "C")
+    scheduler._handle_scored(scored, "solana", source="test", mc=50000.0)
+
+    assert "alert" in captured
+    assert "Deployer age" not in captured["alert"].tags
+
+
+def test_deployer_age_not_checked_when_deployer_wallet_unknown(monkeypatch):
+    # If the deployer lookup itself failed (returns None), the age check
+    # must not even attempt a call -- nothing to look up.
+    def boom(*a, **kw):
+        raise AssertionError("should not be called when deployer_wallet is None")
+    monkeypatch.setattr(scheduler, "fetch_solana_token_deployer", lambda mint: None)
+    monkeypatch.setattr(scheduler, "fetch_solana_dev_holding_pct", lambda mint, wallet: None)
+    monkeypatch.setattr(scheduler, "fetch_solana_wallet_first_seen_ts", boom)
+
+    scored = _scored("token-unknown-deployer", "C")
+    scheduler._handle_scored(scored, "solana", source="test", mc=50000.0)

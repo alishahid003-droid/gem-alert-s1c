@@ -860,6 +860,72 @@ def classify_dev_holding_pct(pct: Optional[float]) -> str:
     return "risk"
 
 
+
+def fetch_solana_wallet_first_seen_ts(wallet: str) -> Optional[int]:
+    """Real deployer wallet-age signal (checklist Sept 27/28 2026 --
+    Ali's original ask was literal deployer RUG-HISTORY, i.e. "how did
+    this wallet's past token launches perform," but that needs decoding
+    pump.fun's own "create" instruction to find a wallet's past launches
+    at all, and this codebase has a deliberate, existing rule against
+    guessing an instruction discriminator without real confirmed traffic
+    (see pumpfun_trades.py's docstring -- built that way on purpose after
+    getting burned by exactly that mistake before). Not breaking that
+    discipline solo overnight with no way to verify against real data.
+
+    Wallet AGE is the safe, verifiable, well-established adjacent signal
+    instead: a wallet funded and used for the first time minutes before
+    deploying a token is a classic burner-wallet pattern real rug-
+    checking tools (Rugcheck, Bubblemaps and others) already track. Uses
+    the SAME technique as fetch_solana_token_deployer -- oldest
+    getSignaturesForAddress entry -- but on the wallet itself, and reads
+    blockTime directly off that entry (no second getTransaction call
+    needed, getSignaturesForAddress already returns it).
+
+    Same limitation as fetch_solana_token_deployer: single page (limit
+    1000), so a wallet with 1000+ transactions already would have its
+    true first-seen time missed. Fine for a genuinely fresh burner wallet
+    (the case this signal exists to catch), not reliable for an old,
+    highly active wallet -- which is a real caller-worth-knowing gap
+    when reading a "safe/no signal" result from this signal on a wallet
+    with heavy prior activity.
+
+    Returns None (never a guessed timestamp) on any RPC failure, empty
+    history, or missing blockTime."""
+    sigs_resp = rpc_call("solana", "getSignaturesForAddress", [wallet, {"limit": 1000}])
+    if not sigs_resp.get("ok"):
+        return None
+    sigs = sigs_resp.get("result") or []
+    if not sigs:
+        return None
+    oldest = sigs[-1]
+    if not isinstance(oldest, dict):
+        return None
+    return oldest.get("blockTime")
+
+
+def classify_deployer_wallet_age(first_seen_ts: Optional[int], now_ts: Optional[float] = None) -> str:
+    """Graduated classification of fetch_solana_wallet_first_seen_ts's
+    result. now_ts defaults to real wall-clock time (module-level `time`)
+    -- overridable in tests for a deterministic clock, same pattern as
+    compute_holder_growth_rate_per_hr elsewhere in this file.
+
+    Returns "unknown" if first_seen_ts is None (RPC failure upstream,
+    never silently treated as safe), "fresh" (<1 hour old -- classic
+    burner-wallet red flag), "new" (1-24 hours -- worth noting, not
+    alarming), or "established" (>24 hours -- no signal either way, most
+    real wallets)."""
+    if first_seen_ts is None:
+        return "unknown"
+    if now_ts is None:
+        now_ts = time.time()
+    age_hours = (now_ts - first_seen_ts) / 3600.0
+    if age_hours < 1:
+        return "fresh"
+    if age_hours < 24:
+        return "new"
+    return "established"
+
+
 def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     """Real bug caught live Sept 24 2026: this used to always return
     ok=True no matter what, even when all 3 sub-calls failed (e.g.

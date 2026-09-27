@@ -34,7 +34,7 @@ class Alert:
     def render(self) -> str:
         order = [
             "Chain", "Score", "Deployer", "Convergence", "SELL",
-            "Backing", "Buzz", "Dev holding", "News", "Exit-risk", "Realizable", "MEGA-ALERT",
+            "Backing", "Buzz", "Dev holding", "Deployer age", "News", "Exit-risk", "Realizable", "MEGA-ALERT",
         ]
         tag_str = " ".join(f"[{k}: {self.tags[k]}]" for k in order if k in self.tags)
         lines = [
