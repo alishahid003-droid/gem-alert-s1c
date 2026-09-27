@@ -25,11 +25,13 @@ docs.mobula.io as of Sep 2026).
 """
 from dataclasses import dataclass
 from typing import List, Optional, Literal, Tuple
+import time
 
 from config import CONFIG
 from utils.http import get_json, ApiUnreachable, describe_fetch_failure
 import state
 from links import DEXSCREENER_CHAIN_SLUG
+from layers.layer0d_point_in_time import fetch_birdeye_ohlcv, summarize_launch_window
 
 Chain = Literal["solana", "robinhood_chain", "base", "bsc", "ton", "ethereum"]
 
@@ -44,6 +46,7 @@ class RawSignals:
     vol_to_liq_ratio: Optional[float] = None           # unitless, moderate is better
     holder_growth_rate_per_hr: Optional[float] = None  # new holders/hr, higher (to a point) better
     bundler_sniper_pct: Optional[float] = None         # 0-1, lower is better
+    price_drawdown_from_peak_pct: Optional[float] = None  # Birdeye real launch-window shape, e.g. -80.0 = -80% off peak; None if unavailable/RHC
     liquidity_usd: Optional[float] = None
     is_pregraduation_solana: bool = False
 
@@ -145,8 +148,18 @@ def score_token(sig: RawSignals) -> ScoreResult:
     # Ali: these numbers came from 2 real data points, not a large backtest
     # -- worth revisiting once more named coins can be scored (MadeOnSol
     # rate limit resets, more BSC/Base winners run through this).
+    # Reweighted 25->15 Sept 27 2026 -- Ali's real rug-score diagnostic
+    # (10 real labeled rugs/pump_dumps, live MadeOnSol+DexScreener data)
+    # showed this ratio can't tell a real early pump from a post-rug quiet
+    # token -- both land in the same "healthy" 0.2-15 plateau. Freed 10
+    # points go to the new Birdeye launch-window-shape check below, which
+    # the same diagnostic run showed is the signal that actually
+    # distinguishes them (77% real hit rate vs this ratio's ~0%). Kept
+    # (not zeroed) because it's still real, free signal on its own terms
+    # (dead/wash-trading detection) -- just no longer over-weighted as if
+    # it alone proved organic momentum.
     if sig.vol_to_liq_ratio is not None:
-        w = 25
+        w = 15
         r = sig.vol_to_liq_ratio
         if r < 0.2:
             earned = w * 0.3   # dead / no real trading
@@ -156,7 +169,33 @@ def score_token(sig: RawSignals) -> ScoreResult:
             earned = w * max(0.3, 1.0 - (r - 15.0) / 150.0)  # gentle decay, floors at 0.3 not 0
         add(w, earned, f"vol/liq ratio {r:.2f}")
     else:
-        add(25, 10, "vol/liq trend unknown -- scored low-neutral")
+        add(15, 6, "vol/liq trend unknown -- scored low-neutral")
+
+    # Launch price/volume shape (weight 10) -- NEW Sept 27 2026, wired live
+    # off the same real diagnostic. Uses Birdeye's real OHLCV candles from
+    # the token's actual launch time (DexScreener's pairCreatedAt) to now,
+    # via fetch_birdeye_ohlcv + summarize_launch_window (already built and
+    # tested for backtest_point_in_time.py -- same functions, now also
+    # called live from score_solana_mint below). Solana-chain only --
+    # Robinhood Chain has no Birdeye mapping, see fetch_birdeye_ohlcv.
+    # Severe drawdown-from-peak (the real "pumped then got dumped on"
+    # signature every one of the 10 real labeled rugs/pump_dumps showed)
+    # scores low; a token still near its peak scores high. This is the
+    # single check in this file that reads actual price ACTION rather than
+    # a structural snapshot -- everything else here can look "healthy" on
+    # a token that has already collapsed, this can't.
+    if sig.price_drawdown_from_peak_pct is not None:
+        w = 10
+        dd = sig.price_drawdown_from_peak_pct  # e.g. -80.0 = -80% off peak, 0 = still at peak
+        if dd >= -10.0:
+            earned = w * 1.0    # still near peak, healthy
+        elif dd >= -60.0:
+            earned = w * max(0.0, 1.0 - (-10.0 - dd) / 50.0)  # linear decay 10%->60% off peak
+        else:
+            earned = 0.0        # severe collapse -- the rug/dump signature
+        add(w, earned, f"launch-window drawdown {dd:.1f}% from peak")
+    else:
+        add(10, 4, "launch-window price shape unknown -- scored low-neutral")
 
     # Holder growth rate (weight 20)
     if sig.holder_growth_rate_per_hr is not None:
@@ -209,7 +248,8 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
                                  holder_growth_rate_per_hr: Optional[float] = None,
                                  goplus_mint_authority_revoked: Optional[bool] = None,
                                  goplus_freeze_authority_revoked: Optional[bool] = None,
-                                 goplus_lp_locked: Optional[bool] = None) -> RawSignals:
+                                 goplus_lp_locked: Optional[bool] = None,
+                                 price_drawdown_from_peak_pct: Optional[float] = None) -> RawSignals:
     """risk_json from GET /tokens/{mint}/risk, holders_json from
     /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle.
 
@@ -281,6 +321,7 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
         # data now correctly falls through to None (scored low-neutral by
         # score_token), never a false 0.
         bundler_sniper_pct=(bundle_json.get("bundle", {}) or {}).get("held_pct_of_supply") if bundle_json else None,
+        price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
         liquidity_usd=liquidity_usd,
         is_pregraduation_solana=is_pregraduation,
     )
@@ -772,10 +813,17 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
     """Single-mint MadeOnSol scoring -- 3 calls (risk/holders/bundle) plus
     one DexScreener call for real vol/liq data (see fetch_dexscreener_vol_liq
     -- added Sept 25 2026, MadeOnSol's own 3 endpoints carry no volume or
-    liquidity figure). Costly enough per token that scheduler.py only calls
-    this for a bounded subset of Layer 1's deployer alerts (elite tier only,
-    capped per cycle), not every discovered mint -- see README's call-budget
-    section for why."""
+    liquidity figure), plus (Solana only, added Sept 27 2026) one Birdeye
+    OHLCV call for real launch-window price shape (see fetch_birdeye_ohlcv
+    -- the signal Ali's real rug-score diagnostic showed actually catches a
+    post-pump collapse, unlike anything else in this function). Costly
+    enough per token that scheduler.py only calls this for a bounded subset
+    of Layer 1's deployer alerts (elite tier only, capped per cycle), not
+    every discovered mint -- see README's call-budget section for why. The
+    Birdeye call adds no MadeOnSol budget cost (separate free-tier account,
+    30k compute units/month, 1 req/sec) but does add one more real HTTP
+    call per scored mint -- worth knowing if that budget ever needs
+    tightening too."""
     raw = fetch_madeonsol_token_risk(mint, chain)
     if not raw.get("ok"):
         return {"chain": chain, "address": mint, "error": raw.get("reason", "fetch failed")}
@@ -811,12 +859,32 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
             goplus_freeze_authority_revoked = parsed["freeze_authority_revoked"]
             goplus_lp_locked = parsed["lp_locked"]
 
+    # Real launch-window price shape (Birdeye), wired live Sept 27 2026 --
+    # same fetch_birdeye_ohlcv/summarize_launch_window functions already
+    # built and tested for backtest_point_in_time.py, now also called here
+    # so the LIVE score sees them, not just the backtest. Never a hard
+    # dependency -- any failure (no key, RHC unsupported, token too new for
+    # a candle yet) just leaves price_drawdown_from_peak_pct at None,
+    # exactly like every other optional signal in this function. Chain
+    # gate mirrors fetch_birdeye_ohlcv's own (RHC has no Birdeye mapping).
+    price_drawdown_from_peak_pct = None
+    if chain == "solana" and dex.get("ok") and dex.get("launch_ts_ms"):
+        window_start = int(dex["launch_ts_ms"] / 1000)
+        window_end = int(time.time())
+        if window_end > window_start:
+            ohlcv = fetch_birdeye_ohlcv(chain, mint, window_start, window_end, interval="15m")
+            if ohlcv.get("ok"):
+                summary = summarize_launch_window(ohlcv.get("candles") or [])
+                if summary.get("ok"):
+                    price_drawdown_from_peak_pct = summary["drawdown_from_peak_pct"]
+
     sig = signals_from_madeonsol_risk(
         d["risk"].get("json") or {}, d["holders"].get("json") or {}, d["bundle"].get("json") or {},
         is_pregraduation, vol_to_liq_ratio=vol_to_liq_ratio, liquidity_usd=liquidity_usd,
         goplus_mint_authority_revoked=goplus_mint_authority_revoked,
         goplus_freeze_authority_revoked=goplus_freeze_authority_revoked,
         goplus_lp_locked=goplus_lp_locked,
+        price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
     )
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 

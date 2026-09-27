@@ -74,6 +74,108 @@ def test_bundler_sniper_pct_none_when_bundle_json_empty():
     assert sig.bundler_sniper_pct is None
 
 
+def test_launch_shape_scores_low_on_severe_drawdown_high_near_peak():
+    # New signal wired live Sept 27 2026 -- Birdeye real launch-window
+    # price shape. Confirms the actual scoring curve: a token still near
+    # its peak scores full marks, a token that collapsed (the real
+    # signature every one of the 10 real labeled rugs/pump_dumps showed
+    # in Ali's diagnostic) scores near-zero on this component specifically.
+    risk = _load("madeonsol_risk_sample.json")
+    sig_near_peak = signals_from_madeonsol_risk(risk, holders_json={}, bundle_json={},
+                                                 is_pregraduation=True,
+                                                 price_drawdown_from_peak_pct=-5.0)
+    sig_collapsed = signals_from_madeonsol_risk(risk, holders_json={}, bundle_json={},
+                                                 is_pregraduation=True,
+                                                 price_drawdown_from_peak_pct=-95.0)
+    sig_unknown = signals_from_madeonsol_risk(risk, holders_json={}, bundle_json={},
+                                               is_pregraduation=True)
+    result_near_peak = score_token(sig_near_peak)
+    result_collapsed = score_token(sig_collapsed)
+    result_unknown = score_token(sig_unknown)
+    assert "launch-window drawdown -5.0% from peak" in result_near_peak.reasons
+    assert "launch-window drawdown -95.0% from peak" in result_collapsed.reasons
+    assert "launch-window price shape unknown -- scored low-neutral" in result_unknown.reasons
+    # near-peak must score strictly higher than collapsed on this component
+    # -- verified via the actual total score since both share every other
+    # input identically.
+    assert result_near_peak.score > result_collapsed.score
+    # unknown (low-neutral, 40% credit) sits between the two extremes.
+    assert result_collapsed.score < result_unknown.score < result_near_peak.score
+
+
+def test_score_solana_mint_wires_real_birdeye_launch_shape(monkeypatch):
+    # Confirms the live (not just backtest) path actually calls
+    # fetch_birdeye_ohlcv using the token's real DexScreener launch date,
+    # and that the resulting drawdown reaches score_token via
+    # signals_from_madeonsol_risk. fetch_birdeye_ohlcv itself is patched
+    # directly (rather than the underlying get_json it uses internally,
+    # which lives in a different module's namespace) -- its own real
+    # HTTP behavior is already covered by tests/test_layer0d_point_in_time.py.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/risk"):
+            return {"ok": True, "status_code": 200, "url": url, "json": _load("madeonsol_risk_sample.json")}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {}}
+        if url.endswith("/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": [
+                {"volume": {"h24": 50000.0}, "liquidity": {"usd": 20000.0},
+                 "pairCreatedAt": int((time.time() - 3600) * 1000)},
+            ]}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    captured = {}
+
+    def fake_fetch_birdeye_ohlcv(chain, address, time_from, time_to, interval="1H"):
+        captured["called_with"] = (chain, address, time_from, time_to, interval)
+        return {"ok": True, "candles": [{"o": 1.0, "h": 3.0, "l": 0.5, "c": 0.6, "v": 1000}]}
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_birdeye_ohlcv", fake_fetch_birdeye_ohlcv)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    assert "error" not in result
+    assert captured.get("called_with") is not None
+    assert captured["called_with"][0] == "solana"
+    assert captured["called_with"][1] == "MINT123"
+    # real drawdown from the fake candle: (0.6-3.0)/3.0*100 = -80.0
+    assert result["score"].reasons and any("drawdown -80.0%" in r for r in result["score"].reasons)
+
+
+def test_score_solana_mint_never_calls_birdeye_for_robinhood_chain(monkeypatch):
+    # Birdeye has no Robinhood Chain mapping -- must not even attempt the
+    # call for that chain, same convention as GoPlus's Solana-only gate.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/rhc/tokens/MINT123/risk"):
+            return {"ok": True, "status_code": 200, "url": url, "json": _load("madeonsol_risk_sample.json")}
+        if url.endswith("/rhc/tokens/MINT123/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {}}
+        if url.endswith("/rhc/tokens/MINT123/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": [
+                {"volume": {"h24": 50000.0}, "liquidity": {"usd": 20000.0},
+                 "pairCreatedAt": int((time.time() - 3600) * 1000)},
+            ]}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    def fake_fetch_birdeye_ohlcv(*args, **kwargs):
+        raise AssertionError("fetch_birdeye_ohlcv must not be called for robinhood_chain")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_birdeye_ohlcv", fake_fetch_birdeye_ohlcv)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = score_solana_mint("MINT123", "robinhood_chain", is_pregraduation=True)
+    assert "error" not in result
+
+
 def test_madeonsol_risk_parses_and_scores():
     risk = _load("madeonsol_risk_sample.json")
     sig = signals_from_madeonsol_risk(risk, holders_json={"top10_share": 34.0}, bundle_json={"bundle": {"held_pct_of_supply": 0.06}},
