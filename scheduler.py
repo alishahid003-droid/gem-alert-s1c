@@ -944,17 +944,17 @@ def run_poll_fast():
     MadeOnSol scoring here -- meant to run every 10 min, unchanged, because
     speed on brand-new token discovery is the single most valuable thing in
     this system. See module docstring."""
-    # One-off pump.fun manual wallet seeding (Ali, Sept 24 2026), run from
-    # HERE rather than its own workflow file or an edit to an existing one:
+    # Pump.fun manual wallet seeding (Ali, Sept 24 2026), run from HERE
+    # rather than its own workflow file or an edit to an existing one:
     # GitHub blocks Ali's saved token from pushing ANY change to a workflow
     # YAML (create OR modify) without the `workflow` scope -- confirmed live
-    # Sept 24, twice. A plain Python change has no such restriction. Guarded
-    # by a state flag so it only actually runs once (seed_manual_wallets is
-    # idempotent regardless, but no reason to spend an Upstash round-trip on
-    # it every 10 minutes forever).
-    if not state.get_value("pumpfun_manual_seed_done"):
-        run_seed_pumpfun_wallets()
-        state.set_value("pumpfun_manual_seed_done", True)
+    # Sept 24, twice. A plain Python change has no such restriction. Runs
+    # every poll-fast cycle now (fixed Sept 28 2026 -- see
+    # run_seed_pumpfun_wallets' docstring): it tracks completion per BATCH
+    # KEY internally, so this costs one cheap Upstash read/cycle (not a
+    # MadeOnSol call, doesn't touch the 200/day budget) and only does real
+    # work the first cycle after Ali hands over a genuinely new batch.
+    run_seed_pumpfun_wallets()
 
     report = readiness_report()
     print("Readiness:", report)
@@ -1536,18 +1536,35 @@ PUMPFUN_MANUAL_SEED_BATCHES = {
 }
 
 
+PUMPFUN_MANUAL_SEED_BATCHES_DONE_KEY = "pumpfun_manual_seed_batches_done"
+
+
 def run_seed_pumpfun_wallets():
     """Writes PUMPFUN_MANUAL_SEED_BATCHES into the live smart-money roster.
     Must run somewhere that can actually reach Upstash -- GitHub Actions,
     not Ali's own machine (confirmed Sept 24 2026: his local network blocks
     the outbound connection to Upstash at the proxy level, unrelated to
-    this code)."""
+    this code).
+
+    Tracks completion PER BATCH KEY (not one global flag) -- fixed Sept 28
+    2026 after the original single `pumpfun_manual_seed_done` bool silently
+    stopped a newly-added batch from ever being applied once it had already
+    fired once live. Now: a batch name already recorded as done is skipped
+    (no wasted Upstash round-trip re-checking wallets that are already in
+    the roster), but any NEW batch key Ali hands over gets picked up
+    automatically on the next real poll-fast cycle with zero manual Upstash
+    access needed."""
     from layers.layer2b_pumpfun_smart_money import seed_manual_wallets, get_smart_money_roster
     print(f"[seed] state backend: {state.backend()}")
+    done = set(state.get_value(PUMPFUN_MANUAL_SEED_BATCHES_DONE_KEY) or [])
     for source, wallets in PUMPFUN_MANUAL_SEED_BATCHES.items():
+        if source in done:
+            continue
         result = seed_manual_wallets(wallets, source=source, note=f"batch={source}")
         print(f"[seed] {source}: added={len(result['added'])} "
               f"already_present={len(result['already_present'])} rejected={result['rejected']}")
+        done.add(source)
+    state.set_value(PUMPFUN_MANUAL_SEED_BATCHES_DONE_KEY, sorted(done))
     roster = get_smart_money_roster()
     print(f"[seed] roster size now: {len(roster)}")
     print(f"[seed] roster: {sorted(roster)}")

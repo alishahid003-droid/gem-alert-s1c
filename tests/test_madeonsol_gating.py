@@ -26,7 +26,6 @@ def test_run_poll_fast_skips_layer1_on_github_actions(monkeypatch, capsys):
     called = []
     monkeypatch.setattr(scheduler, "_run_layer1_cycle", lambda *a, **k: called.append(1) or (0, 0))
     monkeypatch.setattr(scheduler, "fetch_boost_board", lambda: {"ok": False})
-    scheduler.state.set_value("pumpfun_manual_seed_done", True)  # skip one-off seed
     scheduler.run_poll_fast()
     assert called == []
     captured = capsys.readouterr()
@@ -38,7 +37,6 @@ def test_run_poll_fast_runs_layer1_when_not_on_github_actions(monkeypatch):
     called = []
     monkeypatch.setattr(scheduler, "_run_layer1_cycle", lambda *a, **k: called.append(1) or (0, 0))
     monkeypatch.setattr(scheduler, "fetch_boost_board", lambda: {"ok": False})
-    scheduler.state.set_value("pumpfun_manual_seed_done", True)  # skip one-off seed
     scheduler.run_poll_fast()
     assert called == [1]
 
