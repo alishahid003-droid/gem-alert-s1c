@@ -227,6 +227,33 @@ def score_token(sig: RawSignals) -> ScoreResult:
     else:
         band = "D"
 
+    # Launch-window collapse override (Ali, Sept 28 2026 -- real backtest
+    # evidence): backtest_point_in_time.py's real, verified Birdeye
+    # launch-window check hit 76.9% (10/13) separating real rugs/pump_dumps
+    # from moonshots, while the SAME run's blended structural score only hit
+    # 30.8% (4/13) on the fair "settled" subset -- because a severe
+    # launch-window collapse (real labeled rugs/pump_dumps that night:
+    # JEANCOIN -99.8%, Super Inu -98.04%, ELONCOIN -98.2%, MEMESTONK -95.6%,
+    # Trader -96.31%, StonkBlend -95.94%) still got diluted up to band B by
+    # the other 90 points of the blended score, even though every real
+    # moonshot in the same dataset had a far milder worst-case drawdown
+    # (PAID, -37.96%) -- a clean, evidence-backed separation at -60%, the
+    # SAME cutoff this function's own point curve above already treats as
+    # "severe collapse" (see the launch price/volume shape block). A token
+    # already showing that shape is not one this system should ever alert
+    # on, no matter how healthy its holder/bundle/authority snapshot looks
+    # right now -- so this is a hard override, not just another weighted
+    # input, because weighted averaging is EXACTLY the mechanism that let
+    # real dumps still clear a blended band=B on live data. Only overrides
+    # DOWN (to D) -- never used to promote a band, and never applied when
+    # the signal itself is unknown (None), same "missing data never fakes a
+    # verdict" convention as every other signal in this file.
+    if sig.price_drawdown_from_peak_pct is not None and sig.price_drawdown_from_peak_pct <= -60.0:
+        if band != "D":
+            reasons.append(f"OVERRIDE: severe launch-window collapse "
+                            f"({sig.price_drawdown_from_peak_pct:.1f}% from peak) -- band {band} -> D")
+            band = "D"
+
     if sig.liquidity_usd is None:
         liq_flag = "unknown"
     elif sig.liquidity_usd < TYPICAL_POSITION_USD * 3:

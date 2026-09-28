@@ -930,3 +930,95 @@ def test_classify_deployer_wallet_age_uses_real_wallclock_by_default(monkeypatch
     monkeypatch.setattr(l0.time, "time", lambda: fixed_now)
     # first_seen 30 minutes before "now" -> fresh, without passing now_ts explicitly
     assert l0.classify_deployer_wallet_age(fixed_now - 1800) == "fresh"
+
+
+# --- Launch-window collapse override (Ali, Sept 28 2026) -- real backtest
+# evidence: the blended structural score alone let real labeled rugs/
+# pump_dumps with a severe launch-window collapse (-95% to -99.8%) still
+# clear band B, because the drawdown signal was only 10 of 100 points and
+# got diluted by everything else. This hard-overrides band to D whenever a
+# severe collapse (<=-60%, matching score_token's own existing "severe
+# collapse" cutoff on this signal's point curve) is present, regardless of
+# how healthy the rest of the snapshot looks -- see score_token's inline
+# comment for the exact real numbers this is calibrated against. ---
+from layers.layer0_scoring import RawSignals
+
+
+def _near_perfect_signals(price_drawdown_from_peak_pct=None):
+    """Every OTHER signal maxed out/healthy -- isolates the override's
+    effect from the rest of the scoring curve. Without the override, this
+    would score comfortably in band A on its own (see
+    test_near_perfect_signals_without_collapse_score_band_a below)."""
+    return RawSignals(
+        top10_holder_pct=0.05,
+        lp_locked_or_curve_healthy=True,
+        mint_authority_revoked=True,
+        freeze_authority_revoked=True,
+        vol_to_liq_ratio=3.0,
+        holder_growth_rate_per_hr=30.0,
+        bundler_sniper_pct=0.0,
+        price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
+        liquidity_usd=50_000.0,
+        is_pregraduation_solana=False,
+    )
+
+
+def test_near_perfect_signals_without_collapse_score_band_a():
+    # Sanity baseline -- confirms the override is what's forcing D below,
+    # not some other effect of these particular signal values.
+    result = score_token(_near_perfect_signals(price_drawdown_from_peak_pct=-5.0))
+    assert result.band == "A"
+
+
+def test_severe_collapse_overrides_band_to_d_even_with_perfect_other_signals():
+    result = score_token(_near_perfect_signals(price_drawdown_from_peak_pct=-99.8))  # real JEANCOIN figure
+    assert result.band == "D"
+    assert any("OVERRIDE" in r for r in result.reasons)
+
+
+def test_collapse_exactly_at_threshold_triggers_override():
+    result = score_token(_near_perfect_signals(price_drawdown_from_peak_pct=-60.0))
+    assert result.band == "D"
+
+
+def test_collapse_just_under_threshold_does_not_trigger_override():
+    result = score_token(_near_perfect_signals(price_drawdown_from_peak_pct=-59.9))
+    assert result.band == "A"
+    assert not any("OVERRIDE" in r for r in result.reasons)
+
+
+def test_real_moonshot_drawdown_does_not_trigger_override():
+    # PAID, a real labeled moonshot from Ali's backtest -- worst observed
+    # drawdown among real moonshots was -37.96%, well clear of the -60%
+    # cutoff this override uses.
+    result = score_token(_near_perfect_signals(price_drawdown_from_peak_pct=-37.96))
+    assert result.band == "A"
+
+
+def test_unknown_drawdown_does_not_trigger_override():
+    # Missing data must never fake a verdict, same convention as every
+    # other signal in this file -- unknown stays unknown, no override.
+    sig = _near_perfect_signals(price_drawdown_from_peak_pct=None)
+    result = score_token(sig)
+    assert result.band == "A"
+
+
+def test_override_never_promotes_a_band_only_demotes():
+    # A token that would already score D on its own (bad everything) with
+    # a severe collapse on top must simply stay D, not error or flip.
+    sig = RawSignals(
+        top10_holder_pct=0.9, lp_locked_or_curve_healthy=False,
+        mint_authority_revoked=False, freeze_authority_revoked=False,
+        vol_to_liq_ratio=200.0, holder_growth_rate_per_hr=0.0,
+        bundler_sniper_pct=0.9, price_drawdown_from_peak_pct=-99.0,
+        liquidity_usd=100.0, is_pregraduation_solana=False,
+    )
+    result = score_token(sig)
+    assert result.band == "D"
+
+
+def test_override_applies_to_pregraduation_solana_bands_too():
+    sig = _near_perfect_signals(price_drawdown_from_peak_pct=-95.94)  # real StonkBlend figure
+    sig.is_pregraduation_solana = True
+    result = score_token(sig)
+    assert result.band == "D"
