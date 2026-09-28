@@ -675,6 +675,16 @@ def _send_post_alert_downgrade(token: str, chain: str, q: dict, dd: float, now: 
     downgrade.set_tag("Exit-risk", f"price down {dd:.1f}% from its post-alert peak within "
                                     f"{(now - alert_ts) / 60:.0f} min -- likely a rug/dump in progress")
     send_res = send_alert(downgrade)
+    # Real gap found and fixed Sept 28 2026: this was the one alert path in
+    # the whole codebase that never wrote to state.log_full_alert -- every
+    # other alert does, which is what the dashboard actually reads (see
+    # dashboard.py). It only ever reached Ali via Telegram or a live
+    # terminal print, both of which he can be away from -- a fully
+    # unattended run (GitHub Actions, or Telegram unreachable/disabled)
+    # would silently lose the one alert that matters most: "this thing you
+    # bought is cratering." Now logged like everything else.
+    state.log_full_alert("post_alert_downgrade", chain, downgrade.token_symbol, downgrade.token_address,
+                          downgrade.headline, dict(downgrade.tags))
     print(f"[post-alert-monitor] {token[:8]} CRATERED ({dd:.1f}% from peak) -- downgrade sent -> {send_res}")
     return send_res
 

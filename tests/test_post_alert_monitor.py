@@ -251,3 +251,26 @@ def test_cycle_empty_queue_is_a_noop(monkeypatch):
         raise AssertionError("should not be called on an empty queue")
     monkeypatch.setattr(scheduler, "fetch_birdeye_ohlcv", boom)
     assert scheduler._run_post_alert_monitor_cycle() == 0
+
+
+def test_cycle_downgrade_is_logged_to_alert_feed_for_dashboard(monkeypatch):
+    # Real gap found and fixed Sept 28 2026: the DOWNGRADE alert was the
+    # one alert path that never called state.log_full_alert (what
+    # dashboard.py actually reads). If Telegram is down/disabled and
+    # nobody's watching the terminal live (a fully automated run), the
+    # single most important alert -- "this thing you bought is cratering"
+    # -- would have been silently invisible on the dashboard.
+    alert_ts = time.time() - 20 * 60
+    state.post_alert_monitor_add("token-dashboard-check", "solana", "headline", "A", 90, ts=alert_ts)
+    monkeypatch.setattr(scheduler, "fetch_birdeye_ohlcv",
+                         lambda chain, addr, t_from, t_to, interval="15m": {
+                             "ok": True, "candles": [
+                                 {"o": 1.0, "h": 1.2, "c": 1.1},
+                                 {"o": 1.1, "h": 1.1, "c": 0.3},
+                             ]})
+    # Telegram fails/unconfigured -- the downgrade must still reach the dashboard.
+    monkeypatch.setattr(scheduler, "send_alert", lambda alert: {"sent": False, "reason": "no creds"})
+    downgraded = scheduler._run_post_alert_monitor_cycle()
+    assert downgraded == 1
+    feed = state.get_alert_feed()
+    assert any(f["layer"] == "post_alert_downgrade" and f["token_address"] == "token-dashboard-check" for f in feed)
