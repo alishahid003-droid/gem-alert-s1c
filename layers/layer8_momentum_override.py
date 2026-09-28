@@ -16,7 +16,7 @@ source's public docs show one clean "MC history" endpoint. This is called
 out explicitly rather than fabricating an endpoint.
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Tuple
 
 LOW_BASE_MC_USD = 10_000
@@ -53,8 +53,25 @@ class MomentumResult:
 
 
 def _parse_time(ts):
+    """Real bug caught live Sept 28 2026, while testing the new soft-fail
+    watch list (see state.py's watch_add docstring): this only ever handled
+    a datetime or an ISO-format string, but state.py's real mc_history (via
+    record_mc_point -> get_mc_history, the ACTUAL data source this function
+    is fed in production, scheduler.py's `mc_hist = state.get_mc_history(mint)`)
+    stores plain float unix-epoch timestamps (time.time()), never ISO
+    strings. datetime.fromisoformat(str(1790577283.87...)) raises
+    ValueError -- meaning detect_momentum_override would crash on its very
+    first real call with genuine recorded MC history (2+ points), not just
+    on some edge case. No existing test caught this because
+    tests/test_layer8_momentum_override.py always constructed its own
+    datetime/ISO-string fixtures directly, never round-tripped through
+    state.py's real storage format. Not a hypothetical -- this is the exact
+    call path scheduler._handle_scored's band-D branch hits on every D-band
+    token with 2+ recorded MC points."""
     if isinstance(ts, datetime):
         return ts
+    if isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
     return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
 
 

@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -318,7 +318,8 @@ def _alert(alert: Alert, layer: str) -> dict:
     return send_res
 
 
-def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, board: dict = None) -> bool:
+def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, board: dict = None,
+                    is_pregraduation: bool = None) -> bool:
     """Sends an alert for one scored token if appropriate, and records the
     score for future event-triggered re-scoring (state.set_last_score).
     Returns True iff an alert was actually delivered.
@@ -448,11 +449,29 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         mc_hist = state.get_mc_history(mint) if mint else []
         mom = detect_momentum_override(sr.band, mc_hist)
         if not mom.triggered:
+            # Soft-fail watch list (Ali, Sept 28 2026 -- see state.py's
+            # watch_add docstring for the real gap this closes): a token no
+            # tracked KOL wallet ever trades never gets a fresh MC point, so
+            # _maybe_queue_rescan's MC-triggered path never re-checks it --
+            # this gives it a second, MC-independent path back into
+            # consideration via cheap free-RPC signals. Solana only (the
+            # free signals are SPL-specific -- see
+            # free_recheck_solana_signals -- RHC uses a different token
+            # standard and isn't covered by them).
+            if mint and chain == "solana":
+                state.watch_add(mint, chain, bool(is_pregraduation), sr.score, sr.reasons)
             return False  # fails safety score, no momentum yet -- suppressed, per spec
         alert = Alert((mint or "?")[:8], mint, chain, "HIGH-RISK MOMENTUM override")
         alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band D)")
         alert.set_tag("HIGH-RISK MOMENTUM", mom.reason)
     else:
+        # Cleared band D on a real re-score (soft-fail watch or MC-triggered
+        # -- either path lands here) -- drop it from the watch list so it
+        # doesn't sit there stale; this IS the "coin quietly became solid"
+        # case Ali described, now actually alerting instead of being stuck
+        # silently rejected forever.
+        if mint:
+            state.watch_remove(mint)
         alert = Alert((mint or "?")[:8], mint, chain, f"Layer 0{'b' if source == 'mobula' else ''} structural score")
         alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band {sr.band})")
     if backing_tag:
@@ -484,6 +503,84 @@ def _maybe_queue_rescan(token: str, chain: str, new_mc: float):
         state.queue_rescan(token, chain, is_pregrad)
         print(f"[layer8] {token[:8]} MC moved {last.get('mc')} -> {new_mc} since its failing score -- "
               f"queued for re-score")
+
+
+# Soft-fail watch cycle (Ali, Sept 28 2026) -- see state.py's watch_add
+# docstring for the real gap this closes and free_recheck_solana_signals'
+# docstring for why this costs ZERO MadeOnSol budget. Capped per cycle same
+# philosophy as LAYER2B_MAX_SIGNATURES_PER_CYCLE below -- the free Solana RPC
+# pool (executor/rpc_pool.py) has no real SLA, so this is additive load on
+# it, not a MadeOnSol budget concern (this path spends none).
+SOFT_FAIL_RECHECK_MAX_PER_CYCLE = 8
+
+# Thresholds a free re-check needs to clear before this queues a real
+# 3-call MadeOnSol re-score on a token that already failed once -- kept
+# deliberately stricter than "any improvement at all" (burning real,
+# budget-capped calls on a token that's barely better than before isn't
+# worth it). Both mirror the same structural bar score_token itself already
+# uses: top10 concentration's credit curve zeroes out at >=60%, so <=35%
+# is comfortably in "real, not marginal" territory; holder growth's credit
+# curve maxes out at 30/hr, so >=10/hr is a genuine signal, not noise.
+SOFT_FAIL_WATCH_TOP10_OK = 0.35
+SOFT_FAIL_WATCH_HOLDER_GROWTH_OK = 10.0
+
+
+def _run_soft_fail_watch_cycle() -> int:
+    """Sweeps state.get_soft_fail_watch() -- D-band Solana tokens
+    _handle_scored couldn't clear and that never got MC-triggered back into
+    _maybe_queue_rescan's path (no tracked KOL wallet ever traded them, so
+    no fresh MC point ever arrived -- see state.py's watch_add docstring).
+    Spends ZERO MadeOnSol budget -- only the two free RPC signals already
+    wired for real scoring (layer0_scoring.free_recheck_solana_signals). A
+    token that clears either bar above gets queued into the SAME
+    state.queue_rescan/pop_pending_rescans path _maybe_queue_rescan already
+    uses -- the next slow cycle spends one real 3-call MadeOnSol re-score on
+    it, and _handle_scored's own band-D-cleared branch fires a normal alert
+    and drops it from the watch list if it actually clears. No separate
+    alerting path needed -- this only decides WHETHER a real re-score is
+    worth spending, not what happens after. A token that doesn't clear
+    either bar just gets last_checked_ts bumped and ages out naturally past
+    state.SOFT_FAIL_WATCH_MAX_AGE_SECONDS (pruned on state.get_soft_fail_watch's
+    own read). Returns the number newly queued for a real re-score."""
+    watch = state.get_soft_fail_watch()
+    if not watch:
+        return 0
+    # Oldest-checked-first so the whole list gets a turn across successive
+    # cycles instead of the same few tokens (whatever sorts first) hogging
+    # every cycle's cap -- same round-robin intent as Layer 8's overflow
+    # re-queue.
+    watch.sort(key=lambda w: w.get("last_checked_ts", 0))
+    to_check = [w for w in watch if w.get("chain") == "solana"][:SOFT_FAIL_RECHECK_MAX_PER_CYCLE]
+    queued = 0
+    for w in to_check:
+        token = w["token"]
+        sig = _safe(free_recheck_solana_signals, token)
+        state.watch_touch(token)
+        if not isinstance(sig, dict):
+            continue
+        top10 = sig.get("top10_holder_pct")
+        growth = sig.get("holder_growth_rate_per_hr")
+        improved = (top10 is not None and top10 <= SOFT_FAIL_WATCH_TOP10_OK) or \
+                   (growth is not None and growth >= SOFT_FAIL_WATCH_HOLDER_GROWTH_OK)
+        if improved:
+            reasons = []
+            if top10 is not None and top10 <= SOFT_FAIL_WATCH_TOP10_OK:
+                reasons.append(f"top10 now {top10*100:.1f}%")
+            if growth is not None and growth >= SOFT_FAIL_WATCH_HOLDER_GROWTH_OK:
+                reasons.append(f"+{growth:.0f} holders/hr")
+            print(f"[soft-fail-watch] {token[:8]} shows real improvement ({', '.join(reasons)}) -- "
+                  f"queued for a real re-score")
+            state.queue_rescan(token, w["chain"], w.get("is_pregraduation", True))
+            # The next real re-score (via the queue above) is the
+            # authoritative verdict either way -- leaving this entry in the
+            # watch list too would just double-check the same token via two
+            # separate paths for no benefit.
+            state.watch_remove(token)
+            queued += 1
+    if to_check:
+        print(f"[soft-fail-watch] checked {len(to_check)}/{len(watch)} watched token(s), "
+              f"{queued} queued for a real re-score (0 MadeOnSol calls spent)")
+    return queued
 
 
 LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
@@ -886,6 +983,12 @@ def run_poll_fast():
     else:
         print("[layer6] BLOCKED: MOBULA_API_KEY and/or WALLET_ADDRESSES not set")
 
+    # --- Soft-fail watch sweep (Ali, Sept 28 2026) -- free RPC only (0
+    # MadeOnSol calls), so this runs every fast cycle same as Layer 2b/6
+    # above, not gated behind the slow cycle's budget concerns. See
+    # _run_soft_fail_watch_cycle's docstring for what this closes. ---
+    _safe(_run_soft_fail_watch_cycle)
+
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "
           f"pass). See README's call-budget section for how this compares to the 200/day cap.")
@@ -932,7 +1035,8 @@ def _run_layer8_cycle(board):
                     continue
                 scored = _safe(score_solana_mint, p["token"], chain, is_pregraduation=p["is_pregraduation"])
                 madeonsol_calls += 3  # risk + holders + bundle
-                if _handle_scored(scored, chain, source="madeonsol", board=board):
+                if _handle_scored(scored, chain, source="madeonsol", board=board,
+                                   is_pregraduation=p["is_pregraduation"]):
                     alerts_sent += 1
             if to_process:
                 print(f"[layer0/8:{chain}] deep-scored {len(to_process)} token(s) "

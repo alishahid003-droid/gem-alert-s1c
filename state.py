@@ -604,3 +604,93 @@ def release_lock(key: str):
         get_json(f"{CONFIG.upstash_redis_rest_url}/del/{key}", headers=_upstash_headers())
     except ApiUnreachable:
         pass
+
+
+# --- Soft-fail watch list (Ali, Sept 28 2026) -----------------------------
+# Real gap Ali flagged live: a Solana/RHC token that fails Layer 0's
+# structural score (band D) only gets a second look via
+# scheduler._maybe_queue_rescan, which triggers ONLY when a fresh market-cap
+# point comes in for it -- and the only source of fresh MC points today is
+# Layer 2's tracked-KOL-wallet feed. A token no tracked wallet ever trades
+# never gets a second MC point, so it silently never re-queues, even if it
+# quietly becomes structurally clean (liquidity locked, concentration drops,
+# real holder growth starts) within its first hours -- exactly the scenario
+# Ali described: "our system not detecting it further as it had done the
+# scan of the coin earlier."
+#
+# This tracks D-band Solana tokens independent of MC/KOL activity, so
+# scheduler._run_soft_fail_watch_cycle can cheaply re-check them (via
+# layer0_scoring.free_recheck_solana_signals -- ZERO MadeOnSol budget, only
+# free RPC) on its own cadence and queue a real re-score (via the SAME
+# queue_rescan/pop_pending_rescans path _maybe_queue_rescan already uses)
+# only once a real improvement signal shows up. Bounded in both directions:
+# capped item count (a busy night shouldn't grow this without bound, same
+# philosophy as ALERT_FEED_MAX_ITEMS) and capped age -- Ali's own framing
+# was "minutes and hours", not an indefinite hold, so a token that hasn't
+# turned around within the window is dropped for good, same as a real
+# hard-fail (mint/freeze authority live, honeypot) that was never likely to
+# change in the first place.
+SOFT_FAIL_WATCH_KEY = "soft_fail_watch"
+SOFT_FAIL_WATCH_MAX_AGE_SECONDS = 12 * 3600
+SOFT_FAIL_WATCH_MAX_ITEMS = 300
+
+
+def watch_add(token: str, chain: str, is_pregraduation: bool, score: int, reasons: list,
+              ts: Optional[float] = None):
+    """Adds a D-band token to the soft-fail watch list, deduped by token --
+    an already-watched token keeps its original first_seen_ts (the age
+    window is measured from when it FIRST failed, not refreshed on a repeat
+    D score every cycle) but gets its last-known score/reasons updated."""
+    ts = ts if ts is not None else time.time()
+    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
+    existing = next((w for w in watch if w.get("token") == token), None)
+    if existing:
+        existing["last_score"] = score
+        existing["last_reasons"] = reasons
+    else:
+        watch.append({
+            "token": token, "chain": chain, "is_pregraduation": is_pregraduation,
+            "first_seen_ts": ts, "last_checked_ts": ts,
+            "last_score": score, "last_reasons": reasons, "free_checks_done": 0,
+        })
+    cutoff = ts - SOFT_FAIL_WATCH_MAX_AGE_SECONDS
+    watch = [w for w in watch if w.get("first_seen_ts", 0) >= cutoff][-SOFT_FAIL_WATCH_MAX_ITEMS:]
+    set_value(SOFT_FAIL_WATCH_KEY, watch)
+
+
+def get_soft_fail_watch() -> list:
+    """Returns the current watch list, pruned of anything past
+    SOFT_FAIL_WATCH_MAX_AGE_SECONDS -- self-cleaning on read, same pattern
+    as the other capped lists in this file, so a token that never turns
+    around ages out on its own without a separate sweep job."""
+    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
+    cutoff = time.time() - SOFT_FAIL_WATCH_MAX_AGE_SECONDS
+    fresh = [w for w in watch if w.get("first_seen_ts", 0) >= cutoff]
+    if len(fresh) != len(watch):
+        set_value(SOFT_FAIL_WATCH_KEY, fresh)
+    return fresh
+
+
+def watch_remove(token: str):
+    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
+    remaining = [w for w in watch if w.get("token") != token]
+    if len(remaining) != len(watch):
+        set_value(SOFT_FAIL_WATCH_KEY, remaining)
+
+
+def watch_touch(token: str, ts: Optional[float] = None):
+    """Bumps last_checked_ts/free_checks_done for a watched token after a
+    free-signal recheck, regardless of outcome -- lets the scheduler's
+    per-cycle cap round-robin across the whole list (oldest-checked-first)
+    instead of the same few tokens (whatever sorts first) hogging every
+    cycle."""
+    ts = ts if ts is not None else time.time()
+    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
+    changed = False
+    for w in watch:
+        if w.get("token") == token:
+            w["last_checked_ts"] = ts
+            w["free_checks_done"] = w.get("free_checks_done", 0) + 1
+            changed = True
+    if changed:
+        set_value(SOFT_FAIL_WATCH_KEY, watch)

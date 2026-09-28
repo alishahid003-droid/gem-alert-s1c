@@ -210,3 +210,73 @@ def test_cryptopanic_seen_cap_keeps_most_recent(tmp_path, monkeypatch):
     assert len(seen) == state_module.CRYPTOPANIC_SEEN_CAP
     assert ids[-1] in seen
     assert ids[0] not in seen
+
+
+# --- Soft-fail watch list (Ali, Sept 28 2026) -- see state.py's watch_add
+# docstring for the real gap this closes ---
+
+def test_watch_add_creates_new_entry(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    state_module.watch_add("MintA", "solana", True, 40, ["top10 holds 70%"])
+    watch = state_module.get_soft_fail_watch()
+    assert len(watch) == 1
+    assert watch[0]["token"] == "MintA"
+    assert watch[0]["chain"] == "solana"
+    assert watch[0]["is_pregraduation"] is True
+    assert watch[0]["last_score"] == 40
+    assert watch[0]["free_checks_done"] == 0
+
+
+def test_watch_add_dedupes_and_preserves_first_seen_ts(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    now = time.time()
+    state_module.watch_add("MintA", "solana", True, 40, ["r1"], ts=now - 3600)
+    state_module.watch_add("MintA", "solana", True, 35, ["r2"], ts=now - 1800)
+    watch = state_module.get_soft_fail_watch()
+    assert len(watch) == 1
+    assert watch[0]["first_seen_ts"] == now - 3600  # not refreshed on repeat D score
+    assert watch[0]["last_score"] == 35          # but last-known score IS updated
+    assert watch[0]["last_reasons"] == ["r2"]
+
+
+def test_get_soft_fail_watch_prunes_stale_entries(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    now = time.time()
+    state_module.watch_add("Old", "solana", True, 40, [], ts=now - state_module.SOFT_FAIL_WATCH_MAX_AGE_SECONDS - 1)
+    state_module.watch_add("Fresh", "solana", True, 40, [], ts=now)
+    watch = state_module.get_soft_fail_watch()
+    tokens = {w["token"] for w in watch}
+    assert tokens == {"Fresh"}
+
+
+def test_watch_remove(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    state_module.watch_add("MintA", "solana", True, 40, [])
+    state_module.watch_remove("MintA")
+    assert state_module.get_soft_fail_watch() == []
+
+
+def test_watch_remove_nonexistent_token_is_a_noop(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    state_module.watch_add("MintA", "solana", True, 40, [])
+    state_module.watch_remove("NeverAdded")
+    assert len(state_module.get_soft_fail_watch()) == 1
+
+
+def test_watch_touch_increments_check_count(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    state_module.watch_add("MintA", "solana", True, 40, [])
+    state_module.watch_touch("MintA")
+    state_module.watch_touch("MintA")
+    watch = state_module.get_soft_fail_watch()
+    assert watch[0]["free_checks_done"] == 2
+
+
+def test_watch_add_caps_item_count(tmp_path, monkeypatch):
+    _reset_local_state(tmp_path, monkeypatch)
+    for i in range(state_module.SOFT_FAIL_WATCH_MAX_ITEMS + 10):
+        state_module.watch_add(f"Mint{i}", "solana", True, 40, [], ts=time.time())
+    watch = state_module.get_soft_fail_watch()
+    assert len(watch) == state_module.SOFT_FAIL_WATCH_MAX_ITEMS
+    # newest entries survive the cap, oldest (lowest index) get dropped
+    assert "Mint0" not in {w["token"] for w in watch}

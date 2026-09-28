@@ -1187,6 +1187,37 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 
 
+def free_recheck_solana_signals(mint: str) -> dict:
+    """Cheap, keyless re-check of a Solana mint's two free RPC signals (top10
+    holder concentration, holder growth rate) -- ZERO MadeOnSol budget spent.
+
+    Built Sept 28 2026 for state.py's soft-fail watch list (see
+    watch_add/get_soft_fail_watch's docstrings), which exists to close a real
+    gap Ali flagged live: _maybe_queue_rescan only re-queues a D-band token
+    for a real re-score when a fresh market-cap point comes in for it, and
+    the ONLY source of fresh MC points today is Layer 2's tracked-KOL-wallet
+    feed. A token no tracked wallet ever trades never gets a second MC point,
+    so it never re-queues -- even if it quietly becomes structurally clean
+    (liquidity locked, concentration drops, organic holder growth starts)
+    within its first hours, exactly the scenario Ali described. This lets the
+    scheduler check for that kind of real improvement on its own cadence,
+    independent of KOL activity, without spending real (budget-capped) money
+    on a full MadeOnSol re-score for every watched token every cycle.
+
+    Returns {"top10_holder_pct": Optional[float],
+    "holder_growth_rate_per_hr": Optional[float]} -- either can be None on an
+    RPC failure, same as their underlying fetchers; never fabricates a value.
+    Also records the holder point via state.record_holder_point (same as
+    score_solana_mint's real wiring) so a later real re-score, if this
+    triggers one, sees continuous history instead of a cold start."""
+    top10 = fetch_solana_top10_holder_pct(mint)
+    holder_count = fetch_solana_holder_count(mint)
+    if holder_count is not None:
+        state.record_holder_point(mint, holder_count)
+    growth = compute_holder_growth_rate_per_hr(state.get_holder_history(mint))
+    return {"top10_holder_pct": top10, "holder_growth_rate_per_hr": growth}
+
+
 def scan_stage1(mints_by_chain: dict) -> list:
     """mints_by_chain: {"solana": [(mint, is_pregrad), ...], "base": [mint,...], ...}
     Returns list of dicts: {chain, address, score_result}."""
