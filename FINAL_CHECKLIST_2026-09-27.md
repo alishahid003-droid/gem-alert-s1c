@@ -164,7 +164,11 @@ that reset, except step 0.
   change -- not building that. This item stays paid-only, no free
   substitute for Twitter specifically.
 - [x] BUILT Sept 28 2026 (infra done; channel list is Ali's real remaining
-  step, not a build task). `layers/layer12_caller_channels.py` +
+  step, not a build task). **ON HOLD Sept 28 2026** -- Ali is not supplying
+  a channel list right now, so this stays exactly as shipped: CONFIG-driven,
+  fails closed, `TELEGRAM_CALLER_BOT_TOKEN`/`TELEGRAM_CALLER_CHANNEL_IDS`
+  unset, zero effect on the running system until/unless he comes back to it.
+  `layers/layer12_caller_channels.py` +
   `scheduler.poll_layer12_caller_channels` + wiring into `_handle_scored`
   as a `[Caller: channel (Nm ago)]` tag, same convention as Backing/Buzz
   -- never folded into the structural score. Uses Telegram's own free,
@@ -282,9 +286,19 @@ Tiers, cheapest to most expensive, only spend from real profit:
   validators, Jito bundle infrastructure, enterprise data feeds. This is
   what the top commercial bots actually run on. Naming it so the ceiling
   is known, not because it's a near-term target.
-- [ ] If ever worth revisiting: check whether any retail bot (Axiom,
-  Trojan, etc.) exposes an API/webhook that lets an external script
-  trigger a trade through THEIR execution infra -- most are closed
-  consumer apps and don't, but if one does, that combination (our
-  scoring + their speed) could be cheaper than building our own
-  low-latency infra from scratch. Not confirmed either way yet.
+- [x] CONFIRMED Sept 28 2026 -- of Axiom/Photon/BonkBot/Trojan, none
+  document a public API. **GMGN does**: a real, official "Agent API"
+  (docs.gmgn.ai/index/gmgn-agent-api, official GitHub GMGNAI/gmgn-skills)
+  that lets an external agent read live market data AND execute real
+  on-chain swaps on Solana, BSC, and Base (Ethereum "in progress" -- no
+  Robinhood Chain support, so it wouldn't cover every chain this system
+  trades). Auth is a generated API key + a private key GMGN's own docs
+  say is needed "for trading features" -- real custody/trust exposure
+  handing a private key to a third party's API, not a neutral technical
+  detail; pricing isn't documented anywhere found. This is exactly the
+  "our scoring + their speed" combination this bullet used to speculate
+  about -- genuinely worth a real look if execution speed becomes the
+  bottleneck later, but NOT a decision to make solo. Handing a real
+  funded wallet's private key to an external service is Ali's call, not
+  something to wire in without him reviewing the custody model first.
+  (Full writeup also logged in section 3 above.)
