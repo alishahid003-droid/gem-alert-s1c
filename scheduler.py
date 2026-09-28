@@ -158,6 +158,139 @@ import state
 IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
+# --- Cycle summary (Ali, Sept 28 2026) -----------------------------------
+# Ali's ask: the verbose per-line [layerX] prints below are real and stay
+# (still needed to actually debug a broken layer), but he shouldn't have to
+# scroll/paste the whole thread to find out what happened this cycle. This
+# collects the handful of things he actually asked for -- band counts,
+# moonshots, rugs, executions, copy-trade hits, deployer launches, news,
+# and which modules were up/down -- as the cycle runs, then
+# _print_cycle_summary() prints ONE compact block at the very end that's
+# meant to be the only thing he reads on a normal check-in. _STATS is a
+# single module-level instance (not thread-safe, but this scheduler is
+# always single-process/single-threaded) reset at the top of each of the
+# three real entrypoints (run_poll_fast/run_poll_slow/run_poll_madeonsol)
+# so a --poll (fast+slow) run prints two summaries, one per real cycle,
+# rather than merging two different cadences into one confusing block.
+class _CycleStats:
+    def __init__(self, name: str):
+        self.name = name
+        self.bands = {"A": 0, "B": 0, "C": 0, "D": 0}
+        self.moonshots = []       # band A/B fires + Layer 0c momentum gems (any chain)
+        self.rugs = []            # post-alert-monitor CRATERED downgrades
+        self.executions = []      # real Stage1/Stage2 fires (handle_stage1/2_candidate)
+        self.copytrades = []      # Fomo (layer2) + pump.fun smart-money (layer2b) + sell-mirror (layer9)
+        self.deployer_alerts = [] # layer1 elite/good-tier deployer launches
+        self.news = []            # layer4 CoinDesk/CryptoPanic actionable posts
+        self.modules = {}         # name -> (ok: bool, detail: str) -- last status seen this cycle
+        self.alerts_sent = 0
+        self.alerts_failed = 0
+
+    def note_module(self, name: str, ok: bool, detail: str = ""):
+        self.modules[name] = (ok, detail)
+
+    def note_band(self, chain: str, label: str, band: str, score, extra: str = ""):
+        if band not in self.bands:
+            self.bands[band] = 0
+        self.bands[band] += 1
+        if band in ("A", "B"):
+            self.moonshots.append(f"{label} [{chain}] band {band} ({score}/100){extra}")
+
+    def note_rug(self, token: str, chain: str, dd: float):
+        self.rugs.append(f"{(token or '?')[:8]} [{chain}] {dd:.0f}% from peak")
+
+    def note_execution(self, stage: int, chain: str, token: str, position_usd: float, conviction):
+        self.executions.append(f"STAGE{stage} {(token or '?')[:8]} [{chain}] "
+                                f"${position_usd:.2f}, conviction {conviction}")
+
+    def note_copytrade(self, detail: str):
+        self.copytrades.append(detail)
+
+    def note_deployer(self, detail: str):
+        self.deployer_alerts.append(detail)
+
+    def note_news(self, detail: str):
+        self.news.append(detail)
+
+    def note_alert_result(self, sent: bool):
+        if sent:
+            self.alerts_sent += 1
+        else:
+            self.alerts_failed += 1
+
+
+_STATS: "_CycleStats | None" = None  # set by _start_cycle_stats(), read via _stats()
+
+
+def _start_cycle_stats(name: str) -> "_CycleStats":
+    global _STATS
+    _STATS = _CycleStats(name)
+    return _STATS
+
+
+def _stats() -> "_CycleStats | None":
+    return _STATS
+
+
+def _short_reason(detail: str, max_len: int = 70) -> str:
+    """Collapses a verbose network-failure string (full ProxyError/
+    ConnectionError chains, real in this codebase since utils/http.py
+    deliberately surfaces the real underlying error rather than swallowing
+    it) down to something that fits on one summary line. Ali's ask:
+    'clear lines', not a wall of stack trace -- the full detail is still in
+    the per-layer [layerX] print above this block for anyone who needs to
+    actually debug it."""
+    if not detail:
+        return ""
+    detail = str(detail)
+    # Cut at the first parenthetical "(Caused by ...)" -- that's where the
+    # real underlying urllib3/requests traceback text starts, and it's
+    # exactly the part that's useless for a quick glance.
+    for marker in (" (Caused by", " (see fetch_cryptopanic_posts", "\n"):
+        idx = detail.find(marker)
+        if idx != -1:
+            detail = detail[:idx]
+    if len(detail) > max_len:
+        detail = detail[:max_len].rstrip() + "..."
+    return detail
+
+
+def _print_cycle_summary(stats: "_CycleStats"):
+    def _section(title, items, cap=10):
+        out = [f"{title}: {len(items)}"]
+        for it in items[:cap]:
+            out.append(f"  - {it}")
+        if len(items) > cap:
+            out.append(f"  ... and {len(items) - cap} more")
+        return out
+
+    now_str = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    lines = ["", "=" * 64, f"SUMMARY -- {stats.name} -- {now_str}", "=" * 64]
+
+    band_line = ", ".join(f"{b}:{stats.bands.get(b, 0)}" for b in ("A", "B", "C", "D"))
+    lines.append(f"Coins scored this cycle by band -> {band_line}")
+    lines.extend(_section("Moonshots (band A/B or momentum gem)", stats.moonshots))
+    lines.extend(_section("Rugs/craters flagged", stats.rugs))
+    lines.extend(_section("Copy-trade hits (Fomo + pump.fun tracked wallets)", stats.copytrades))
+    lines.extend(_section("Deployer launch alerts (elite/good tier)", stats.deployer_alerts))
+    lines.extend(_section("News hits (CoinDesk/CryptoPanic)", stats.news))
+    lines.extend(_section("Real executions (Stage1/Stage2 fired)", stats.executions))
+    lines.append(f"Alerts delivered: {stats.alerts_sent}  |  Alerts attempted but failed to send: {stats.alerts_failed}")
+
+    working = sorted(name for name, (ok, _d) in stats.modules.items() if ok)
+    broken = sorted(stats.modules.items(), key=lambda kv: kv[0])
+    lines.append(f"Modules OK this cycle ({len(working)}): {', '.join(working) if working else 'none'}")
+    down = [(name, detail) for name, (ok, detail) in broken if not ok]
+    lines.append(f"Modules DOWN/failed this cycle ({len(down)}):")
+    if not down:
+        lines.append("  - none")
+    for name, detail in down:
+        short = _short_reason(detail)
+        lines.append(f"  - {name}: {short}" if short else f"  - {name}")
+    lines.append("=" * 64)
+    print("\n".join(lines))
+
+
 def _safe(fn, *args, **kwargs):
     """Runs a network-touching call and converts a genuine network-level
     failure (ApiUnreachable -- DNS, connection refused, blocked outbound
@@ -330,6 +463,11 @@ def _alert(alert: Alert, layer: str) -> dict:
             mega_send = send_alert(mega_alert)
             print(f"[layer7] MEGA-ALERT {token[:8]} ({layer_key}) -> {mega_send}")
             state.set_value(f"mega_alert_sent:{token}", layer_key)
+            if _stats():
+                _stats().moonshots.append(f"MEGA-ALERT {token[:8]} [{alert.chain}] {len(mega.layers)} layers converged")
+    if _stats():
+        sent = send_res.get("sent") if isinstance(send_res, dict) else bool(send_res)
+        _stats().note_alert_result(bool(sent))
     return send_res
 
 
@@ -363,6 +501,9 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         return False
     mint = scored["address"]
     sr = scored["score"]
+    if _stats():
+        symbol = (scored.get("raw") or {}).get("symbol")
+        _stats().note_band(chain, symbol or (mint or "?")[:8], sr.band, sr.score)
     if mint:
         state.set_last_score(mint, sr.score, sr.band, mc)
         stage1 = handle_stage1_candidate(
@@ -373,6 +514,8 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             print(f"[layer0/8:{chain}] STAGE1 FIRED for {mint[:8]} -- "
                   f"${stage1['position_usd']:.2f}, conviction {stage1['conviction_score']}, "
                   f"ladder={stage1['trim_ladder']} ({stage1['reason']})")
+            if _stats():
+                _stats().note_execution(1, chain, mint, stage1["position_usd"], stage1["conviction_score"])
 
     # -- Layer 3: Reddit-backing check (Ali, Sept 23 2026 -- built Sept 7,
     # never called). Only attempted on an actual Stage 1 fire, not every
@@ -686,6 +829,10 @@ def _send_post_alert_downgrade(token: str, chain: str, q: dict, dd: float, now: 
     state.log_full_alert("post_alert_downgrade", chain, downgrade.token_symbol, downgrade.token_address,
                           downgrade.headline, dict(downgrade.tags))
     print(f"[post-alert-monitor] {token[:8]} CRATERED ({dd:.1f}% from peak) -- downgrade sent -> {send_res}")
+    if _stats():
+        _stats().note_rug(token, chain, dd)
+        sent = send_res.get("sent") if isinstance(send_res, dict) else bool(send_res)
+        _stats().note_alert_result(bool(sent))
     return send_res
 
 
@@ -859,6 +1006,8 @@ def _run_layer1_cycle(_summary_path=None):
     madeonsol_calls = 0
     if not CONFIG.layer1_ready():
         print("[layer1] BLOCKED: MADEONSOL_API_KEY not set")
+        if _stats():
+            _stats().note_module("layer1 deployer", False, "MADEONSOL_API_KEY not set")
         return alerts_sent, madeonsol_calls
 
     chain = chain_for_cycle(time.time())
@@ -870,8 +1019,12 @@ def _run_layer1_cycle(_summary_path=None):
         if _summary_path:
             with open(_summary_path, "a") as _f:
                 _f.write(f"- [layer1:{chain}] FAILED: {result.get('reason')}\n")
+        if _stats():
+            _stats().note_module(f"layer1 deployer ({chain})", False, result.get("reason"))
     else:
         state.set_layer1_last_checked(chain, datetime.now(timezone.utc).isoformat())
+        if _stats():
+            _stats().note_module(f"layer1 deployer ({chain})", True)
         for a in result["alerts"]:
             alert = Alert(a["token_address"][:8], a["token_address"], chain,
                            "Elite/good-tier deployer just launched a token")
@@ -880,6 +1033,8 @@ def _run_layer1_cycle(_summary_path=None):
             print(f"[layer1:{chain}] alert -> {send_res}")
             if send_res.get("sent"):
                 alerts_sent += 1
+            if _stats():
+                _stats().note_deployer(f"{a['token_address'][:8]} [{chain}] {a['deployer_tier']} tier")
             if a["deployer_tier"] == "elite" and a["token_address"]:
                 state.queue_rescan(a["token_address"], chain, is_pregraduation=(chain == "solana"))
     print(f"[layer1] checked {chain} this cycle")
@@ -966,6 +1121,7 @@ def run_poll_fast():
     # MadeOnSol call, doesn't touch the 200/day budget) and only does real
     # work the first cycle after Ali hands over a genuinely new batch.
     run_seed_pumpfun_wallets()
+    _start_cycle_stats("FAST cycle")
 
     report = readiness_report()
     print("Readiness:", report)
@@ -1026,6 +1182,8 @@ def run_poll_fast():
     # 'since' cursor the way Layer 1's does. ---
     stonkfun_result = _safe(poll_layer0c)
     if isinstance(stonkfun_result, dict) and stonkfun_result.get("ok"):
+        if _stats():
+            _stats().note_module("layer0c stonkfun discovery", True)
         seen = state.layer0c_seen_mints()
         newly_alerted = []
         for tok in stonkfun_result["tokens"]:
@@ -1040,6 +1198,8 @@ def run_poll_fast():
             print(f"[layer0c] {mint} band {tok['band']} -> {send_res}")
             if send_res.get("sent"):
                 alerts_sent += 1
+            if _stats():
+                _stats().note_band("solana (StonkFun)", tok.get("symbol") or mint[:8], tok["band"], tok["score"])
             newly_alerted.append(mint)
         state.mark_layer0c_seen(newly_alerted)
         print(f"[layer0c] {len(stonkfun_result['tokens'])} SOL-quoted launch(es) fetched, "
@@ -1047,6 +1207,8 @@ def run_poll_fast():
     else:
         reason = stonkfun_result.get("reason") if isinstance(stonkfun_result, dict) else str(stonkfun_result)
         print(f"[layer0c] fetch failed: {reason}")
+        if _stats():
+            _stats().note_module("layer0c stonkfun discovery", False, reason)
 
     # --- Layer 0c momentum: cross-quote-type gem scan (Sept 23, 2026). ---
     # Independent of the SOL-only filter above -- catches a LEVERCAT-shaped
@@ -1060,6 +1222,8 @@ def run_poll_fast():
     mom_checked = state.layer0c_momentum_checked_mints()
     mom_result = _safe(poll_layer0c_momentum, 25, 15, mom_checked)
     if isinstance(mom_result, dict) and mom_result.get("ok"):
+        if _stats():
+            _stats().note_module("layer0c momentum", True)
         for gem in mom_result["gems"]:
             mint = gem.get("mint")
             exec_tag = "EXECUTABLE" if gem.get("executable") else "ALERT-ONLY (no buy route for this quote token)"
@@ -1070,12 +1234,18 @@ def run_poll_fast():
             print(f"[layer0c-momentum] {mint} {gem['peak_multiple']:.0f}x ({exec_tag}) -> {send_res}")
             if send_res.get("sent"):
                 alerts_sent += 1
+            if _stats():
+                _stats().moonshots.append(
+                    f"{gem.get('symbol') or (mint or '?')[:8]} [solana (StonkFun)] "
+                    f"{gem['peak_multiple']:.0f}x momentum ({exec_tag})")
         state.mark_layer0c_momentum_checked(mom_result["checked"])
         print(f"[layer0c-momentum] {len(mom_result['checked'])} recent launch(es) deep-checked, "
               f"{len(mom_result['gems'])} momentum gem(s) found")
     else:
         reason = mom_result.get("reason") if isinstance(mom_result, dict) else str(mom_result)
         print(f"[layer0c-momentum] fetch failed: {reason}")
+        if _stats():
+            _stats().note_module("layer0c momentum", False, reason)
 
     # --- Layer 4: news/exchange (no MadeOnSol cost either way) ---
     #
@@ -1095,6 +1265,8 @@ def run_poll_fast():
     if report["stage1"]["layer4_news_exchange"]["cryptopanic"]:
         cp = _safe(fetch_cryptopanic_posts, "rising")
         if cp["ok"]:
+            if _stats():
+                _stats().note_module("layer4 cryptopanic", True)
             posts = parse_cryptopanic_posts(cp["raw"].get("json") or {})
             seen = state.cryptopanic_seen_posts()
             actionable = [p for p in posts if p.get("currencies") and p.get("id") not in seen]
@@ -1111,18 +1283,27 @@ def run_poll_fast():
                 print(f"[layer4:cryptopanic] {coins} -> {send_res}")
                 if send_res.get("sent"):
                     alerts_sent += 1
+                if _stats():
+                    _stats().note_news(f"CryptoPanic: {coins}")
+                    _stats().note_alert_result(bool(send_res.get("sent")))
                 just_alerted.append(post.get("id"))
             state.mark_cryptopanic_seen(just_alerted)
         else:
             print(f"[layer4:cryptopanic] fetch failed (expected -- see docstring): {describe_fetch_failure(cp)}")
+            if _stats():
+                _stats().note_module("layer4 cryptopanic", False, describe_fetch_failure(cp))
     else:
         print("[layer4:cryptopanic] BLOCKED: CRYPTOPANIC_AUTH_TOKEN not set (see README -- separate free signup)")
+        if _stats():
+            _stats().note_module("layer4 cryptopanic", False, "CRYPTOPANIC_AUTH_TOKEN not set")
 
     # CoinDesk RSS -- keyless, so it runs regardless of whether
     # CRYPTOPANIC_AUTH_TOKEN is configured (unlike the CryptoPanic block
     # above, which is gated on that token).
     cd = _safe(fetch_coindesk_rss)
     if cd["ok"]:
+        if _stats():
+            _stats().note_module("layer4 coindesk", True)
         posts = parse_coindesk_rss(cd["raw"].get("text") or "")  # fetch_coindesk_rss returns raw text directly now, no "json" key
         seen = state.coindesk_seen_posts()
         actionable = [p for p in posts if p.get("currencies") and p.get("id") not in seen]
@@ -1139,10 +1320,15 @@ def run_poll_fast():
             print(f"[layer4:coindesk] {coins} -> {send_res}")
             if send_res.get("sent"):
                 alerts_sent += 1
+            if _stats():
+                _stats().note_news(f"CoinDesk: {coins}")
+                _stats().note_alert_result(bool(send_res.get("sent")))
             just_alerted.append(post.get("id"))
         state.mark_coindesk_seen(just_alerted)
     else:
         print(f"[layer4:coindesk] fetch failed: {describe_fetch_failure(cd)}")
+        if _stats():
+            _stats().note_module("layer4 coindesk", False, describe_fetch_failure(cd))
 
     # Binance new-listing feed REMOVED (Ali, Sept 24 2026: "do we really need it
     # for memecoins"). Binance only lists coins after its own formal review, which
@@ -1163,7 +1349,11 @@ def run_poll_fast():
             if not raw.get("ok"):
                 detail = raw["reason"] if "reason" in raw else describe_fetch_failure({"raw": raw})
                 print(f"[layer0b/8:{chain}] pulse fetch failed: {detail}")
+                if _stats():
+                    _stats().note_module(f"layer0b pulse ({chain})", False, detail)
                 continue
+            if _stats():
+                _stats().note_module(f"layer0b pulse ({chain})", True)
             items = flatten_mobula_pulse_response(raw.get("json"))
             for scored in score_mobula_pulse_items(chain, items):
                 mint = scored["address"]
@@ -1175,6 +1365,8 @@ def run_poll_fast():
             print(f"[layer0b/8:{chain}] scored {len(items)} Pulse item(s) (1 Mobula call)")
     else:
         print("[layer0b/8] BLOCKED: MOBULA_API_KEY not set")
+        if _stats():
+            _stats().note_module("layer0b pulse (bsc/base)", False, "MOBULA_API_KEY not set")
 
     # --- Layer 2b: self-built pump.fun smart-money convergence (Ali, Sept
     # 23 2026). Keyless (free Solana RPC only), so always attempted, no
@@ -1182,6 +1374,8 @@ def run_poll_fast():
     # the real per-cycle call cost this incurs. ---
     l2b_result = _safe(poll_layer2b_pumpfun_smart_money)
     if isinstance(l2b_result, dict) and l2b_result.get("ok"):
+        if _stats():
+            _stats().note_module("layer2b pump.fun smart-money", True)
         # Single-wallet alerts (Ali, Sept 24 2026 -- see single_wallet_buy_events'
         # docstring): fires on ANY tracked wallet's buy, not just 2+ converging.
         # Sent BEFORE the convergence check below so if both fire for the same
@@ -1199,6 +1393,8 @@ def run_poll_fast():
             print(f"[layer2b] {token[:8]} single tracked-trader buy by {wallet[:8]}... -> {send_res}")
             if send_res.get("sent"):
                 alerts_sent += 1
+            if _stats():
+                _stats().note_copytrade(f"pump.fun: {wallet[:8]}... bought {token[:8]}")
         for event in l2b_result["convergence_events"]:
             token = event["token"]
             alert = Alert(token[:8], token, "solana", "Pump.fun SMART-MONEY convergence")
@@ -1209,12 +1405,17 @@ def run_poll_fast():
             print(f"[layer2b] {token[:8]} smart-money convergence -> {send_res}")
             if send_res.get("sent"):
                 alerts_sent += 1
+            if _stats():
+                _stats().note_copytrade(f"pump.fun CONVERGENCE: {event['count']} wallet(s) on {token[:8]}")
+                _stats().moonshots.append(f"{token[:8]} [solana (pump.fun)] {event['count']}-wallet smart-money convergence")
         print(f"[layer2b] checked {l2b_result['checked']} pump.fun signature(s), "
               f"{l2b_result['decoded']} decoded buy(s), {len(l2b_result['promotions'])} new smart-money "
               f"promotion(s), roster size now {l2b_result['roster_size']}")
     else:
         reason = l2b_result.get("reason") if isinstance(l2b_result, dict) else str(l2b_result)
         print(f"[layer2b] fetch failed: {reason}")
+        if _stats():
+            _stats().note_module("layer2b pump.fun smart-money", False, reason)
 
     # --- Layer 6: exit-risk / realizable-gain snapshot (Mobula only, no
     # MadeOnSol cost) -- kept fast for quicker rug detection. ---
@@ -1225,6 +1426,8 @@ def run_poll_fast():
             print(f"[layer6] {len(held)} held assets fetched; exit-risk diffing needs a prior "
                   f"snapshot (state.py) -- first cycle establishes the baseline only")
             state.save_snapshot(held)
+            if _stats():
+                _stats().note_module("layer6 exit-risk", True)
         else:
             raw = portfolio.get("raw") if isinstance(portfolio, dict) else None
             if isinstance(raw, dict):
@@ -1232,8 +1435,12 @@ def run_poll_fast():
             else:
                 detail = portfolio.get("reason") if isinstance(portfolio, dict) else str(portfolio)
             print(f"[layer6] portfolio fetch failed: {detail}")
+            if _stats():
+                _stats().note_module("layer6 exit-risk", False, str(detail)[:120])
     else:
         print("[layer6] BLOCKED: MOBULA_API_KEY and/or WALLET_ADDRESSES not set")
+        if _stats():
+            _stats().note_module("layer6 exit-risk", False, "MOBULA_API_KEY / WALLET_ADDRESSES not set")
 
     # --- Soft-fail watch sweep (Ali, Sept 28 2026) -- free RPC only (0
     # MadeOnSol calls), so this runs every fast cycle same as Layer 2b/6
@@ -1257,6 +1464,9 @@ def run_poll_fast():
             _f.write(f"\n### Fast-cycle result\n- alerts_sent: {alerts_sent}\n"
                      f"- madeonsol_calls: {madeonsol_calls}\n"
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
+
+    if _stats():
+        _print_cycle_summary(_stats())
 
 
 def _run_layer8_cycle(board):
@@ -1302,6 +1512,8 @@ def _run_layer8_cycle(board):
                       f"({len(to_process) * 3} MadeOnSol calls){', ' + str(len(overflow)) + ' re-queued' if overflow else ''}")
     else:
         print("[layer0/8:solana/rhc] BLOCKED: MADEONSOL_API_KEY not set")
+        if _stats():
+            _stats().note_module("layer8 deep-score (solana/rhc)", False, "MADEONSOL_API_KEY not set")
     return alerts_sent, madeonsol_calls
 
 
@@ -1327,7 +1539,11 @@ def _run_fomo_cycle(report, _summary_path=None):
                 if _summary_path:
                     with open(_summary_path, "a") as _f:
                         _f.write(f"- [layer2+9:{chain}] FAILED: {fetched.get('reason')}\n")
+                if _stats():
+                    _stats().note_module(f"layer2+9 kol-feed ({chain})", False, fetched.get("reason"))
                 continue
+            if _stats():
+                _stats().note_module(f"layer2+9 kol-feed ({chain})", True)
             print(f"[layer2+9:{chain}] kol-feed fetch mode={fetched['mode']} "
                   f"({fetched['calls_made']} MadeOnSol call(s))")
             buy_trades, sell_trades = fetched["buy_trades"], fetched["sell_trades"]
@@ -1362,6 +1578,8 @@ def _run_fomo_cycle(report, _summary_path=None):
                 print(f"[layer2:{chain}] {token[:8]} single tracked-trader buy by {ev['name']} -> {send_res}")
                 if send_res.get("sent"):
                     alerts_sent += 1
+                if _stats():
+                    _stats().note_copytrade(f"Fomo: {ev['name']} bought {token[:8]} [{chain}]")
 
             for ev in result["events"]:
                 active_tokens.add(ev["token"])
@@ -1372,6 +1590,9 @@ def _run_fomo_cycle(report, _summary_path=None):
                 print(f"[layer2:{chain}] convergence alert -> {send_res}")
                 if send_res.get("sent"):
                     alerts_sent += 1
+                if _stats():
+                    _stats().note_copytrade(f"Fomo CONVERGENCE: {ev['count']} wallet(s) on {ev['token'][:8]} [{chain}]")
+                    _stats().moonshots.append(f"{ev['token'][:8]} [{chain}] {ev['count']}-wallet Fomo convergence")
 
             # Large buy from an UNTRACKED name (Ali, Sept 24 2026 -- "a new
             # person...good cash balance...maybe he can be an insider
@@ -1389,6 +1610,9 @@ def _run_fomo_cycle(report, _summary_path=None):
                       f"({ev['sol_amount']:.1f} SOL) -> {send_res}")
                 if send_res.get("sent"):
                     alerts_sent += 1
+                if _stats():
+                    _stats().note_copytrade(f"Fomo large untracked buy: {ev['name']} "
+                                             f"{ev['sol_amount']:.1f} SOL on {token[:8]} [{chain}]")
 
                 # -- Shared execution core (Ali, Sept 23 2026: "point 5 ...
                 # should cover all 3 platforms" -- decided: Pump.fun/Fomo
@@ -1420,6 +1644,8 @@ def _run_fomo_cycle(report, _summary_path=None):
                     print(f"[layer2:{chain}] STAGE2 FIRED for {ev['token'][:8]} -- "
                           f"${stage2['position_usd']:.2f}, conviction {stage2['conviction_score']}, "
                           f"ladder={stage2['trim_ladder']} ({stage2['reason']})")
+                    if _stats():
+                        _stats().note_execution(2, chain, ev["token"], stage2["position_usd"], stage2["conviction_score"])
                 else:
                     print(f"[layer2:{chain}] stage2 not fired for {ev['token'][:8]}: {stage2['reason']}")
 
@@ -1478,7 +1704,11 @@ def _run_fomo_cycle(report, _summary_path=None):
                              trades=sell_trades, resolve_unknown=resolve_unknown)
             if not result9["ok"]:
                 print(f"[layer9:{chain}] skipped: {result9.get('reason')}")
+                if _stats():
+                    _stats().note_module(f"layer9 sell-mirror ({chain})", False, result9.get("reason"))
                 continue
+            if _stats():
+                _stats().note_module(f"layer9 sell-mirror ({chain})", True)
             for ev in result9["events"]:
                 alert = Alert(ev["token"][:8], ev["token"], chain,
                               f"Tracked entity SOLD: {ev['who']}")
@@ -1488,6 +1718,12 @@ def _run_fomo_cycle(report, _summary_path=None):
                 print(f"[layer9:{chain}] sell alert -> {send_res}")
                 if send_res.get("sent"):
                     alerts_sent += 1
+                if _stats():
+                    _stats().note_copytrade(f"SELL: {ev['who']} ({ev['role']}) sold {pct_str} of "
+                                             f"{ev['token'][:8]} [{chain}]")
+                    if ev["pct_of_position"] is not None and ev["pct_of_position"] >= 50:
+                        _stats().rugs.append(f"{ev['token'][:8]} [{chain}] {ev['who']} dumped {pct_str} "
+                                              f"of position (tracked-wallet sell, not price-based)")
                 # Arithmetic-only update -- no extra Mobula call at sell time.
                 new_bal = update_balance_after_sell(ev["wallet"], ev["token"], ev.get("amount_for_pct"),
                                                      prior_balances)
@@ -1495,6 +1731,8 @@ def _run_fomo_cycle(report, _summary_path=None):
                     state.record_balance(ev["wallet"], ev["token"], new_bal)
     else:
         print("[layer2+9] BLOCKED: MADEONSOL_API_KEY not set")
+        if _stats():
+            _stats().note_module("layer2+9 kol-feed", False, "MADEONSOL_API_KEY not set")
     return alerts_sent, madeonsol_calls
 
 
@@ -1503,6 +1741,7 @@ def run_poll_slow():
     the pending-rescore queue Layer 1/run_poll_fast feeds) and Layers 2+9's
     wallet-activity checks. Meant to run every 15-20 min, not 10 -- see
     README's call-budget section."""
+    _start_cycle_stats("SLOW cycle")
     report = readiness_report()
     print("Readiness:", report)
     alerts_sent = 0
@@ -1553,6 +1792,8 @@ def run_poll_slow():
             _f.write(f"\n### Slow-cycle result\n- alerts_sent: {alerts_sent}\n"
                      f"- madeonsol_calls: {madeonsol_calls}\n")
 
+    if _stats():
+        _print_cycle_summary(_stats())
 
 
 # One-off manual seeding runs (Ali, Sept 24 2026) -- each entry here is a
@@ -1645,6 +1886,7 @@ def run_poll_madeonsol():
     real machine's network is untested for this specifically, so the first
     real run is the real answer; if it can't reach Upstash or Telegram
     either, that's a separate, new finding to report back."""
+    _start_cycle_stats("MADEONSOL cycle")
     report = readiness_report()
     print("Readiness:", report)
     board = _safe(fetch_boost_board)
@@ -1669,6 +1911,9 @@ def run_poll_madeonsol():
 
     print(f"\nMadeOnSol-only cycle done. {total_alerts} alert(s) delivered. "
           f"~{total_calls} MadeOnSol call(s) used.")
+
+    if _stats():
+        _print_cycle_summary(_stats())
 
 
 def run_poll():
