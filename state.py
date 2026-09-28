@@ -694,3 +694,65 @@ def watch_touch(token: str, ts: Optional[float] = None):
             changed = True
     if changed:
         set_value(SOFT_FAIL_WATCH_KEY, watch)
+
+
+# --- Post-alert monitoring pass (Ali, Sept 28 2026 -- checklist item: "a
+# flagged token that rugs 10 minutes later still shows as a live alert with
+# no correction"). This is the mirror image of the soft-fail watch list
+# above: that one catches a D-band token that quietly gets BETTER after
+# being suppressed; this one catches an A/B-band (or HIGH-RISK MOMENTUM)
+# token that gets WORSE after being alerted on. Every real per-token alert
+# scheduler._handle_scored actually sends gets a one-time follow-up entry
+# here; scheduler._run_post_alert_monitor_cycle re-checks it once real price
+# history exists for the 15-60 min window (see that function's docstring
+# for why it's a single pass, not a repeating watch) and sends a DOWNGRADE
+# follow-up if the token craters. Bounded the same way as SOFT_FAIL_WATCH
+# above: capped item count and capped age, since a token this old has
+# already aged out of the window this pass cares about either way.
+POST_ALERT_MONITOR_KEY = "post_alert_monitor"
+POST_ALERT_MONITOR_MIN_AGE_SECONDS = 15 * 60   # per spec: don't check before 15 min
+POST_ALERT_MONITOR_MAX_AGE_SECONDS = 60 * 60   # per spec: window closes at 60 min
+POST_ALERT_MONITOR_MAX_ITEMS = 300
+
+
+def post_alert_monitor_add(token: str, chain: str, headline: str, band: str, score: int,
+                            ts: Optional[float] = None):
+    """Adds a just-sent alert to the post-alert monitor queue, deduped by
+    token -- a token that alerts again before its first follow-up check
+    fires just gets its headline/band/score refreshed, not a second entry
+    (one follow-up check per token in flight is enough; a second real alert
+    on the same token already tells Ali something changed)."""
+    ts = ts if ts is not None else time.time()
+    queue = get_value(POST_ALERT_MONITOR_KEY) or []
+    existing = next((q for q in queue if q.get("token") == token), None)
+    if existing:
+        existing["headline"] = headline
+        existing["band"] = band
+        existing["score"] = score
+    else:
+        queue.append({
+            "token": token, "chain": chain, "headline": headline, "band": band, "score": score,
+            "alert_ts": ts, "checked": False,
+        })
+    cutoff = ts - POST_ALERT_MONITOR_MAX_AGE_SECONDS
+    queue = [q for q in queue if q.get("alert_ts", 0) >= cutoff][-POST_ALERT_MONITOR_MAX_ITEMS:]
+    set_value(POST_ALERT_MONITOR_KEY, queue)
+
+
+def get_post_alert_monitor() -> list:
+    """Returns the current post-alert monitor queue, pruned of anything past
+    POST_ALERT_MONITOR_MAX_AGE_SECONDS -- self-cleaning on read, same
+    pattern as get_soft_fail_watch above."""
+    queue = get_value(POST_ALERT_MONITOR_KEY) or []
+    cutoff = time.time() - POST_ALERT_MONITOR_MAX_AGE_SECONDS
+    fresh = [q for q in queue if q.get("alert_ts", 0) >= cutoff]
+    if len(fresh) != len(queue):
+        set_value(POST_ALERT_MONITOR_KEY, fresh)
+    return fresh
+
+
+def post_alert_monitor_remove(token: str):
+    queue = get_value(POST_ALERT_MONITOR_KEY) or []
+    remaining = [q for q in queue if q.get("token") != token]
+    if len(remaining) != len(queue):
+        set_value(POST_ALERT_MONITOR_KEY, remaining)

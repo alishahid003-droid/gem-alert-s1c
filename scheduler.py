@@ -138,6 +138,7 @@ from layers.layer4_news import fetch_cryptopanic_posts, parse_cryptopanic_posts,
     fetch_binance_new_listings, parse_binance_new_listings
 from layers.layer6_exit_realizable import fetch_wallet_portfolio
 from layers.layer8_momentum_override import detect_momentum_override, mc_moved_enough
+from layers.layer0d_point_in_time import fetch_birdeye_ohlcv, summarize_launch_window
 from layers.layer9_sell_mirror import poll_layer9, update_balance_after_sell
 from layers.roster import SELL_WATCH_ROSTER
 from layers.wallet_balance import fetch_wallets_portfolio, extract_balances_for_pairs
@@ -485,6 +486,16 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     layer_name = "layer0b" if source == "mobula" else "layer0"
     send_res = _alert(alert, layer_name)
     print(f"[layer0/8:{chain}] {mint} band {sr.band} -> {send_res}")
+    # Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
+    # post_alert_monitor_add docstring): every real alert this function
+    # actually delivers gets a one-time follow-up entry, checked once real
+    # Birdeye price history exists for the 15-60 min window. Birdeye-
+    # supported chains only (same gate fetch_birdeye_ohlcv itself already
+    # enforces -- Robinhood Chain has no Birdeye mapping, see that
+    # function's docstring); gating here too avoids queuing an entry that
+    # can only ever fail its own check.
+    if mint and send_res.get("sent") and chain in BIRDEYE_SUPPORTED_CHAINS:
+        state.post_alert_monitor_add(mint, chain, alert.headline, sr.band, sr.score)
     return bool(send_res.get("sent"))
 
 
@@ -581,6 +592,84 @@ def _run_soft_fail_watch_cycle() -> int:
         print(f"[soft-fail-watch] checked {len(to_check)}/{len(watch)} watched token(s), "
               f"{queued} queued for a real re-score (0 MadeOnSol calls spent)")
     return queued
+
+
+# Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
+# post_alert_monitor_add docstring for the gap this closes: "a flagged
+# token that rugs 10 minutes later still shows as a live alert with no
+# correction"). Birdeye-supported chains only -- Robinhood Chain has no
+# Birdeye mapping (see layers.layer0d_point_in_time.fetch_birdeye_ohlcv),
+# same disclosed gap as the launch-window collapse override this reuses.
+BIRDEYE_SUPPORTED_CHAINS = {"solana", "base", "bsc", "ethereum"}
+POST_ALERT_MONITOR_MAX_PER_CYCLE = 8
+# Same threshold as layer0_scoring's launch-window collapse override
+# (real backtest evidence, Sept 28 2026) -- a token whose price is down
+# 60%+ from its post-alert peak by the time this checks it is the same
+# "pumped then got dumped on" shape that override already proved on, not a
+# separately-guessed number.
+POST_ALERT_CRATER_DRAWDOWN_PCT = -60.0
+
+
+def _run_post_alert_monitor_cycle() -> int:
+    """Sweeps state.get_post_alert_monitor() -- tokens a real alert was
+    just sent for -- and, for any entry that's now at least 15 minutes old
+    (state.POST_ALERT_MONITOR_MIN_AGE_SECONDS), fetches real Birdeye OHLCV
+    covering the window from the original alert to now and checks whether
+    the price has since collapsed 60%+ from its post-alert peak. This is a
+    SINGLE one-time pass per alert, not a repeating watch (per Ali's own
+    framing, "15-60 min after a coin is flagged") -- every entry checked
+    this cycle is removed from the queue regardless of outcome, since the
+    verdict this pass exists to give has now been delivered one way or the
+    other. An entry that ages past 60 min without ever being checked (the
+    per-cycle cap was full every cycle in that window) just ages out on
+    state.get_post_alert_monitor's own self-cleaning read -- an honest,
+    disclosed gap, same convention as the soft-fail watch list's own
+    max-age prune, not a silent failure. Returns the number of real
+    DOWNGRADE follow-ups sent."""
+    queue = state.get_post_alert_monitor()
+    if not queue:
+        return 0
+    now = time.time()
+    eligible = [q for q in queue if q.get("chain") in BIRDEYE_SUPPORTED_CHAINS
+                and now - q.get("alert_ts", now) >= state.POST_ALERT_MONITOR_MIN_AGE_SECONDS]
+    # Oldest-flagged-first, same round-robin intent as the soft-fail watch
+    # cycle -- a busy night shouldn't let the newest handful of alerts hog
+    # every cycle's cap while older ones silently age past the 60-min
+    # window without ever being checked.
+    eligible.sort(key=lambda q: q.get("alert_ts", 0))
+    to_check = eligible[:POST_ALERT_MONITOR_MAX_PER_CYCLE]
+    downgraded = 0
+    for q in to_check:
+        token, chain, alert_ts = q["token"], q["chain"], q.get("alert_ts", now)
+        ohlcv = _safe(fetch_birdeye_ohlcv, chain, token, int(alert_ts), int(now), interval="15m")
+        # One-time pass -- remove now, checked either way, before deciding
+        # the outcome, so a crash in the summarize step below can't leave
+        # the same entry stuck being re-checked forever.
+        state.post_alert_monitor_remove(token)
+        if not (isinstance(ohlcv, dict) and ohlcv.get("ok")):
+            reason = ohlcv.get("reason") if isinstance(ohlcv, dict) else str(ohlcv)
+            print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: {reason}")
+            continue
+        summary = summarize_launch_window(ohlcv.get("candles") or [])
+        if not summary.get("ok"):
+            print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: {summary.get('reason')}")
+            continue
+        dd = summary.get("drawdown_from_peak_pct")
+        if dd is not None and dd <= POST_ALERT_CRATER_DRAWDOWN_PCT:
+            downgrade = Alert(token[:8], token, chain, f"ALERT DOWNGRADE -- {q.get('headline', 'previous alert')}")
+            downgrade.set_tag("Chain", chain)
+            downgrade.set_tag("Score", f"{q.get('score')}/100 (band {q.get('band')}, at time of original alert)")
+            downgrade.set_tag("Exit-risk", f"price down {dd:.1f}% from its post-alert peak within "
+                                            f"{(now - alert_ts) / 60:.0f} min -- likely a rug/dump in progress")
+            send_res = send_alert(downgrade)
+            print(f"[post-alert-monitor] {token[:8]} CRATERED ({dd:.1f}% from peak) -- downgrade sent -> {send_res}")
+            downgraded += 1
+        else:
+            print(f"[post-alert-monitor] {token[:8]} held up (drawdown {dd}% from peak) -- no downgrade")
+    if to_check:
+        print(f"[post-alert-monitor] checked {len(to_check)}/{len(queue)} pending follow-up(s), "
+              f"{downgraded} downgraded")
+    return downgraded
 
 
 LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
@@ -988,6 +1077,13 @@ def run_poll_fast():
     # above, not gated behind the slow cycle's budget concerns. See
     # _run_soft_fail_watch_cycle's docstring for what this closes. ---
     _safe(_run_soft_fail_watch_cycle)
+
+    # --- Post-alert monitoring pass (Ali, Sept 28 2026) -- Birdeye calls
+    # cost no MadeOnSol budget (separate free-tier account, same as the
+    # launch-window collapse override's own Birdeye call), so this runs
+    # every fast cycle too, same reasoning as the soft-fail sweep above.
+    # See _run_post_alert_monitor_cycle's docstring for what this closes. ---
+    _safe(_run_post_alert_monitor_cycle)
 
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "

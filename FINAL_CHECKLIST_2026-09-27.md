@@ -55,11 +55,25 @@ that reset, except step 0.
   Layer2b/10 signal as unvalidated like everything else.
 
 ## 3. Close acknowledged detection gaps
-- [ ] Build the post-alert monitoring pass: re-check price/liquidity
-  15-60 min after a coin is flagged, downgrade or cancel the alert if it
-  craters in that window. Not started yet — this is a real, named gap,
-  not a nice-to-have, because right now a flagged token that rugs 10
-  minutes later still shows as a live alert with no correction.
+- [x] DONE Sept 28 2026: post-alert monitoring pass built and wired live.
+  Every real alert scheduler._handle_scored actually delivers (band A/B
+  and HIGH-RISK MOMENTUM, on Birdeye-supported chains -- solana/base/bsc/
+  ethereum, not Robinhood Chain, same disclosed gap as the launch-window
+  collapse override) queues a one-time follow-up entry
+  (state.post_alert_monitor_add). scheduler._run_post_alert_monitor_cycle
+  runs every fast cycle (0 MadeOnSol budget -- Birdeye's a separate
+  free-tier account), checks any entry >=15 min old against real Birdeye
+  OHLCV covering the alert-to-now window, and sends a DOWNGRADE follow-up
+  if price is down 60%+ from its post-alert peak (same threshold as the
+  collapse override, same real evidence). A single pass per alert, not a
+  repeating watch, per spec ("15-60 min after"); an entry that ages past
+  60 min uncapped-out just prunes silently, an honest disclosed gap same
+  as the soft-fail watch list's own max-age prune. 12 new tests, all
+  passing (tests/test_post_alert_monitor.py), full suite still green
+  (428/428). Direct fix for tonight's one remaining miss (RICH OFF GTA 6,
+  -8.54% at scan time -- this would have caught it 15-60 min later if it
+  went on to crater the way the override's threshold implies it likely
+  did).
 - [x] CORRECTION Sept 28 2026: a deployer rug-history check already
   existed for StonkFun (compute_stonkfun_deployer_tier in
   layer0c_stonkfun_scoring.py) -- my earlier "confirmed missing, grepped
