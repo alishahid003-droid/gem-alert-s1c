@@ -156,13 +156,6 @@ that reset, except step 0.
   getTokenLargestAccounts as first guessed here -- that call returns
   token ACCOUNTS not owner wallets, so it can't directly answer "does
   the deployer hold X%" without an extra lookup per account.)
-- [ ] Twitter/X itself confirmed genuinely paid-only (checked twice,
-  Sept 27 2026): free tier is a one-time ~100-request trial or
-  restricted to government/public-service accounts; real read/search
-  needs Basic ~$200/mo (no search) or Pro ~$5,000/mo; scraping
-  workarounds get IP-blocked within hours and break on every frontend
-  change -- not building that. This item stays paid-only, no free
-  substitute for Twitter specifically.
 - [x] BUILT Sept 28 2026 (infra done; channel list is Ali's real remaining
   step, not a build task). **ON HOLD Sept 28 2026** -- Ali is not supplying
   a channel list right now, so this stays exactly as shipped: CONFIG-driven,
@@ -190,7 +183,7 @@ that reset, except step 0.
   channel's real numeric ID afterward. 27 new tests, all passing
   (tests/test_layer12_caller_channels.py, tests/test_state_caller_
   signals.py, tests/test_layer12_scheduler_wiring.py), full suite green
-  (459/459).
+  (459/459). (Moved to Advanced Upgrades below -- on hold, not blocking.)
 - [x] CLOSED Sept 28 2026 -- confirmed dead, not building against it.
   Checked Dune's own docs directly (docs.dune.com/learning/how-tos/
   credit-system, plus real reporting on their Sept 10 2026 policy
@@ -203,10 +196,7 @@ that reset, except step 0.
   budget/reachability issue like MadeOnSol/Birdeye -- a real, confirmed
   product-policy dead end. Not worth revisiting unless Ali wants to pay
   for Dune's Analyst tier ($65/mo).
-- [ ] Decide (optional, not blocking): MadeOnSol PRO tier ($43-49/mo) for
-  its own risk `factors` (mint/freeze authority, lp_lock) beyond what
-  GoPlus's fallback already covers. Not urgent since the free RPC signals
-  closed the bigger gap (holder concentration) already.
+  (MadeOnSol PRO decision moved to Advanced Upgrades below -- optional, not blocking.)
 - [x] CHECKED Sept 28 2026 -- real, actionable finding, not previously
   known. Of Axiom/Photon/BonkBot/Trojan, none document a public API.
   **GMGN does**: a real, official "Agent API" (docs.gmgn.ai/index/
@@ -273,6 +263,15 @@ rug-history, combined into one score) is a genuinely different, more
 sophisticated category than what they offer. What they have that we don't
 is raw execution speed. So the upgrade path is closing OUR speed gap, not
 buying THEIR decision-making -- we don't need it, ours is better already.
+
+Section 3 items parked here, not blocking, not forgotten:
+- [ ] Decide (optional): MadeOnSol PRO tier ($43-49/mo) -- skippable, already
+  covered in the $150-250/month tier below.
+- [x] Twitter/X: confirmed dead-end, paid-only (Basic ~$200/mo or Pro
+  ~$5,000/mo, scraping workarounds get IP-blocked) -- nothing to do, no free
+  substitute exists.
+- [x] Telegram caller-channels: on hold -- infra built and shipped (Layer 12,
+  see section 3 above), fails closed, no channel list supplied by Ali yet.
 
 Tiers, cheapest to most expensive, only spend from real profit:
 - [ ] ~$50-100/month: paid low-latency RPC/geyser stream (Helius, Triton,
