@@ -92,14 +92,16 @@ def test_no_conviction_call_falls_back_to_default_ladder():
     # never called assess_conviction on this one
     trim = moonbag.evaluate_trim("solana", "MintPlain", current_mcap_usd=350000)
     assert trim.should_fire is True
-    assert trim.pct_of_original == 0.35  # default ladder's 3x rung
+    assert trim.pct_of_original == 0.20  # default ladder's 3x rung (revised Sept 28 2026, Ali:
+    # trim less on short levels so a 100x/500x/1000x run isn't capped early -- 20/20/15 = 55%
+    # trimmed total, 45% moonbag rides uncapped, vs. the old 80%-trimmed/20%-moonbag ladder)
 
 
 def test_low_conviction_call_uses_default_ladder():
     position_state.record_stage_entry("solana", "MintLowConv", "stage1", 20.0, 100000, "test")
     moonbag.assess_conviction("solana", "MintLowConv", deployer_tier="good")  # score 1, below threshold
     trim = moonbag.evaluate_trim("solana", "MintLowConv", current_mcap_usd=350000)
-    assert trim.pct_of_original == 0.35
+    assert trim.pct_of_original == 0.20  # default ladder's 3x rung, see comment above
 
 
 def test_high_conviction_ladder_leaves_bigger_moonbag_than_default():

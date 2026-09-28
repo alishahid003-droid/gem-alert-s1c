@@ -50,12 +50,13 @@ def test_fires_first_tier_at_3x():
     d = moonbag.evaluate_trim("solana", "MintMoon", current_mcap_usd=350000)  # 3.5x
     assert d.should_fire is True
     assert d.tier_multiple == 3.0
-    assert d.pct_of_original == 0.35
+    assert d.pct_of_original == 0.20  # revised Sept 28 2026 ladder, see DEFAULT_TRIM_LADDER's
+    # own docstring in executor/moonbag.py -- 20/20/15 across 3x/10x/50x, 45% moonbag rides free
 
 
 def test_does_not_refire_same_tier_twice():
     _open_position(entry_mcap=100000)
-    position_state.record_moonbag_trim("solana", "MintMoon", 3.0, 0.35, exit_usd=15.0)
+    position_state.record_moonbag_trim("solana", "MintMoon", 3.0, 0.20, exit_usd=15.0)
     d = moonbag.evaluate_trim("solana", "MintMoon", current_mcap_usd=350000)  # still only 3.5x
     assert d.should_fire is False
     assert "no untrimmed tier" in d.reason
@@ -63,11 +64,11 @@ def test_does_not_refire_same_tier_twice():
 
 def test_fires_next_tier_after_first_already_trimmed():
     _open_position(entry_mcap=100000)
-    position_state.record_moonbag_trim("solana", "MintMoon", 3.0, 0.35, exit_usd=15.0)
+    position_state.record_moonbag_trim("solana", "MintMoon", 3.0, 0.20, exit_usd=15.0)
     d = moonbag.evaluate_trim("solana", "MintMoon", current_mcap_usd=1200000)  # 12x
     assert d.should_fire is True
     assert d.tier_multiple == 10.0
-    assert d.pct_of_original == 0.25
+    assert d.pct_of_original == 0.20  # revised ladder's 10x rung
 
 
 def test_fires_lowest_untrimmed_tier_even_if_price_jumped_past_several():
@@ -86,9 +87,12 @@ def test_remaining_pct_decreases_as_tiers_trim():
     assert position_state.remaining_pct("solana", "MintMoon") == pytest.approx(0.40)
 
 
-def test_all_three_tiers_leave_a_20pct_moonbag():
+def test_all_three_tiers_leave_a_45pct_moonbag():
+    # Renamed Sept 29 2026 -- ladder revised Sept 28 2026 (Ali: trimming too much on short
+    # levels, "only 20% wont suit my purpose if coin explodes"). 20/20/15 = 55% trimmed total,
+    # 45% moonbag rides uncapped for a real 100x/500x/1000x run, not the old 80%/20% split.
     total_trimmed = sum(pct for _, pct in moonbag.DEFAULT_TRIM_LADDER)
-    assert total_trimmed == pytest.approx(0.80)
+    assert total_trimmed == pytest.approx(0.55)
 
 
 def test_check_and_trim_does_not_record_when_execution_disabled():
