@@ -286,15 +286,82 @@ function render(data) {
     </tr>`).join("")}</tbody></table>` : '<div class="empty">no alerts yet</div>';
 }
 
+let __seenAlertKeys = null;
+let __seenTradeKeys = null;
+let __notifyReady = false;
+
+function __alertKey(a) { return (a.layer||"") + "|" + (a.token_address||"") + "|" + (a.ts||""); }
+function __tradeKey(t) { return (t.tx_signature||"") + "|" + (t.token||"") + "|" + (t.ts||""); }
+
+function __beep(freq) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq || 880;
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (e) {}
+}
+
+function __notify(title, body) {
+  __beep(880);
+  if (__notifyReady && "Notification" in window && Notification.permission === "granted") {
+    try { new Notification(title, { body: body }); } catch (e) {}
+  }
+  document.title = "\uD83D\uDD34 " + title;
+  setTimeout(() => { document.title = "S1c Dashboard"; }, 8000);
+}
+
+function __checkNewAlertsAndTrades(data) {
+  const alertKeys = new Set((data.alert_feed || []).map(__alertKey));
+  const tradeKeys = new Set((data.trade_log || []).map(__tradeKey));
+
+  if (__seenAlertKeys === null) {
+    __seenAlertKeys = alertKeys;
+  } else {
+    for (const a of (data.alert_feed || [])) {
+      const k = __alertKey(a);
+      if (!__seenAlertKeys.has(k)) {
+        __notify("New alert: " + (a.token_symbol || a.headline || "gem alert"), a.headline || "");
+      }
+    }
+    __seenAlertKeys = alertKeys;
+  }
+
+  if (__seenTradeKeys === null) {
+    __seenTradeKeys = tradeKeys;
+  } else {
+    for (const t of (data.trade_log || [])) {
+      const k = __tradeKey(t);
+      if (!__seenTradeKeys.has(k)) {
+        const label = t.ok ? "AUTO-BUY/SELL EXECUTED" : "TRADE ATTEMPT FAILED";
+        __notify(label + ": " + (t.side || "").toUpperCase() + " " + (t.token || ""),
+                  "$" + (t.usd_amount != null ? Number(t.usd_amount).toFixed(2) : "?") + " -- " + (t.reason || ""));
+      }
+    }
+    __seenTradeKeys = tradeKeys;
+  }
+}
+
 async function poll() {
   try {
     const res = await fetch("/api/data");
     const data = await res.json();
     window.__lastData = data;
+    __checkNewAlertsAndTrades(data);
     render(data);
   } catch (e) {
     document.getElementById("meta").textContent = "fetch failed: " + e;
   }
+}
+if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+  Notification.requestPermission().then(() => { __notifyReady = true; });
+} else if ("Notification" in window && Notification.permission === "granted") {
+  __notifyReady = true;
 }
 poll();
 setInterval(poll, 10000);
