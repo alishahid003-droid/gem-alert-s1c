@@ -301,3 +301,20 @@ Tiers, cheapest to most expensive, only spend from real profit:
   funded wallet's private key to an external service is Ali's call, not
   something to wire in without him reviewing the custody model first.
   (Full writeup also logged in section 3 above.)
+
+## Sept 28 2026 evening -- $7 real live-money test (Solana only)
+- Ali's Phantom wallet funded with real $7 for a genuine end-to-end test
+  of the execution path (real quote, real slippage floor, real fill
+  recording -- all fixed/hardened earlier tonight).
+- TEMPORARY local-only .env overrides for this test, NOT committed
+  (`.env` is gitignored):
+    STAGE1_POSITION_USD=3
+    STAGE2_POSITION_USD=3
+    TOTAL_WALLET_USD=7
+  These exist ONLY so a $3 buy can actually clear against a $7 wallet
+  without gas pushing it over balance. They override the real $20/$17
+  defaults in executor/config.py, which stay unchanged in code.
+- ACTION ITEM once the wallet is funded for real go-live: remove these
+  three overrides from .env (or raise them back to $20/$17 and the real
+  wallet total) -- otherwise every future position stays capped at the
+  $3 test size indefinitely.
