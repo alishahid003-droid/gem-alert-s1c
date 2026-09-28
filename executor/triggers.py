@@ -16,6 +16,27 @@ import executor.position_state as position_state
 import executor.circuit_breaker as circuit_breaker
 from executor.config import EXECUTOR_CONFIG
 
+# Band-scaled Stage 1 position sizing (Ali, Sept 29 2026: "with abcd bands
+# pricing or entry must be managed" -- band was previously fire/no-fire
+# only, with every Stage 1 entry betting the exact same flat
+# stage1_position_usd regardless of whether it was a strong band-A signal
+# or barely scraped in on a 2-wallet convergence with a D-band score.
+# Multiplier is applied to EXECUTOR_CONFIG.stage1_position_usd (today's
+# default $20) for EVERY fire path -- score, deployer, or convergence --
+# not just score-triggered fires, since a token's band is a real read on
+# its structural quality regardless of which condition actually fired.
+# None (no score available yet at this point in the caller) gets the same
+# mid-tier treatment as C, deliberately conservative rather than assuming
+# quality it hasn't been shown.
+STAGE1_BAND_SIZE_MULTIPLIER = {"A": 1.0, "B": 0.75, "C": 0.4, "D": 0.25}
+STAGE1_UNKNOWN_BAND_MULTIPLIER = 0.4
+
+
+def stage1_position_usd_for_band(score_band) -> float:
+    mult = STAGE1_BAND_SIZE_MULTIPLIER.get(score_band, STAGE1_UNKNOWN_BAND_MULTIPLIER)
+    return round(EXECUTOR_CONFIG.stage1_position_usd * mult, 2)
+
+
 LAUNCHPAD_BY_CHAIN = {
     "solana": "pump.fun",
     "robinhood_chain": "pons/flap.sh",
@@ -48,24 +69,25 @@ def evaluate_stage1(chain: str, token: str, score_band: Optional[str],
     if position_state.has_stage(chain, token, "stage1"):
         return TriggerDecision(False, None, "stage1 already fired for this token")
 
+    position_usd = stage1_position_usd_for_band(score_band)
     committed = position_state.stage_committed_usd("stage1")
     budget = EXECUTOR_CONFIG.stage1_budget_usd()
-    if committed + EXECUTOR_CONFIG.stage1_position_usd > budget:
+    if committed + position_usd > budget:
         return TriggerDecision(
             False, None,
             f"stage1 budget exhausted: ${committed:.2f} committed of ${budget:.2f} budget "
-            f"(a ${EXECUTOR_CONFIG.stage1_position_usd:.2f} entry would exceed it)"
+            f"(a ${position_usd:.2f} band-{score_band or '?'}-sized entry would exceed it)"
         )
 
     if score_band in ("A", "B"):
         return TriggerDecision(True, "stage1", f"structural score band {score_band}",
-                                EXECUTOR_CONFIG.stage1_position_usd)
+                                position_usd)
     if deployer_tier in ("elite", "good"):
-        return TriggerDecision(True, "stage1", f"deployer tier {deployer_tier}",
-                                EXECUTOR_CONFIG.stage1_position_usd)
+        return TriggerDecision(True, "stage1", f"deployer tier {deployer_tier} (band {score_band or '?'})",
+                                position_usd)
     if convergence_count >= 2:
-        return TriggerDecision(True, "stage1", f"{convergence_count}-wallet convergence",
-                                EXECUTOR_CONFIG.stage1_position_usd)
+        return TriggerDecision(True, "stage1", f"{convergence_count}-wallet convergence (band {score_band or '?'})",
+                                position_usd)
 
     return TriggerDecision(False, None, "no stage1 trigger condition met")
 
