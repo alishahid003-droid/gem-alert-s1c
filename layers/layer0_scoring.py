@@ -1179,6 +1179,23 @@ def fetch_geckoterminal_new_pools(network: str) -> dict:
     return get_json(f"{CONFIG.geckoterminal_base_url}/networks/{network}/new_pools")
 
 
+def _gt_float(val):
+    """GeckoTerminal's JSON:API response encodes every numeric attribute
+    (price, fdv, market cap, volume, reserve) as a JSON STRING, not a
+    number -- confirmed live Sept 28, 2026 when score_geckoterminal_pools
+    crashed with TypeError: unsupported operand type(s) for /: 'str' and
+    'str' on the very first real poll run. Coerces to float here, once,
+    at the flatten boundary, so every downstream consumer (RawSignals,
+    _safe_div, scheduler.py's state.record_mc_point) gets a real number.
+    Falls back to None on anything unparsable rather than guessing."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def flatten_geckoterminal_pools(gt_json) -> list:
     """GeckoTerminal's JSON:API-style response nests every real field inside
     data[i]["attributes"], and the base token's contract address lives in
@@ -1187,7 +1204,8 @@ def flatten_geckoterminal_pools(gt_json) -> list:
     confirmed against the GeckoTerminal API reference (apiguide.
     geckoterminal.com). This flattens that into the same flat-dict shape
     score_geckoterminal_pools expects, one dict per pool, address already
-    stripped of its "<network>_" prefix."""
+    stripped of its "<network>_" prefix. Every numeric field is coerced
+    via _gt_float since GeckoTerminal serializes them as strings."""
     if not isinstance(gt_json, dict):
         return []
     out = []
@@ -1201,11 +1219,11 @@ def flatten_geckoterminal_pools(gt_json) -> list:
         out.append({
             "address": address,
             "name": attrs.get("name"),
-            "price_usd": attrs.get("base_token_price_usd"),
-            "fdv_usd": attrs.get("fdv_usd"),
-            "market_cap_usd": attrs.get("market_cap_usd"),
-            "volume_24h_usd": (attrs.get("volume_usd") or {}).get("h24"),
-            "liquidity_usd": attrs.get("reserve_in_usd"),
+            "price_usd": _gt_float(attrs.get("base_token_price_usd")),
+            "fdv_usd": _gt_float(attrs.get("fdv_usd")),
+            "market_cap_usd": _gt_float(attrs.get("market_cap_usd")),
+            "volume_24h_usd": _gt_float((attrs.get("volume_usd") or {}).get("h24")),
+            "liquidity_usd": _gt_float(attrs.get("reserve_in_usd")),
             "pool_created_at": attrs.get("pool_created_at"),
         })
     return out
