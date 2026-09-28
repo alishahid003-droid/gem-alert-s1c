@@ -49,19 +49,33 @@ class Alert:
 
 
 def send_telegram_message(text: str) -> dict:
+    """Real bug found and fixed live Sept 28 2026: a network-level failure
+    here (DNS resolution failure, connection refused, timeout -- e.g. a
+    momentary internet/DNS hiccup on Ali's own PC, caught live mid-run)
+    used to raise all the way up through send_alert -> run_poll_fast and
+    crash the ENTIRE poll cycle. Every other network call in this codebase
+    (MadeOnSol, Mobula, CoinDesk, etc.) fails closed and lets the cycle
+    continue -- this was the one exception, and because it's called from
+    inside every layer's alert-sending step, a single bad Telegram send
+    could abort the run before it ever reached Stage1/Stage2's buy-trigger
+    checks further down in run_poll_fast. One missed alert should never
+    cost a missed trade."""
     if not CONFIG.telegram_ready():
         return {"sent": False, "reason": "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured"}
     url = f"https://api.telegram.org/bot{CONFIG.telegram_bot_token}/sendMessage"
-    resp = requests.post(
-        url,
-        json={
-            "chat_id": CONFIG.telegram_chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True,
-        },
-        timeout=CONFIG.http_timeout_seconds,
-    )
+    try:
+        resp = requests.post(
+            url,
+            json={
+                "chat_id": CONFIG.telegram_chat_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True,
+            },
+            timeout=CONFIG.http_timeout_seconds,
+        )
+    except requests.exceptions.RequestException as e:
+        return {"sent": False, "reason": f"network-level failure sending to Telegram: {e}"}
     ok = resp.status_code == 200
     return {"sent": ok, "status_code": resp.status_code, "body": resp.text[:500]}
 
