@@ -10,11 +10,18 @@ same discipline as tests/test_rhc_buy.py and test_swap_executor_fills.py.
 """
 import pytest
 from web3 import Web3
+from eth_abi import encode as abi_encode
 
 import state
 import executor.swap_executor as swap_executor
 from executor.config import EXECUTOR_CONFIG
 from executor.rhc_pool_discovery import INITIALIZE_EVENT_TOPIC0, NATIVE_CURRENCY
+from executor.rhc_v4_swap import QUOTE_EXACT_INPUT_SINGLE_SELECTOR
+
+# Real slippage-protection fix, Sept 28 2026: _sell_robinhood_chain now
+# makes one extra eth_call (to UNISWAP_V4_QUOTER_RHC) before building the
+# swap, to get a real amount_out_minimum floor instead of hardcoding 0.
+QUOTER_RESULT_HEX = "0x" + abi_encode(["uint256", "uint256"], [10**17, 100000]).hex()  # quotes 0.1 native out
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +93,8 @@ def _make_harness(monkeypatch, account, erc20_allowance=0, permit2_allowance=0, 
                 return {"ok": True, "result": "0x" + format(erc20_allowance, "064x")}
             if data.startswith(PERMIT2_ALLOWANCE_SELECTOR):
                 return {"ok": True, "result": _encode_uint160_uint48_uint48(permit2_allowance, 0, 0)}
+            if data.startswith("0x" + QUOTE_EXACT_INPUT_SINGLE_SELECTOR.hex()):
+                return {"ok": True, "result": QUOTER_RESULT_HEX}
             raise AssertionError(f"unexpected eth_call to {to}: {data[:10]}")
         if method == "eth_getTransactionCount":
             return {"ok": True, "result": "0x1"}
@@ -160,6 +169,101 @@ def test_sell_computes_filled_usd_from_real_native_balance_diff(monkeypatch):
     log = state.get_trade_log(limit=5)
     assert len(log) == 1
     assert log[0]["side"] == "sell" and log[0]["ok"] is True
+
+
+def test_sell_sets_a_real_slippage_floor_from_the_quoter(monkeypatch):
+    """Real bug, fixed Sept 28 2026: amount_out_minimum used to be
+    hardcoded to 0 on every RHC sell too. Confirms the calldata builder
+    receives a real, quote-derived floor when the Quoter answers."""
+    from eth_account import Account
+    account = Account.create()
+    monkeypatch.setattr(EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(EXECUTOR_CONFIG, "rhc_private_key", account.key.hex())
+    huge = 2 ** 150
+    _make_harness(monkeypatch, account, erc20_allowance=huge, permit2_allowance=huge)
+
+    captured = {}
+    real_builder = swap_executor.build_v4_exact_in_single_calldata
+
+    def spying_builder(pool_key, zero_for_one, amount_in, amount_out_minimum, deadline, hook_data=None):
+        captured["amount_out_minimum"] = amount_out_minimum
+        return real_builder(pool_key, zero_for_one, amount_in, amount_out_minimum, deadline, hook_data)
+
+    monkeypatch.setattr(swap_executor, "build_v4_exact_in_single_calldata", spying_builder)
+
+    result = swap_executor.execute_sell("robinhood_chain", TOKEN, amount_tokens=100.0, reason="test sell")
+    assert result.ok, result.reason
+
+    quoted_out = 10 ** 17  # QUOTER_RESULT_HEX quotes 0.1 native out
+    expected_floor = int(quoted_out * (1 - swap_executor.RHC_SELL_SLIPPAGE_TOLERANCE))
+    assert captured["amount_out_minimum"] == expected_floor
+    assert captured["amount_out_minimum"] > 0  # the actual bug: this used to always be 0
+
+
+def test_sell_falls_back_to_zero_floor_when_no_quote_available_but_still_lands(monkeypatch):
+    """Unlike the buy side, a sell must not refuse just because the Quoter
+    is unreachable -- a rug event is exactly the scenario where a sell
+    most needs to land AND where supporting data is most likely to be
+    degraded. Confirms the sell still succeeds (with an unprotected floor
+    of 0, same as before this fix, but only as a last resort)."""
+    from eth_account import Account
+    account = Account.create()
+    monkeypatch.setattr(EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(EXECUTOR_CONFIG, "rhc_private_key", account.key.hex())
+    huge = 2 ** 150
+    log = _make_initialize_log(NATIVE_CURRENCY, TOKEN, 3000, 60, "0x" + "00" * 20, block=1000)
+
+    def fake_get_json(url, params=None, **kw):
+        return {"ok": True, "json": [
+            {"quoteToken": {"address": NATIVE_CURRENCY}, "priceUsd": "2.0", "priceNative": "1.0",
+             "liquidity": {"usd": 50000}},
+        ]}
+    monkeypatch.setattr(swap_executor, "get_json", fake_get_json)
+
+    def fake_rpc_call(chain, method, params):
+        if method == "eth_blockNumber":
+            return {"ok": True, "result": hex(2000)}
+        if method == "eth_getLogs":
+            return {"ok": True, "result": [log]}
+        if method == "eth_call":
+            data = params[0]["data"]
+            if data.startswith(DECIMALS_SELECTOR):
+                return {"ok": True, "result": "0x" + format(18, "064x")}
+            if data.startswith(ERC20_ALLOWANCE_SELECTOR):
+                return {"ok": True, "result": "0x" + format(huge, "064x")}
+            if data.startswith(PERMIT2_ALLOWANCE_SELECTOR):
+                return {"ok": True, "result": _encode_uint160_uint48_uint48(huge, 0, 0)}
+            if data.startswith("0x" + QUOTE_EXACT_INPUT_SINGLE_SELECTOR.hex()):
+                return {"ok": False, "reason": "rpc timeout"}  # Quoter unreachable
+            raise AssertionError(data[:10])
+        if method == "eth_getTransactionCount":
+            return {"ok": True, "result": "0x1"}
+        if method == "eth_gasPrice":
+            return {"ok": True, "result": "0x3b9aca00"}
+        if method == "eth_sendRawTransaction":
+            return {"ok": True, "result": "0xsellhashfallback"}
+        if method == "eth_getTransactionReceipt":
+            return {"ok": True, "result": {"status": "0x1", "gasUsed": "0x5208", "logs": []}}
+        if method == "eth_getBalance":
+            return {"ok": True, "result": hex(10 * 10 ** 18)}
+        raise AssertionError(method)
+
+    monkeypatch.setattr(swap_executor, "rpc_call", fake_rpc_call)
+    import executor.rhc_pool_discovery as rhc_pool_discovery
+    monkeypatch.setattr(rhc_pool_discovery, "rpc_call", fake_rpc_call)
+
+    captured = {}
+    real_builder = swap_executor.build_v4_exact_in_single_calldata
+
+    def spying_builder(pool_key, zero_for_one, amount_in, amount_out_minimum, deadline, hook_data=None):
+        captured["amount_out_minimum"] = amount_out_minimum
+        return real_builder(pool_key, zero_for_one, amount_in, amount_out_minimum, deadline, hook_data)
+
+    monkeypatch.setattr(swap_executor, "build_v4_exact_in_single_calldata", spying_builder)
+
+    result = swap_executor.execute_sell("robinhood_chain", TOKEN, amount_tokens=100.0, reason="test sell")
+    assert result.ok, result.reason  # still lands, unlike the buy side
+    assert captured["amount_out_minimum"] == 0
 
 
 def test_sell_refuses_when_no_pool_found(monkeypatch):

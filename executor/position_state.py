@@ -49,23 +49,74 @@ def has_stage(chain: str, token: str, stage: str) -> bool:
     return bool(pos and stage in pos.get("stages", {}))
 
 
-def record_fill(chain: str, token: str, amount_tokens: Optional[float]):
+def record_fill(chain: str, token: str, amount_tokens: Optional[float], tx_signature: Optional[str] = None):
     """Adds a REAL, on-chain-confirmed token quantity to the position's
     running total -- called once per successful buy, with
     ExecutionResult.filled_amount_tokens (never the requested USD size).
     Without this, moonbag.check_and_trim() reads amount_tokens=0 off every
     position and every trim silently sells nothing. A None or non-positive
-    amount is deliberately ignored rather than zeroing out an existing
-    total -- a fill-parsing failure on one call shouldn't erase a real
-    quantity recorded by an earlier one (e.g. Stage 1 filled fine, Stage 2's
-    fill-amount parse failed for an unrelated reason)."""
+    amount is deliberately ignored (never treated as "add 0") rather than
+    zeroing out an existing total -- a fill-parsing failure on one call
+    shouldn't erase a real quantity recorded by an earlier one (e.g. Stage 1
+    filled fine, Stage 2's fill-amount parse failed for an unrelated reason).
+
+    Real gap this closes (Sept 28 2026): a buy whose on-chain tx SUCCEEDED
+    but whose fill-amount parsing failed (or a "sent but could not confirm"
+    result that still carries a tx_signature) used to look IDENTICAL to a
+    position that was opened but never bought into at all -- amount_tokens
+    stays unset either way, so moonbag/defensive_sell can't tell "we have
+    no idea how many tokens we hold" apart from "we hold none." Now that
+    case is tagged fill_status="unconfirmed_amount" with the tx_signature
+    recorded, so it's visible for manual reconciliation instead of silently
+    indistinguishable from an unopened position."""
     if amount_tokens is None or amount_tokens <= 0:
+        pos = get_position(chain, token)
+        if pos and tx_signature:
+            pos["fill_status"] = "unconfirmed_amount"
+            pos.setdefault("unconfirmed_fills", []).append({"tx_signature": tx_signature, "ts": time.time()})
+            state.set_value(_key(chain, token), pos)
         return
     pos = get_position(chain, token)
     if not pos:
         return
     pos["amount_tokens"] = pos.get("amount_tokens", 0.0) + amount_tokens
+    pos["fill_status"] = "confirmed"
     state.set_value(_key(chain, token), pos)
+
+
+def mark_stage_buy_failed(chain: str, token: str, stage: str, reason: str = ""):
+    """Called when the real buy for a stage that just fired failed outright
+    (ExecutionResult.ok is False). Deliberately does NOT remove the stage
+    entry or clear has_stage() -- triggers.evaluate_stage1/2 use has_stage()
+    to guarantee a stage only ever fires ONCE per token
+    (test_stage1_already_fired_blocks_second_entrypoint_call encodes this on
+    purpose: retrying a persistently-failing token every single poll cycle
+    forever would be its own bug, hammering the same dead RPC/liquidity
+    problem repeatedly). A failed buy is still a real, final outcome for
+    that stage -- it just isn't a MONEY outcome.
+
+    Real bug this closes instead (Sept 28 2026): record_stage_entry runs
+    BEFORE the buy is attempted (the trade decision, including committing
+    usd_amount to total_usd, is locked in ahead of the network call) -- so a
+    buy that fails outright used to leave that usd_amount permanently
+    counted in stage_committed_usd() forever, with zero tokens ever
+    received, silently shrinking the real trading budget on every failed
+    buy with no recovery path. Tagging the stage entry buy_status='failed'
+    lets stage_committed_usd() exclude it from committed budget (see that
+    function) while has_stage() still reports the stage as fired."""
+    pos = get_position(chain, token)
+    if not pos or stage not in pos.get("stages", {}):
+        return None
+    pos["stages"][stage]["buy_status"] = "failed"
+    pos["stages"][stage]["fail_reason"] = reason
+    # Recompute total_usd (real cost basis) the same way stage_committed_usd
+    # now does -- a failed stage never actually spent its usd_amount, so it
+    # shouldn't inflate the basis used for close_position's pnl_usd either.
+    pos["total_usd"] = sum(
+        s["usd_amount"] for s in pos["stages"].values() if s.get("buy_status") != "failed"
+    )
+    state.set_value(_key(chain, token), pos)
+    return pos
 
 
 def close_position(chain: str, token: str, reason: str, exit_usd: Optional[float] = None):
@@ -213,6 +264,12 @@ def stage_committed_usd(stage: str) -> float:
     for pos in list_open_positions():
         entry = pos.get("stages", {}).get(stage)
         if not entry:
+            continue
+        if entry.get("buy_status") == "failed":
+            # See mark_stage_buy_failed's docstring: a failed buy still
+            # counts as "fired" (has_stage stays True, no re-fire) but
+            # never actually spent this budget, so it must not keep
+            # counting against it forever.
             continue
         remaining = remaining_pct(pos["chain"], pos["token"])
         total += entry["usd_amount"] * remaining

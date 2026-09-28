@@ -116,3 +116,44 @@ def test_build_calldata_defaults_hook_data_to_empty_bytes():
     _, params = abi_decode(["bytes", "bytes[]"], inputs[0])
     decoded = abi_decode([rvs.EXACT_INPUT_SINGLE_ABI_TYPE], params[0])[0]
     assert decoded[-1] == b""
+
+
+# Added Sept 28 2026 -- real slippage-protection fix, see this module's
+# QUOTE_EXACT_INPUT_SINGLE_SELECTOR docstring.
+
+def test_quote_selector_matches_official_iv4quoter_signature():
+    # Computed here via keccak256 of the exact signature Uniswap's own
+    # docs give for IV4Quoter.quoteExactInputSingle -- this test is really
+    # checking the ABI-type-string construction, not just asserting a
+    # literal (a typo'd type string would silently produce a DIFFERENT,
+    # wrong-but-valid-looking selector that reverts on every real call).
+    from eth_utils import function_signature_to_4byte_selector
+    expected = function_signature_to_4byte_selector(
+        "quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))"
+    )
+    assert rvs.QUOTE_EXACT_INPUT_SINGLE_SELECTOR == expected
+
+
+def test_build_quote_calldata_starts_with_quote_selector_and_round_trips():
+    calldata = rvs.build_quote_exact_input_single_calldata(POOL_KEY, True, 10**18)
+    assert calldata[:4] == rvs.QUOTE_EXACT_INPUT_SINGLE_SELECTOR
+    decoded = abi_decode([rvs.QUOTE_EXACT_SINGLE_PARAMS_ABI_TYPE], calldata[4:])[0]
+    pool_key_tuple, zero_for_one, exact_amount, hook_data = decoded
+    assert pool_key_tuple[0] == POOL_KEY["currency0"]
+    assert pool_key_tuple[2] == POOL_KEY["fee"]
+    assert zero_for_one is True
+    assert exact_amount == 10**18
+    assert hook_data == b""
+
+
+def test_build_quote_calldata_rejects_non_positive_or_oversized_amount():
+    with pytest.raises(ValueError):
+        rvs.build_quote_exact_input_single_calldata(POOL_KEY, True, 0)
+    with pytest.raises(ValueError):
+        rvs.build_quote_exact_input_single_calldata(POOL_KEY, True, 2 ** 128)
+
+
+def test_decode_quote_result_returns_amount_out_only():
+    from eth_abi import encode as abi_encode
+    raw = abi_encode(["uint256", "uint256"], [123456789, 50000])
+    assert rvs.decode_quote_exact_input_single_result(raw) == 123456789

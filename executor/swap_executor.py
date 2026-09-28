@@ -81,7 +81,11 @@ from utils.http import get_json, post_json
 from executor.config import EXECUTOR_CONFIG
 from executor.rpc_pool import rpc_call
 from executor.rhc_pool_discovery import find_v4_pool, NATIVE_CURRENCY as RHC_NATIVE_CURRENCY
-from executor.rhc_v4_swap import build_v4_exact_in_single_calldata
+from executor.rhc_v4_swap import (
+    build_v4_exact_in_single_calldata,
+    build_quote_exact_input_single_calldata,
+    decode_quote_exact_input_single_result,
+)
 from links import DEXSCREENER_CHAIN_SLUG
 
 PANCAKESWAP_V2_ROUTER_BSC = "0x10ED43C718714eb63d5aA57B78B54704E256024E"  # FIXED Sept 25, 2026: previous value was missing its trailing "E" (39 hex chars instead of 40 -- an invalid address that would have failed every BSC buy). Re-verified against PancakeSwap's own official npm package (@pancakeswap/smart-router, V2_ROUTER_ADDRESS[ChainId.BSC]), not a web summary -- confirmed via is_address() == True and Web3.to_checksum_address() round-tripping to this exact casing.
@@ -98,6 +102,52 @@ UNISWAP_V4_POOL_MANAGER_RHC = "0x8366a39cc670b4001a1121b8f6a443a643e40951"
 UNISWAP_V4_QUOTER_RHC = "0x8dc178efb8111bb0973dd9d722ebeff267c98f94"
 PERMIT2_RHC = "0x000000000022D473030F116dDEE9F6B43aC78BA3"  # canonical cross-chain address, matches known value
 ROBINHOOD_CHAIN_ID = 4663
+
+# Real slippage-protection fix, Sept 28 2026 -- every RHC/BSC swap below
+# used to hardcode amount_out_minimum/amountOutMin to 0, meaning a
+# sandwich attack or a near-empty pool could let a swap succeed on-chain
+# while returning almost nothing, with no revert and no signal that
+# anything went wrong (ExecutionResult.ok=True either way). Wide on
+# purpose, not tight like Solana's Jupiter-quoted 100/150bps: these are
+# brand-new, thin-liquidity memecoin pools, the quote can be a block or
+# more stale by execution time, and (for BSC's *SupportingFeeOnTransfer*
+# calls specifically) a token's own transfer tax reduces real received
+# tokens independently of price slippage, which a naive tight floor would
+# mistake for a bad fill and revert on constantly. The purpose of this
+# floor is to catch a catastrophic near-zero-output fill (sandwich/rug),
+# not to optimize for best price -- any real floor is a categorical
+# improvement over the previous 0.
+RHC_BUY_SLIPPAGE_TOLERANCE = 0.20
+RHC_SELL_SLIPPAGE_TOLERANCE = 0.25  # wider than buy -- a rug-triggered sell needs to land, not get optimal price
+BSC_BUY_SLIPPAGE_TOLERANCE = 0.20
+BSC_SELL_SLIPPAGE_TOLERANCE = 0.25
+
+
+def _rhc_quote_exact_input_single(pool_key: dict, zero_for_one: bool, exact_amount: int) -> Optional[int]:
+    """Real on-chain quote via IV4Quoter.quoteExactInputSingle (see
+    rhc_v4_swap.py's QUOTE_EXACT_INPUT_SINGLE_SELECTOR docstring for the
+    officially-confirmed ABI) -- the real amountOut a swap of this exact
+    size would currently return, used to build a genuine
+    amount_out_minimum floor. Returns None (never a guess) on any
+    RPC/decode failure; callers decide how to handle a missing quote (buy
+    refuses outright -- see execute_buy_robinhood_chain; sell falls back
+    to a DexScreener-derived estimate -- see execute_sell_robinhood_chain)."""
+    try:
+        calldata = build_quote_exact_input_single_calldata(pool_key, zero_for_one, exact_amount)
+    except ValueError:
+        return None
+    result = rpc_call("robinhood_chain", "eth_call", [
+        {"to": UNISWAP_V4_QUOTER_RHC, "data": "0x" + calldata.hex()}, "latest",
+    ])
+    if not result.get("ok"):
+        return None
+    raw = result.get("result")
+    if not isinstance(raw, str) or not raw.startswith("0x") or len(raw) <= 2:
+        return None
+    try:
+        return decode_quote_exact_input_single_result(bytes.fromhex(raw[2:]))
+    except Exception:  # noqa: BLE001 -- malformed/unexpected quoter response, treat as "no quote available"
+        return None
 
 
 @dataclass
@@ -342,6 +392,30 @@ def _bnb_price_usd() -> Optional[float]:
         return None
 
 
+def _bsc_get_amounts_out(router, amount_in: int, path: list) -> Optional[int]:
+    """Real on-chain quote via PancakeSwap's own getAmountsOut for an
+    arbitrary path -- generalized Sept 28 2026 from _bnb_price_usd's
+    identical WBNB->USDT-only call, now used to build a genuine
+    amountOutMin floor for the real buy/sell swaps (see
+    BSC_BUY_SLIPPAGE_TOLERANCE's module-level comment). Returns the raw
+    integer final-hop output, or None (never a guess) on any RPC/decode
+    failure -- ignores per-token transfer tax by construction, same
+    caveat as the AMM math itself (see the slippage-tolerance comment)."""
+    from web3 import Web3  # type: ignore
+    calldata = _encode_router_call(router, "getAmountsOut", [amount_in, path])
+    result = rpc_call("bsc", "eth_call", [{"to": router.address, "data": calldata}, "latest"])
+    if not result.get("ok"):
+        return None
+    raw = result.get("result")
+    if not isinstance(raw, str) or not raw.startswith("0x"):
+        return None
+    try:
+        decoded = router.w3.codec.decode(["uint256[]"], bytes.fromhex(raw[2:]))
+        return decoded[0][-1]
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
     guard = _refuse_unless_ready("bsc")
     if guard:
@@ -371,10 +445,23 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
         return ExecutionResult(False, f"'{token_address}' is not a valid BSC address -- refusing to build a tx to it")
 
     router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_ABI)
+    wbnb_checksum = Web3.to_checksum_address(WBNB_BSC)
+
+    # Real slippage floor (fixed Sept 28 2026 -- see BSC_BUY_SLIPPAGE_TOLERANCE's
+    # module-level comment): a real on-chain quote via the router's own
+    # getAmountsOut (current-block, not an external API), refusing outright
+    # if it's unavailable rather than falling back to 0 -- same "no
+    # downside to not buying" reasoning as the bnb_price check above.
+    amounts_out_min = _bsc_get_amounts_out(router, bnb_amount_wei, [wbnb_checksum, token_checksum])
+    if amounts_out_min is None:
+        return ExecutionResult(False, "could not get a real on-chain quote for slippage protection -- "
+                                       "refusing to buy with no amountOutMin floor")
+    amount_out_min = int(amounts_out_min * (1 - BSC_BUY_SLIPPAGE_TOLERANCE))
+
     deadline = int(__import__("time").time()) + 300
     calldata = _encode_router_call(
         router, "swapExactETHForTokensSupportingFeeOnTransferTokens",
-        [0, [Web3.to_checksum_address(WBNB_BSC), token_checksum], account.address, deadline],
+        [amount_out_min, [wbnb_checksum, token_checksum], account.address, deadline],
     )
 
     nonce_result = rpc_call("bsc", "eth_getTransactionCount", [account.address, "pending"])
@@ -584,11 +671,23 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
         return ExecutionResult(False, "pool_key's currency0 was not native RHC ether -- refusing to "
                                        "guess swap direction")
 
+    # Real slippage floor (fixed Sept 28 2026 -- see RHC_BUY_SLIPPAGE_TOLERANCE's
+    # module-level comment): a real on-chain quote via the Quoter, refusing
+    # outright if none is available rather than falling back to 0 -- unlike
+    # a sell, there's no downside to not buying, so this fails closed the
+    # same way the "no live native price" check above already does.
+    quoted_out = _rhc_quote_exact_input_single(pool_key, zero_for_one=True, exact_amount=amount_in_wei)
+    if quoted_out is None:
+        return ExecutionResult(False, "could not get a real on-chain quote for slippage protection -- "
+                                       "refusing to buy with no amount_out_minimum floor")
+    amount_out_minimum = int(quoted_out * (1 - RHC_BUY_SLIPPAGE_TOLERANCE))
+
     account = Account.from_key(EXECUTOR_CONFIG.rhc_private_key)
     deadline = int(__import__("time").time()) + 300
     try:
         calldata = build_v4_exact_in_single_calldata(
-            pool_key, zero_for_one=True, amount_in=amount_in_wei, amount_out_minimum=0, deadline=deadline,
+            pool_key, zero_for_one=True, amount_in=amount_in_wei, amount_out_minimum=amount_out_minimum,
+            deadline=deadline,
         )
     except ValueError as exc:
         return ExecutionResult(False, f"could not build v4 swap calldata: {exc}")
@@ -874,32 +973,31 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
     router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_SELL_ABI)
 
     # Estimated BNB-out via the router's own getAmountsOut, taken right before
-    # the swap -- used only to price filled_usd for the dashboard/realized-P&L
-    # (Tasks Left #3/#4, Sept 25 2026); this is a pre-trade estimate, not a
-    # real balance diff like the Solana sell path gets, since PancakeSwap V2
-    # sends native BNB via an internal call that doesn't show up as a log --
-    # still real and quote-derived, not a guess, and far better than the
-    # previous behavior of leaving filled_usd unset on every BSC sell.
+    # the swap -- used to price filled_usd for the dashboard/realized-P&L
+    # (Tasks Left #3/#4, Sept 25 2026) AND (fixed Sept 28 2026, see
+    # BSC_SELL_SLIPPAGE_TOLERANCE's module-level comment) as the real
+    # slippage floor -- this is a pre-trade estimate, not a real balance
+    # diff like the Solana sell path gets, since PancakeSwap V2 sends
+    # native BNB via an internal call that doesn't show up as a log --
+    # still real and quote-derived, not a guess.
     filled_usd = None
+    amount_out_min = 0  # falls back to 0 only if the quote itself is unavailable -- a sell that fails
+                         # to execute (e.g. during a rug, exactly when this call is most likely to be
+                         # degraded) is worse than one that executes unprotected; see the RHC sell path's
+                         # identical reasoning.
     try:
-        amounts_out_calldata = _encode_router_call(router, "getAmountsOut", [
-            raw_amount, [token_checksum, Web3.to_checksum_address(WBNB_BSC)],
-        ])
-        amounts_out_result = rpc_call("bsc", "eth_call", [{"to": router_addr, "data": amounts_out_calldata}, "latest"])
-        if amounts_out_result.get("ok"):
-            raw = amounts_out_result.get("result")
-            if isinstance(raw, str) and raw.startswith("0x"):
-                decoded = w3.codec.decode(["uint256[]"], bytes.fromhex(raw[2:]))
-                bnb_out_wei = decoded[0][1]
-                bnb_price = _bnb_price_usd()
-                if bnb_price:
-                    filled_usd = (bnb_out_wei / 10**18) * bnb_price
+        bnb_out_wei = _bsc_get_amounts_out(router, raw_amount, [token_checksum, Web3.to_checksum_address(WBNB_BSC)])
+        if bnb_out_wei:
+            amount_out_min = int(bnb_out_wei * (1 - BSC_SELL_SLIPPAGE_TOLERANCE))
+            bnb_price = _bnb_price_usd()
+            if bnb_price:
+                filled_usd = (bnb_out_wei / 10**18) * bnb_price
     except Exception:  # noqa: BLE001 -- pricing must never block a real sell
         filled_usd = None
 
     deadline = int(__import__("time").time()) + 300
     swap_calldata = _encode_router_call(router, "swapExactTokensForETHSupportingFeeOnTransferTokens", [
-        raw_amount, 0, [token_checksum, Web3.to_checksum_address(WBNB_BSC)], account.address, deadline,
+        raw_amount, amount_out_min, [token_checksum, Web3.to_checksum_address(WBNB_BSC)], account.address, deadline,
     ])
     swap_result = _sign_and_send_evm_tx("bsc", 56, account, router_addr, 0, swap_calldata)
     if not swap_result.ok:
@@ -1024,10 +1122,21 @@ def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> Execution
     if not zero_for_one:
         return ExecutionResult(False, "pool_key's currency1 was not this token -- refusing to guess swap direction")
 
+    # Real slippage floor (fixed Sept 28 2026 -- see RHC_SELL_SLIPPAGE_TOLERANCE's
+    # module-level comment). Unlike the buy side, a missing quote does NOT
+    # refuse the sell outright -- a sell that fails to execute (e.g. during
+    # a rug, exactly when DexScreener/RPC data is most likely to be
+    # degraded) is worse than one that executes at an unprotected price;
+    # falling back to 0 here keeps the previous (pre-fix) behavior only as
+    # a last resort, not as the default.
+    quoted_out = _rhc_quote_exact_input_single(pool_key, zero_for_one=False, exact_amount=raw_amount)
+    amount_out_minimum = int(quoted_out * (1 - RHC_SELL_SLIPPAGE_TOLERANCE)) if quoted_out else 0
+
     deadline = int(__import__("time").time()) + 300
     try:
         calldata = build_v4_exact_in_single_calldata(
-            pool_key, zero_for_one=False, amount_in=raw_amount, amount_out_minimum=0, deadline=deadline,
+            pool_key, zero_for_one=False, amount_in=raw_amount, amount_out_minimum=amount_out_minimum,
+            deadline=deadline,
         )
     except ValueError as exc:
         return ExecutionResult(False, f"could not build v4 swap calldata: {exc}")

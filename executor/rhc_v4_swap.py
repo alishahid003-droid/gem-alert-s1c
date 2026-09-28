@@ -54,7 +54,7 @@ Permit2 approve/permit step first, which this module does not attempt.
 """
 from typing import Optional
 
-from eth_abi import encode as abi_encode
+from eth_abi import encode as abi_encode, decode as abi_decode
 from eth_utils import function_signature_to_4byte_selector
 
 V4_SWAP_COMMAND = 0x10
@@ -68,6 +68,22 @@ EXACT_INPUT_SINGLE_ABI_TYPE = f"({POOL_KEY_ABI_TYPE},bool,uint128,uint128,bytes)
 EXECUTE_SELECTOR = function_signature_to_4byte_selector("execute(bytes,bytes[],uint256)")
 
 UINT128_MAX = 2 ** 128 - 1
+
+# Added Sept 28 2026, real slippage-protection fix (see swap_executor.py's
+# amount_out_minimum usage) -- previously every RHC swap hardcoded
+# amount_out_minimum=0, meaning a swap could return near-zero real output
+# and still succeed on-chain with no revert. IV4Quoter.quoteExactInputSingle
+# gives a REAL on-chain quote (via V4Quoter.sol's standard "swap, then
+# revert with the result, caught internally" pattern -- callable with a
+# plain eth_call, no state actually changes). Confirmed verbatim against
+# Uniswap's own official docs (docs.uniswap.org/contracts/v4/reference/
+# periphery/interfaces/IV4Quoter): QuoteExactSingleParams is
+# (PoolKey poolKey, bool zeroForOne, uint128 exactAmount, bytes hookData),
+# returns (uint256 amountOut, uint256 gasEstimate).
+QUOTE_EXACT_SINGLE_PARAMS_ABI_TYPE = f"({POOL_KEY_ABI_TYPE},bool,uint128,bytes)"
+QUOTE_EXACT_INPUT_SINGLE_SELECTOR = function_signature_to_4byte_selector(
+    f"quoteExactInputSingle({QUOTE_EXACT_SINGLE_PARAMS_ABI_TYPE})"
+)
 
 
 def _pool_key_tuple(pool_key: dict) -> tuple:
@@ -123,3 +139,33 @@ def build_v4_exact_in_single_calldata(pool_key: dict, zero_for_one: bool, amount
 
     args = abi_encode(["bytes", "bytes[]", "uint256"], [commands, [v4_swap_input], deadline])
     return EXECUTE_SELECTOR + args
+
+
+def build_quote_exact_input_single_calldata(pool_key: dict, zero_for_one: bool, exact_amount: int,
+                                             hook_data: Optional[bytes] = None) -> bytes:
+    """Returns calldata for IV4Quoter.quoteExactInputSingle -- a REAL
+    on-chain quote for what a swap would actually return, used to build a
+    genuine amount_out_minimum floor (see this module's top-of-file note
+    and swap_executor.py's usage). Pure function -- caller sends this via
+    eth_call against UNISWAP_V4_QUOTER_RHC and decodes the result with
+    decode_quote_exact_input_single_result below.
+
+    exact_amount: raw integer input amount (uint128 range, same convention
+    as build_v4_exact_in_single_calldata's amount_in)."""
+    if exact_amount <= 0:
+        raise ValueError("exact_amount must be positive")
+    if exact_amount > UINT128_MAX:
+        raise ValueError("exact_amount must fit in uint128")
+    pool_key_tuple = _pool_key_tuple(pool_key)
+    params = (pool_key_tuple, zero_for_one, exact_amount, hook_data or b"")
+    return QUOTE_EXACT_INPUT_SINGLE_SELECTOR + abi_encode([QUOTE_EXACT_SINGLE_PARAMS_ABI_TYPE], [params])
+
+
+def decode_quote_exact_input_single_result(raw_result: bytes) -> int:
+    """Decodes IV4Quoter.quoteExactInputSingle's (uint256 amountOut,
+    uint256 gasEstimate) return value and returns just amountOut -- the
+    real expected output for the amount_out_minimum floor. Raises on
+    malformed input; callers should catch and treat as "no quote
+    available" rather than let a decode error crash a live poll cycle."""
+    amount_out, _gas_estimate = abi_decode(["uint256", "uint256"], raw_result)
+    return amount_out

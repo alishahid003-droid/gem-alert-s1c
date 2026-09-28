@@ -40,7 +40,7 @@ _BUY_FUNCTIONS = {
 }
 
 
-def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float) -> dict:
+def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float, stage: Optional[str] = None) -> dict:
     """Actually calls the real buy (guarded by EXECUTION_ENABLED -- inert
     by construction until that's turned on, same guard every execute_buy_*
     already has) and, on success, records the REAL filled token quantity
@@ -48,13 +48,25 @@ def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float) -> d
     with. Previously this module only decided a position WOULD be opened
     and never called swap_executor at all -- meaning even with
     EXECUTION_ENABLED=true, nothing here actually bought anything, and even
-    if it had, the trim ladder had no real token quantity to trim against."""
+    if it had, the trim ladder had no real token quantity to trim against.
+
+    Fixed Sept 28 2026: on an outright buy failure (result.ok is False),
+    tags the stage entry position_state.record_stage_entry already
+    committed before this call as buy_status='failed' -- otherwise that
+    usd_amount permanently counted against stage_committed_usd's budget
+    forever, with zero tokens ever received. Does NOT un-fire the stage
+    (has_stage() stays True) -- see position_state.mark_stage_buy_failed's
+    docstring for why retrying a persistently-failing token every cycle
+    would be its own bug. `stage` is optional only so this function stays
+    callable the old way; both real callers below always pass it."""
     buy_fn = _BUY_FUNCTIONS.get(chain)
     if buy_fn is None:
         return {"attempted": False, "reason": f"no buy function wired for chain '{chain}'"}
     result = buy_fn(token, usd_amount)
     if result.ok:
-        position_state.record_fill(chain, token, result.filled_amount_tokens)
+        position_state.record_fill(chain, token, result.filled_amount_tokens, tx_signature=result.tx_signature)
+    elif stage is not None:
+        position_state.mark_stage_buy_failed(chain, token, stage, reason=result.reason)
     return {
         "attempted": True, "ok": result.ok, "reason": result.reason,
         "tx_signature": result.tx_signature, "filled_amount_tokens": result.filled_amount_tokens,
@@ -80,7 +92,7 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
         double_confirmed=False,  # a lone Stage 1 fire can't be double-confirmed yet
         insider_ratio=insider_ratio, has_news_catalyst=has_news_catalyst,
     )
-    buy_result = _attempt_buy_and_record_fill(chain, token, decision.position_usd)
+    buy_result = _attempt_buy_and_record_fill(chain, token, decision.position_usd, stage="stage1")
     return {
         "fired": True, "stage": "stage1", "position_usd": decision.position_usd,
         "reason": decision.reason, "conviction_score": conviction["score"],
@@ -107,7 +119,7 @@ def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[f
         chain, token, deployer_tier=deployer_tier, convergence_count=fomo_convergence_count,
         double_confirmed=double_confirmed, insider_ratio=insider_ratio, has_news_catalyst=has_news_catalyst,
     )
-    buy_result = _attempt_buy_and_record_fill(chain, token, decision.position_usd)
+    buy_result = _attempt_buy_and_record_fill(chain, token, decision.position_usd, stage="stage2")
     return {
         "fired": True, "stage": "stage2", "position_usd": decision.position_usd,
         "reason": decision.reason, "double_confirmed": double_confirmed,
