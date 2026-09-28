@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd, fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, score_geckoterminal_pools, GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -657,7 +657,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         alert.set_tag("Dev holding", dev_tag)
     if age_tag:
         alert.set_tag("Deployer age", age_tag)
-    layer_name = "layer0b" if source == "mobula" else "layer0"
+    layer_name = "layer0b" if source in ("mobula", "geckoterminal") else "layer0"
     send_res = _alert(alert, layer_name)
     print(f"[layer0/8:{chain}] {mint} band {sr.band} -> {send_res}")
     # Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
@@ -1045,6 +1045,41 @@ def _run_layer1_cycle(_summary_path=None):
     return alerts_sent, madeonsol_calls
 
 
+def _run_geckoterminal_fallback(chain: str, board) -> int:
+    """Fallback discovery source for BSC/Base Layer 0b, only reached when
+    Mobula's own fetch failed or MOBULA_API_KEY isn't set (Ali, Sept 28
+    2026 -- Mobula's free plan is confirmed permanently dead, HTTP 403 on
+    /api/2/pulse, not a transient outage). GeckoTerminal's own /new_pools
+    call costs zero MadeOnSol/Mobula budget; the per-token GoPlus security
+    enrichment inside score_geckoterminal_pools is capped (see
+    layer0_scoring.GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE) so this can't quietly
+    balloon into an unbounded number of calls on a busy new-pools page.
+    Returns the number of alerts actually delivered, same convention as
+    every other _run_* helper in this file."""
+    alerts_sent = 0
+    gt_network = chain  # GeckoTerminal's own slug already matches this codebase's chain name for bsc/base
+    raw = _safe(fetch_geckoterminal_new_pools, gt_network)
+    if not (isinstance(raw, dict) and raw.get("ok")):
+        detail = raw.get("reason") if isinstance(raw, dict) else describe_fetch_failure({"raw": raw})
+        print(f"[layer0b/8:{chain}] GeckoTerminal fallback fetch failed: {detail}")
+        if _stats():
+            _stats().note_module(f"layer0b pulse ({chain}) [GeckoTerminal fallback]", False, detail)
+        return alerts_sent
+    if _stats():
+        _stats().note_module(f"layer0b pulse ({chain}) [GeckoTerminal fallback]", True)
+    items = flatten_geckoterminal_pools(raw.get("json"))
+    for scored in score_geckoterminal_pools(chain, items):
+        mint = scored["address"]
+        mc = scored["raw"].get("market_cap_usd") or scored["raw"].get("fdv_usd")
+        if mint and mc is not None:
+            state.record_mc_point(mint, mc)
+        if _handle_scored(scored, chain, source="geckoterminal", mc=mc, board=board):
+            alerts_sent += 1
+    print(f"[layer0b/8:{chain}] GeckoTerminal fallback: {len(items)} new pool(s) fetched, "
+          f"{min(len(items), GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE)} scored via GoPlus enrichment")
+    return alerts_sent
+
+
 def run_poll_fast_loop():
     """Wraps run_poll_fast() in a real wall-clock loop so discovery actually
     runs on a real cadence, instead of relying on GitHub's `schedule:`
@@ -1343,30 +1378,39 @@ def run_poll_fast():
     # --- Layer 0b: Mobula Pulse, one call per chain, scores every item in
     # that response -- free (no MadeOnSol cost), so this runs every fast
     # cycle rather than waiting for the slow one. ---
-    if CONFIG.mobula_api_key:
-        for chain, chain_id in MOBULA_PULSE_CHAINS:
+    for chain, chain_id in MOBULA_PULSE_CHAINS:
+        mobula_ok = False
+        if CONFIG.mobula_api_key:
             raw = _safe(fetch_mobula_pulse, chain_id)  # ONE call per chain, covers every token in it
-            if not raw.get("ok"):
-                detail = raw["reason"] if "reason" in raw else describe_fetch_failure({"raw": raw})
-                print(f"[layer0b/8:{chain}] pulse fetch failed: {detail}")
+            if raw.get("ok"):
+                mobula_ok = True
                 if _stats():
-                    _stats().note_module(f"layer0b pulse ({chain})", False, detail)
-                continue
+                    _stats().note_module(f"layer0b pulse ({chain}) [Mobula]", True)
+                items = flatten_mobula_pulse_response(raw.get("json"))
+                for scored in score_mobula_pulse_items(chain, items):
+                    mint = scored["address"]
+                    mc = scored["raw"].get("marketCap") or scored["raw"].get("market_cap")
+                    if mint and mc is not None:
+                        state.record_mc_point(mint, mc)
+                    if _handle_scored(scored, chain, source="mobula", mc=mc, board=board):
+                        alerts_sent += 1
+                print(f"[layer0b/8:{chain}] scored {len(items)} Pulse item(s) (1 Mobula call)")
+            else:
+                detail = raw["reason"] if "reason" in raw else describe_fetch_failure({"raw": raw})
+                print(f"[layer0b/8:{chain}] Mobula pulse fetch failed: {detail}")
+                if _stats():
+                    _stats().note_module(f"layer0b pulse ({chain}) [Mobula]", False, detail)
+        else:
+            print(f"[layer0b/8:{chain}] Mobula BLOCKED: MOBULA_API_KEY not set")
             if _stats():
-                _stats().note_module(f"layer0b pulse ({chain})", True)
-            items = flatten_mobula_pulse_response(raw.get("json"))
-            for scored in score_mobula_pulse_items(chain, items):
-                mint = scored["address"]
-                mc = scored["raw"].get("marketCap") or scored["raw"].get("market_cap")
-                if mint and mc is not None:
-                    state.record_mc_point(mint, mc)
-                if _handle_scored(scored, chain, source="mobula", mc=mc, board=board):
-                    alerts_sent += 1
-            print(f"[layer0b/8:{chain}] scored {len(items)} Pulse item(s) (1 Mobula call)")
-    else:
-        print("[layer0b/8] BLOCKED: MOBULA_API_KEY not set")
-        if _stats():
-            _stats().note_module("layer0b pulse (bsc/base)", False, "MOBULA_API_KEY not set")
+                _stats().note_module(f"layer0b pulse ({chain}) [Mobula]", False, "MOBULA_API_KEY not set")
+
+        # GeckoTerminal fallback (Ali, Sept 28 2026) -- only reached when
+        # Mobula didn't come through this cycle, either because the key's
+        # missing or (the real, current situation) its free plan 403s. See
+        # _run_geckoterminal_fallback's docstring.
+        if not mobula_ok:
+            alerts_sent += _run_geckoterminal_fallback(chain, board)
 
     # --- Layer 2b: self-built pump.fun smart-money convergence (Ali, Sept
     # 23 2026). Keyless (free Solana RPC only), so always attempted, no

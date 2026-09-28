@@ -1146,6 +1146,149 @@ def score_mobula_pulse_items(chain: str, items: list) -> list:
     return results
 
 
+# ---------------------------------------------------------------------------
+# GeckoTerminal fallback for BSC/Base (Ali, Sept 28 2026) -- Mobula's free
+# plan is confirmed dead (HTTP 403 "API access is unavailable on the Free
+# plan" on /api/2/pulse, live and repeatable, not a transient outage), so
+# Layer 0b has had ZERO real BSC/Base discovery since that plan changed --
+# a genuine blind spot, not noise. GeckoTerminal's public API
+# (apiguide.geckoterminal.com, confirmed free + keyless, 30 calls/min, no
+# signup) replaces Mobula's discovery feed: GET /networks/{bsc|base}/
+# new_pools returns the newest pools on that chain with real price/fdv/
+# market-cap/volume/liquidity figures -- no MadeOnSol/Mobula budget spent
+# either way. It carries NO security data at all (no holder concentration,
+# no mint/mutability/honeypot flags -- GeckoTerminal is a pure DEX-data
+# aggregator, not a security scanner), so every candidate here is enriched
+# via fetch_goplus_security (already used as Mobula's own fallback above --
+# same GOPLUS_CHAIN_IDS mapping, same call, nothing new to build there).
+# Capped at GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE per chain per cycle (GoPlus's
+# public rate limit is undocumented/unconfirmed for this codebase, same
+# honest-gap caveat as fetch_goplus_security's own docstring) so a busy
+# new-pools page can't quietly burn an unbounded number of GoPlus calls.
+# NOT wired into scheduler.py to REPLACE Mobula -- Mobula is still tried
+# first every cycle (harmless if Ali ever upgrades that plan), and this is
+# the fallback scheduler.py reaches for only when Mobula's own fetch fails.
+GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE = 8
+
+
+def fetch_geckoterminal_new_pools(network: str) -> dict:
+    """network is GeckoTerminal's own network slug -- confirmed "bsc" and
+    "base" (same strings this codebase already uses as its internal chain
+    names, so no extra mapping needed, unlike Mobula's evm:<chainId> or
+    GoPlus's numeric chain-id conventions)."""
+    return get_json(f"{CONFIG.geckoterminal_base_url}/networks/{network}/new_pools")
+
+
+def flatten_geckoterminal_pools(gt_json) -> list:
+    """GeckoTerminal's JSON:API-style response nests every real field inside
+    data[i]["attributes"], and the base token's contract address lives in
+    data[i]["relationships"]["base_token"]["data"]["id"] as "<network>_
+    <address>" (e.g. "bsc_0xabc..."), not as a plain top-level field --
+    confirmed against the GeckoTerminal API reference (apiguide.
+    geckoterminal.com). This flattens that into the same flat-dict shape
+    score_geckoterminal_pools expects, one dict per pool, address already
+    stripped of its "<network>_" prefix."""
+    if not isinstance(gt_json, dict):
+        return []
+    out = []
+    for pool in gt_json.get("data") or []:
+        attrs = pool.get("attributes") or {}
+        rel = ((pool.get("relationships") or {}).get("base_token") or {}).get("data") or {}
+        raw_id = rel.get("id") or ""
+        address = raw_id.split("_", 1)[1] if "_" in raw_id else None
+        if not address:
+            continue  # no base-token address -- nothing to score, an honest skip not a guess
+        out.append({
+            "address": address,
+            "name": attrs.get("name"),
+            "price_usd": attrs.get("base_token_price_usd"),
+            "fdv_usd": attrs.get("fdv_usd"),
+            "market_cap_usd": attrs.get("market_cap_usd"),
+            "volume_24h_usd": (attrs.get("volume_usd") or {}).get("h24"),
+            "liquidity_usd": attrs.get("reserve_in_usd"),
+            "pool_created_at": attrs.get("pool_created_at"),
+        })
+    return out
+
+
+def signals_from_geckoterminal_pool(item: dict, chain: str,
+                                     holder_growth_rate_per_hr: Optional[float] = None) -> RawSignals:
+    """Builds RawSignals for one flattened GeckoTerminal pool. vol/liq and
+    liquidity come straight from GeckoTerminal's own real figures; every
+    security-shaped signal (top10 concentration, LP-lock health, mint/
+    freeze authority equivalents) comes from fetch_goplus_security, since
+    GeckoTerminal itself carries none of that -- same GoPlus fields/parsing
+    Mobula's own fallback path already uses in signals_from_mobula_pulse
+    above, reused here rather than duplicated. top10_holder_pct is summed
+    from GoPlus's own `holders` list when present -- that field's exact
+    shape is NOT yet confirmed live for an EVM token the way the Solana
+    lp_holders shape was (see this module's GoPlus section docstring), so
+    this stays defensive and falls back to None/unknown on anything
+    unexpected rather than risk a wrong percentage."""
+    lp_locked = mint_revoked = freeze_revoked = top10_pct = None
+    address = item.get("address")
+    if address:
+        gp = fetch_goplus_security(chain, address)
+        if gp.get("ok"):
+            d = gp["data"]
+            lp_holders = d.get("lp_holders") or []
+            if lp_holders:
+                locked_pct = sum(float(h.get("percent", 0) or 0) for h in lp_holders if h.get("is_locked"))
+                lp_locked = locked_pct >= 0.5
+            is_mintable = d.get("is_mintable")
+            if is_mintable is not None:
+                mint_revoked = is_mintable == "0"
+            is_blacklisted = d.get("is_blacklisted")
+            is_honeypot = d.get("is_honeypot")
+            if is_blacklisted is not None or is_honeypot is not None:
+                freeze_revoked = (is_blacklisted != "1") and (is_honeypot != "1")
+            holders = d.get("holders")
+            if isinstance(holders, list) and holders:
+                try:
+                    pcts = [float(h.get("percent", 0) or 0) for h in holders[:10]]
+                    total = sum(pcts)
+                    # GoPlus's documented convention elsewhere in this file
+                    # (lp_holders) is a 0-1 fraction, not 0-100 -- if this
+                    # sums past 1.0 it's the wrong unit for this sample, so
+                    # stay unknown rather than report a nonsense percentage.
+                    if 0 < total <= 1.0:
+                        top10_pct = total
+                except (TypeError, ValueError):
+                    pass
+
+    return RawSignals(
+        top10_holder_pct=top10_pct,
+        lp_locked_or_curve_healthy=lp_locked,
+        mint_authority_revoked=mint_revoked,
+        freeze_authority_revoked=freeze_revoked,
+        vol_to_liq_ratio=_safe_div(item.get("volume_24h_usd"), item.get("liquidity_usd")),
+        holder_growth_rate_per_hr=holder_growth_rate_per_hr,
+        bundler_sniper_pct=None,  # no sniper/bundler-wallet signal in either GeckoTerminal or GoPlus
+        liquidity_usd=item.get("liquidity_usd"),
+        is_pregraduation_solana=False,
+    )
+
+
+def score_geckoterminal_pools(chain: str, items: list) -> list:
+    """Mirrors score_mobula_pulse_items' shape exactly (same {"chain",
+    "address", "score", "raw"} dict) so scheduler.py's _handle_scored can
+    consume either source's output identically -- capped to
+    GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE items (newest first, GeckoTerminal's
+    new_pools is already sorted that way) since every item here costs one
+    real GoPlus call, unlike Mobula's single-call-covers-everything shape."""
+    results = []
+    for item in items[:GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE]:
+        address = item.get("address")
+        sig = signals_from_geckoterminal_pool(item, chain)
+        results.append({
+            "chain": chain,
+            "address": address,
+            "score": score_token(sig),
+            "raw": item,
+        })
+    return results
+
+
 def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
     """Single-mint MadeOnSol scoring -- 3 calls (risk/holders/bundle) plus
     one DexScreener call for real vol/liq data (see fetch_dexscreener_vol_liq

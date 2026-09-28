@@ -121,6 +121,13 @@ class Config:
     # because there's genuinely no account or key involved.
     stonkfun_base_url: str = "https://www.stonkfun.xyz/api/public/v1"
     goplus_base_url: str = "https://api.gopluslabs.io/api/v1"
+    # GeckoTerminal (Ali, Sept 28 2026) -- Mobula's free plan is confirmed
+    # dead (HTTP 403 on /api/2/pulse), leaving Layer 0b with zero real
+    # BSC/Base discovery. GeckoTerminal's public API (apiguide.
+    # geckoterminal.com) is free, keyless, 30 calls/min, no signup --
+    # used as scheduler.py's fallback discovery source for those two
+    # chains specifically (see layer0_scoring.fetch_geckoterminal_new_pools).
+    geckoterminal_base_url: str = "https://api.geckoterminal.com/api/v2"
     binance_announcements_url: str = (
         "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
     )
