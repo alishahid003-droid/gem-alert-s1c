@@ -144,7 +144,7 @@ from layers.layer9_sell_mirror import poll_layer9, update_balance_after_sell
 from layers.roster import SELL_WATCH_ROSTER
 from layers.wallet_balance import fetch_wallets_portfolio, extract_balances_for_pairs
 from telegram_alert import Alert, send_alert
-from utils.http import ApiUnreachable
+from utils.http import ApiUnreachable, describe_fetch_failure
 import state
 
 # True only inside a GitHub Actions runner (GitHub sets this automatically on
@@ -1096,7 +1096,7 @@ def run_poll_fast():
                 just_alerted.append(post.get("id"))
             state.mark_cryptopanic_seen(just_alerted)
         else:
-            print(f"[layer4:cryptopanic] fetch failed: {cp.get('reason')}")
+            print(f"[layer4:cryptopanic] fetch failed: {describe_fetch_failure(cp)}")
     else:
         print("[layer4:cryptopanic] BLOCKED: CRYPTOPANIC_AUTH_TOKEN not set (see README -- separate free signup)")
 
@@ -1117,7 +1117,8 @@ def run_poll_fast():
         for chain, chain_id in MOBULA_PULSE_CHAINS:
             raw = _safe(fetch_mobula_pulse, chain_id)  # ONE call per chain, covers every token in it
             if not raw.get("ok"):
-                print(f"[layer0b/8:{chain}] pulse fetch failed")
+                detail = raw["reason"] if "reason" in raw else describe_fetch_failure({"raw": raw})
+                print(f"[layer0b/8:{chain}] pulse fetch failed: {detail}")
                 continue
             items = flatten_mobula_pulse_response(raw.get("json"))
             for scored in score_mobula_pulse_items(chain, items):

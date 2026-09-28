@@ -112,9 +112,9 @@ class ExecutorConfig:
 
     # --- hot wallet keys -- a DEDICATED trading wallet, never Ali's main
     # holdings. Never logged, never included in any alert text. ---
-    solana_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_SOLANA_PRIVATE_KEY"))
-    bsc_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_BSC_PRIVATE_KEY"))
-    rhc_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_RHC_PRIVATE_KEY"))
+    solana_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_SOLANA_PRIVATE_KEY"), repr=False)  # repr=False Sept 28 2026: a dataclass repr prints raw field values -- this one is a real signing key, so it must never land in a log line, pytest assertion diff, or stack trace
+    bsc_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_BSC_PRIVATE_KEY"), repr=False)
+    rhc_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_RHC_PRIVATE_KEY"), repr=False)
 
     # --- public RPC endpoints, no account needed for any of these ---
     # solana_rpc_url / bsc_rpc_url / rhc_rpc_url are SINGLE-endpoint manual
