@@ -158,6 +158,25 @@ class ExecutorConfig:
     # trigger constants (same pattern as triggers.py's venue maps). ---
     moonbag_enabled: bool = field(default_factory=lambda: _env("MOONBAG_ENABLED", "true") == "true")
 
+    # Hard dollar-target ladder (Ali, Sept 28 2026: "hard target these 3
+    # levels...it should run towards this if we have identified moonshot,
+    # shouldn't go out quickly rather try and then gain maximum"). Applied
+    # ONLY to positions already flagged high_conviction (see
+    # moonbag.compute_hard_target_ladder) -- an ordinary entry still uses
+    # the conservative 3x/10x/50x DEFAULT_TRIM_LADDER. These are USD
+    # portfolio-value milestones for THAT position, converted into a
+    # per-position price-multiple ladder at entry time (multiple =
+    # level / that position's own entry usd_amount, since a $20 entry and a
+    # $50 entry need very different multiples to reach the same $7,000).
+    # Real math, stated plainly, not softened: at today's stage1_position_usd
+    # ($20), $7k needs a 350x, $20k needs a 1,000x, $95k needs a 4,750x --
+    # each one individually rarer than the last, and the overwhelming
+    # majority of positions never reach even the FIRST one. This ladder
+    # changes what happens to a position IF it runs that far, not the odds
+    # that any given position does.
+    hard_target_usd_levels: list = field(default_factory=lambda: [7000.0, 20000.0, 95000.0])
+    hard_target_trim_pct: float = field(default_factory=lambda: _env_float("HARD_TARGET_TRIM_PCT", 0.10))
+
     # --- total automation wallet size, used to translate budget_pct above
     # into a dollar cap. Set this to whatever's actually funded into the
     # dedicated hot wallet -- NOT Ali's total holdings. ---

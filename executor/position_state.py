@@ -219,17 +219,29 @@ def record_moonbag_trim(chain: str, token: str, tier_multiple: float,
     return pos
 
 
-def set_trim_ladder(chain: str, token: str, ladder_name: str, score: int):
+def set_trim_ladder(chain: str, token: str, ladder_name: str, score: int, rungs: Optional[list] = None):
     """Called once, right after a Stage 1/Stage 2 fire, to lock in which
     moonbag trim ladder this position uses for its whole life. Locked at
     entry rather than recomputed on every poll so a position doesn't flip
     ladders mid-flight as signals wobble -- the conviction call is made
-    once, with the best information available at entry time."""
+    once, with the best information available at entry time.
+
+    rungs (added Sept 28 2026): an optional pre-computed (multiple, pct)
+    ladder specific to THIS position -- used for the real hard-dollar-target
+    ladder (moonbag.compute_hard_target_ladder), where the right multiples
+    depend on this position's own entry size, not a fixed shared table like
+    LADDERS_BY_NAME. None clears any previously-stored rungs (e.g. a
+    downgrade path, though none exists today) so a stale custom ladder
+    never survives a ladder_name change to something that shouldn't have one."""
     pos = get_position(chain, token)
     if not pos:
         return None
     pos["trim_ladder"] = ladder_name
     pos["moonshot_score"] = score
+    if rungs:
+        pos["trim_ladder_rungs"] = rungs
+    else:
+        pos.pop("trim_ladder_rungs", None)
     state.set_value(_key(chain, token), pos)
     return pos
 

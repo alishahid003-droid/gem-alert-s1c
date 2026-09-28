@@ -84,6 +84,29 @@ LADDERS_BY_NAME = {
     "high_conviction": HIGH_CONVICTION_LADDER,
 }
 
+
+def compute_hard_target_ladder(entry_usd: float) -> list:
+    """Turns EXECUTOR_CONFIG.hard_target_usd_levels (real dollar milestones,
+    e.g. $7,000 / $20,000 / $95,000) into a per-position price-multiple
+    ladder, sized to THIS position's actual entry_usd -- a $20 entry and a
+    $50 entry need very different multiples to reach the same dollar level.
+    Same (multiple, pct_of_original) shape as DEFAULT_TRIM_LADDER/
+    HIGH_CONVICTION_LADDER, so evaluate_trim doesn't need to know the
+    difference. Trims EXECUTOR_CONFIG.hard_target_trim_pct (10% by default)
+    at each level -- real cash banked at each real milestone crossed,
+    without capping the position: with 3 levels at 10% each, 70% of the
+    ORIGINAL position keeps riding uncapped past the highest level, same
+    "de-risk in stages, never force a full exit" philosophy as the other
+    two ladders, just tuned to real dollar levels Ali named instead of
+    generic price multiples.
+
+    Returns [] (falls back to the caller's default) if entry_usd isn't a
+    real positive number -- never divides by zero or invents a multiple."""
+    if not entry_usd or entry_usd <= 0:
+        return []
+    pct = EXECUTOR_CONFIG.hard_target_trim_pct
+    return [(level / entry_usd, pct) for level in sorted(EXECUTOR_CONFIG.hard_target_usd_levels)]
+
 # Score weights -- ASSUMED/heuristic, not derived from any backtest (same
 # honesty flag as the rest of this file's outcome assumptions). The one
 # weight that ISN'T a guess is double-confirmed: that's Ali's own stated
@@ -158,7 +181,19 @@ def assess_conviction(chain: str, token: str, deployer_tier: Optional[str] = Non
     if existing_ladder == "high_conviction" and ladder_name == "default":
         ladder_name = "high_conviction"
 
-    position_state.set_trim_ladder(chain, token, ladder_name, score)
+    # A position that earns high_conviction rides the real hard-dollar-target
+    # ladder instead of the generic 3x/10x/50x one (see
+    # compute_hard_target_ladder's docstring) -- computed fresh off this
+    # position's own total_usd each time this runs, so a Stage 2 upgrade
+    # that adds more capital to the same token recomputes the right
+    # multiples for the new combined entry size, not the Stage 1-only one.
+    rungs = None
+    if ladder_name == "high_conviction":
+        pos = position_state.get_position(chain, token)
+        entry_usd = (pos or {}).get("total_usd", 0.0)
+        rungs = compute_hard_target_ladder(entry_usd) or None  # None -> falls back to HIGH_CONVICTION_LADDER
+
+    position_state.set_trim_ladder(chain, token, ladder_name, score, rungs=rungs)
     return {"score": score, "ladder": ladder_name}
 
 
@@ -205,7 +240,12 @@ def evaluate_trim(chain: str, token: str, current_mcap_usd: Optional[float]) -> 
         return TrimDecision(False, "no entry_mcap or current_mcap_usd available to compute a multiple")
 
     ladder_name = position_state.get_trim_ladder(chain, token)
-    ladder = LADDERS_BY_NAME.get(ladder_name, DEFAULT_TRIM_LADDER)
+    # A high_conviction position with real hard-target rungs locked in at
+    # entry (see assess_conviction) uses THOSE instead of the generic
+    # HIGH_CONVICTION_LADDER multiples -- pos.get here rather than a second
+    # position_state call since `pos` is already in hand below.
+    custom_rungs = pos.get("trim_ladder_rungs")
+    ladder = custom_rungs if custom_rungs else LADDERS_BY_NAME.get(ladder_name, DEFAULT_TRIM_LADDER)
 
     fired = pos.get("moonbag_trims", {})
     for tier_multiple, tier_pct in ladder:
