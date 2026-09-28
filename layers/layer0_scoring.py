@@ -461,6 +461,43 @@ def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
             "launch_ts_ms": launch_ts_ms}
 
 
+def fetch_dexscreener_token_price_usd(chain: str, address: str) -> Optional[float]:
+    """The token's own real-time USD price, straight off DexScreener's pair
+    data -- same endpoint/pair-picking logic as fetch_dexscreener_vol_liq
+    (deepest-liquidity pair wins), just reading priceUsd instead of
+    volume/liquidity. Built for scheduler's post-alert monitoring pass
+    (Ali, Sept 28 2026) to close the real, disclosed gap that pass had at
+    launch: Birdeye has no Robinhood Chain mapping (see
+    layer0d_point_in_time.fetch_birdeye_ohlcv), so RHC alerts got no
+    follow-up check at all. DexScreener DOES cover Robinhood Chain
+    (DEXSCREENER_CHAIN_SLUG's "robinhood" slug -- already confirmed live
+    and in production use for execute_buy_robinhood_chain's own native-
+    price derivation, see executor/swap_executor.py's
+    _rhc_native_price_usd), so a snapshot-now / snapshot-later price
+    comparison via this function covers RHC without needing Birdeye's
+    historical OHLCV at all -- this only ever needs "what's the price
+    right now," called once at alert time and once at check time, not a
+    time-series. Works for any DexScreener-covered chain, not just RHC,
+    but scheduler only calls this for Robinhood Chain today -- the other
+    three chains already have a working, tested Birdeye OHLCV path and
+    don't need a second mechanism. Returns None (never a guess) on any
+    failure -- no pairs, missing/unparseable priceUsd, unsupported chain."""
+    slug = DEXSCREENER_CHAIN_SLUG.get(chain)
+    if not slug or not address:
+        return None
+    result = get_json(f"https://api.dexscreener.com/token-pairs/v1/{slug}/{address}")
+    if not result.get("ok"):
+        return None
+    pairs = result.get("json")
+    if not isinstance(pairs, list) or not pairs:
+        return None
+    best = max(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
+    try:
+        return float(best["priceUsd"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 GOPLUS_CHAIN_IDS = {"bsc": "56", "base": "8453", "ethereum": "1"}  # GoPlus's numeric chain ids
 
 # GoPlus's Solana token_security endpoint is a DIFFERENT URL shape from the

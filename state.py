@@ -716,12 +716,23 @@ POST_ALERT_MONITOR_MAX_ITEMS = 300
 
 
 def post_alert_monitor_add(token: str, chain: str, headline: str, band: str, score: int,
-                            ts: Optional[float] = None):
+                            ts: Optional[float] = None, price_at_alert: Optional[float] = None):
     """Adds a just-sent alert to the post-alert monitor queue, deduped by
     token -- a token that alerts again before its first follow-up check
-    fires just gets its headline/band/score refreshed, not a second entry
-    (one follow-up check per token in flight is enough; a second real alert
-    on the same token already tells Ali something changed)."""
+    fires just gets its headline/band/score/price_at_alert refreshed, not a
+    second entry (one follow-up check per token in flight is enough; a
+    second real alert on the same token already tells Ali something
+    changed).
+
+    price_at_alert (Ali, Sept 28 2026 -- closing the RHC gap this pass
+    launched with): the Birdeye-covered chains (solana/base/bsc/ethereum)
+    don't need this -- scheduler._run_post_alert_monitor_cycle re-derives
+    the whole price path from real historical OHLCV at check time. Robinhood
+    Chain has no Birdeye mapping, so its check instead compares a real
+    DexScreener price snapshot taken now (this field) against one taken
+    again at check time -- see
+    layers.layer0_scoring.fetch_dexscreener_token_price_usd's docstring.
+    None for any chain/entry that doesn't use the snapshot-compare path."""
     ts = ts if ts is not None else time.time()
     queue = get_value(POST_ALERT_MONITOR_KEY) or []
     existing = next((q for q in queue if q.get("token") == token), None)
@@ -729,10 +740,11 @@ def post_alert_monitor_add(token: str, chain: str, headline: str, band: str, sco
         existing["headline"] = headline
         existing["band"] = band
         existing["score"] = score
+        existing["price_at_alert"] = price_at_alert
     else:
         queue.append({
             "token": token, "chain": chain, "headline": headline, "band": band, "score": score,
-            "alert_ts": ts, "checked": False,
+            "alert_ts": ts, "checked": False, "price_at_alert": price_at_alert,
         })
     cutoff = ts - POST_ALERT_MONITOR_MAX_AGE_SECONDS
     queue = [q for q in queue if q.get("alert_ts", 0) >= cutoff][-POST_ALERT_MONITOR_MAX_ITEMS:]

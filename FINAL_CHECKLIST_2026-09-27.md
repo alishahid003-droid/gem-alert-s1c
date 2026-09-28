@@ -57,22 +57,29 @@ that reset, except step 0.
 ## 3. Close acknowledged detection gaps
 - [x] DONE Sept 28 2026: post-alert monitoring pass built and wired live.
   Every real alert scheduler._handle_scored actually delivers (band A/B
-  and HIGH-RISK MOMENTUM, on Birdeye-supported chains -- solana/base/bsc/
-  ethereum, not Robinhood Chain, same disclosed gap as the launch-window
-  collapse override) queues a one-time follow-up entry
+  and HIGH-RISK MOMENTUM) queues a one-time follow-up entry
   (state.post_alert_monitor_add). scheduler._run_post_alert_monitor_cycle
-  runs every fast cycle (0 MadeOnSol budget -- Birdeye's a separate
-  free-tier account), checks any entry >=15 min old against real Birdeye
-  OHLCV covering the alert-to-now window, and sends a DOWNGRADE follow-up
-  if price is down 60%+ from its post-alert peak (same threshold as the
-  collapse override, same real evidence). A single pass per alert, not a
-  repeating watch, per spec ("15-60 min after"); an entry that ages past
-  60 min uncapped-out just prunes silently, an honest disclosed gap same
-  as the soft-fail watch list's own max-age prune. 12 new tests, all
-  passing (tests/test_post_alert_monitor.py), full suite still green
-  (428/428). Direct fix for tonight's one remaining miss (RICH OFF GTA 6,
-  -8.54% at scan time -- this would have caught it 15-60 min later if it
-  went on to crater the way the override's threshold implies it likely
+  runs every fast cycle, checks any entry >=15 min old, and sends a
+  DOWNGRADE follow-up if price is down 60%+ from its post-alert peak (same
+  threshold as the launch-window collapse override, same real evidence).
+  TWO real data paths, not one: solana/base/bsc/ethereum use real Birdeye
+  OHLCV covering the alert-to-now window (0 MadeOnSol budget -- Birdeye's
+  a separate free-tier account); Robinhood Chain -- which has no Birdeye
+  mapping at all, see fetch_birdeye_ohlcv's own docstring -- instead uses a
+  real DexScreener price snapshot taken at alert time
+  (fetch_dexscreener_token_price_usd, stored as price_at_alert) compared
+  against a second snapshot taken at check time. Closed same night as a
+  follow-up: RHC is the one chain this system actually trades that Birdeye
+  can't cover, and it's also the one chain Track B's real-money go-live
+  plan includes, so shipping this pass without RHC coverage would have
+  left the highest-stakes chain the least protected. A single pass per
+  alert, not a repeating watch, per spec ("15-60 min after"); an entry
+  that ages past 60 min uncapped-out just prunes silently, an honest
+  disclosed gap same as the soft-fail watch list's own max-age prune. 16
+  tests, all passing (tests/test_post_alert_monitor.py), full suite still
+  green (432/432). Direct fix for tonight's one remaining miss (RICH OFF
+  GTA 6, -8.54% at scan time -- this would have caught it 15-60 min later
+  if it went on to crater the way the override's threshold implies it likely
   did).
 - [x] CORRECTION Sept 28 2026: a deployer rug-history check already
   existed for StonkFun (compute_stonkfun_deployer_tier in

@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -489,13 +489,25 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     # Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
     # post_alert_monitor_add docstring): every real alert this function
     # actually delivers gets a one-time follow-up entry, checked once real
-    # Birdeye price history exists for the 15-60 min window. Birdeye-
-    # supported chains only (same gate fetch_birdeye_ohlcv itself already
-    # enforces -- Robinhood Chain has no Birdeye mapping, see that
-    # function's docstring); gating here too avoids queuing an entry that
-    # can only ever fail its own check.
-    if mint and send_res.get("sent") and chain in BIRDEYE_SUPPORTED_CHAINS:
-        state.post_alert_monitor_add(mint, chain, alert.headline, sr.band, sr.score)
+    # price history exists for the 15-60 min window. Birdeye-supported
+    # chains (solana/base/bsc/ethereum) need nothing extra here --
+    # _run_post_alert_monitor_cycle re-derives the whole window from real
+    # Birdeye OHLCV at check time. Robinhood Chain (no Birdeye mapping) gets
+    # a real DexScreener price snapshot taken NOW instead, so its check can
+    # compare against a second snapshot later -- see
+    # fetch_dexscreener_token_price_usd's docstring for why this closes
+    # that gap without needing Birdeye at all. A snapshot fetch that fails
+    # (no DexScreener pair yet, network error) just isn't queued -- nothing
+    # to compare against later, an honest skip, not a silent guess.
+    if mint and send_res.get("sent") and chain in POST_ALERT_MONITOR_SUPPORTED_CHAINS:
+        price_at_alert = None
+        if chain == "robinhood_chain":
+            price_at_alert = _safe(fetch_dexscreener_token_price_usd, chain, mint)
+            if not isinstance(price_at_alert, (int, float)):
+                price_at_alert = None
+        if chain != "robinhood_chain" or price_at_alert is not None:
+            state.post_alert_monitor_add(mint, chain, alert.headline, sr.band, sr.score,
+                                          price_at_alert=price_at_alert)
     return bool(send_res.get("sent"))
 
 
@@ -597,40 +609,69 @@ def _run_soft_fail_watch_cycle() -> int:
 # Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
 # post_alert_monitor_add docstring for the gap this closes: "a flagged
 # token that rugs 10 minutes later still shows as a live alert with no
-# correction"). Birdeye-supported chains only -- Robinhood Chain has no
-# Birdeye mapping (see layers.layer0d_point_in_time.fetch_birdeye_ohlcv),
-# same disclosed gap as the launch-window collapse override this reuses.
+# correction"). Two chain groups, two real data sources -- Birdeye has no
+# Robinhood Chain mapping (see layers.layer0d_point_in_time.fetch_birdeye_
+# ohlcv), so RHC alerts got no follow-up at all when this pass first
+# shipped; closed same night via a DexScreener price-snapshot compare
+# instead (see fetch_dexscreener_token_price_usd's docstring) -- RHC is the
+# one chain this system actually trades that Birdeye can't cover, and it's
+# also the one Track B's real-money go-live plan includes, so leaving it
+# unmonitored wasn't acceptable once noticed.
 BIRDEYE_SUPPORTED_CHAINS = {"solana", "base", "bsc", "ethereum"}
+DEXSCREENER_SNAPSHOT_CHAINS = {"robinhood_chain"}
+POST_ALERT_MONITOR_SUPPORTED_CHAINS = BIRDEYE_SUPPORTED_CHAINS | DEXSCREENER_SNAPSHOT_CHAINS
 POST_ALERT_MONITOR_MAX_PER_CYCLE = 8
 # Same threshold as layer0_scoring's launch-window collapse override
 # (real backtest evidence, Sept 28 2026) -- a token whose price is down
-# 60%+ from its post-alert peak by the time this checks it is the same
+# 60%+ from its post-alert peak (Birdeye path) or from its alert-time price
+# (DexScreener snapshot path) by the time this checks it is the same
 # "pumped then got dumped on" shape that override already proved on, not a
-# separately-guessed number.
+# separately-guessed number. Applied identically on both paths so a coin
+# isn't judged by a stricter or looser bar just because of which chain it's
+# on.
 POST_ALERT_CRATER_DRAWDOWN_PCT = -60.0
+
+
+def _send_post_alert_downgrade(token: str, chain: str, q: dict, dd: float, now: float) -> dict:
+    """Shared DOWNGRADE-alert builder for both check paths below -- same
+    alert shape regardless of whether the drawdown came from real Birdeye
+    OHLCV or a DexScreener snapshot compare, so Ali sees one consistent
+    format either way."""
+    alert_ts = q.get("alert_ts", now)
+    downgrade = Alert(token[:8], token, chain, f"ALERT DOWNGRADE -- {q.get('headline', 'previous alert')}")
+    downgrade.set_tag("Chain", chain)
+    downgrade.set_tag("Score", f"{q.get('score')}/100 (band {q.get('band')}, at time of original alert)")
+    downgrade.set_tag("Exit-risk", f"price down {dd:.1f}% from its post-alert peak within "
+                                    f"{(now - alert_ts) / 60:.0f} min -- likely a rug/dump in progress")
+    send_res = send_alert(downgrade)
+    print(f"[post-alert-monitor] {token[:8]} CRATERED ({dd:.1f}% from peak) -- downgrade sent -> {send_res}")
+    return send_res
 
 
 def _run_post_alert_monitor_cycle() -> int:
     """Sweeps state.get_post_alert_monitor() -- tokens a real alert was
     just sent for -- and, for any entry that's now at least 15 minutes old
-    (state.POST_ALERT_MONITOR_MIN_AGE_SECONDS), fetches real Birdeye OHLCV
-    covering the window from the original alert to now and checks whether
-    the price has since collapsed 60%+ from its post-alert peak. This is a
-    SINGLE one-time pass per alert, not a repeating watch (per Ali's own
-    framing, "15-60 min after a coin is flagged") -- every entry checked
-    this cycle is removed from the queue regardless of outcome, since the
-    verdict this pass exists to give has now been delivered one way or the
-    other. An entry that ages past 60 min without ever being checked (the
-    per-cycle cap was full every cycle in that window) just ages out on
-    state.get_post_alert_monitor's own self-cleaning read -- an honest,
-    disclosed gap, same convention as the soft-fail watch list's own
-    max-age prune, not a silent failure. Returns the number of real
-    DOWNGRADE follow-ups sent."""
+    (state.POST_ALERT_MONITOR_MIN_AGE_SECONDS), checks whether the price
+    has since collapsed 60%+ (POST_ALERT_CRATER_DRAWDOWN_PCT) since the
+    alert. Birdeye-supported chains use real historical OHLCV covering the
+    alert-to-now window; Robinhood Chain (no Birdeye mapping) instead
+    compares the DexScreener price snapshot taken at alert time
+    (state.post_alert_monitor_add's price_at_alert) against a fresh
+    snapshot taken now. This is a SINGLE one-time pass per alert, not a
+    repeating watch (per Ali's own framing, "15-60 min after a coin is
+    flagged") -- every entry checked this cycle is removed from the queue
+    regardless of outcome, since the verdict this pass exists to give has
+    now been delivered one way or the other. An entry that ages past 60 min
+    without ever being checked (the per-cycle cap was full every cycle in
+    that window) just ages out on state.get_post_alert_monitor's own
+    self-cleaning read -- an honest, disclosed gap, same convention as the
+    soft-fail watch list's own max-age prune, not a silent failure. Returns
+    the number of real DOWNGRADE follow-ups sent."""
     queue = state.get_post_alert_monitor()
     if not queue:
         return 0
     now = time.time()
-    eligible = [q for q in queue if q.get("chain") in BIRDEYE_SUPPORTED_CHAINS
+    eligible = [q for q in queue if q.get("chain") in POST_ALERT_MONITOR_SUPPORTED_CHAINS
                 and now - q.get("alert_ts", now) >= state.POST_ALERT_MONITOR_MIN_AGE_SECONDS]
     # Oldest-flagged-first, same round-robin intent as the soft-fail watch
     # cycle -- a busy night shouldn't let the newest handful of alerts hog
@@ -641,28 +682,37 @@ def _run_post_alert_monitor_cycle() -> int:
     downgraded = 0
     for q in to_check:
         token, chain, alert_ts = q["token"], q["chain"], q.get("alert_ts", now)
-        ohlcv = _safe(fetch_birdeye_ohlcv, chain, token, int(alert_ts), int(now), interval="15m")
         # One-time pass -- remove now, checked either way, before deciding
-        # the outcome, so a crash in the summarize step below can't leave
-        # the same entry stuck being re-checked forever.
+        # the outcome, so a crash in the summarize/compare step below can't
+        # leave the same entry stuck being re-checked forever.
         state.post_alert_monitor_remove(token)
-        if not (isinstance(ohlcv, dict) and ohlcv.get("ok")):
-            reason = ohlcv.get("reason") if isinstance(ohlcv, dict) else str(ohlcv)
-            print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: {reason}")
-            continue
-        summary = summarize_launch_window(ohlcv.get("candles") or [])
-        if not summary.get("ok"):
-            print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: {summary.get('reason')}")
-            continue
-        dd = summary.get("drawdown_from_peak_pct")
+
+        if chain in DEXSCREENER_SNAPSHOT_CHAINS:
+            price_then = q.get("price_at_alert")
+            if not isinstance(price_then, (int, float)) or price_then <= 0:
+                print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: "
+                      f"no valid price_at_alert snapshot recorded")
+                continue
+            price_now = _safe(fetch_dexscreener_token_price_usd, chain, token)
+            if not isinstance(price_now, (int, float)):
+                print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: "
+                      f"couldn't fetch a current DexScreener price")
+                continue
+            dd = round((price_now - price_then) / price_then * 100, 2)
+        else:
+            ohlcv = _safe(fetch_birdeye_ohlcv, chain, token, int(alert_ts), int(now), interval="15m")
+            if not (isinstance(ohlcv, dict) and ohlcv.get("ok")):
+                reason = ohlcv.get("reason") if isinstance(ohlcv, dict) else str(ohlcv)
+                print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: {reason}")
+                continue
+            summary = summarize_launch_window(ohlcv.get("candles") or [])
+            if not summary.get("ok"):
+                print(f"[post-alert-monitor] {token[:8]} follow-up check skipped: {summary.get('reason')}")
+                continue
+            dd = summary.get("drawdown_from_peak_pct")
+
         if dd is not None and dd <= POST_ALERT_CRATER_DRAWDOWN_PCT:
-            downgrade = Alert(token[:8], token, chain, f"ALERT DOWNGRADE -- {q.get('headline', 'previous alert')}")
-            downgrade.set_tag("Chain", chain)
-            downgrade.set_tag("Score", f"{q.get('score')}/100 (band {q.get('band')}, at time of original alert)")
-            downgrade.set_tag("Exit-risk", f"price down {dd:.1f}% from its post-alert peak within "
-                                            f"{(now - alert_ts) / 60:.0f} min -- likely a rug/dump in progress")
-            send_res = send_alert(downgrade)
-            print(f"[post-alert-monitor] {token[:8]} CRATERED ({dd:.1f}% from peak) -- downgrade sent -> {send_res}")
+            _send_post_alert_downgrade(token, chain, q, dd, now)
             downgraded += 1
         else:
             print(f"[post-alert-monitor] {token[:8]} held up (drawdown {dd}% from peak) -- no downgrade")

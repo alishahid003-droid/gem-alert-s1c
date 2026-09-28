@@ -44,9 +44,26 @@ def test_band_a_solana_alert_queues_post_alert_monitor(monkeypatch):
     assert queue[0]["band"] == "A"
 
 
-def test_robinhood_chain_alert_not_queued_no_birdeye_mapping(monkeypatch):
+def test_robinhood_chain_alert_queued_via_dexscreener_snapshot(monkeypatch):
+    # RHC has no Birdeye mapping (see fetch_birdeye_ohlcv), but IS covered
+    # by DexScreener -- a real price snapshot is taken at alert time and
+    # stored, for a later snapshot-compare instead of Birdeye OHLCV.
     monkeypatch.setattr(scheduler, "send_alert", lambda alert: {"sent": True})
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_token_price_usd", lambda chain, addr: 0.0042)
     scored = _scored("token-a-rhc", "A", score=90)
+    scheduler._handle_scored(scored, "robinhood_chain", source="test", mc=50000.0)
+    queue = state.get_post_alert_monitor()
+    assert len(queue) == 1
+    assert queue[0]["chain"] == "robinhood_chain"
+    assert queue[0]["price_at_alert"] == 0.0042
+
+
+def test_robinhood_chain_alert_not_queued_when_no_dexscreener_pair(monkeypatch):
+    # No pair yet (brand-new token) -- nothing to compare against later,
+    # so this is an honest skip, not a queued entry that can only fail.
+    monkeypatch.setattr(scheduler, "send_alert", lambda alert: {"sent": True})
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_token_price_usd", lambda chain, addr: None)
+    scored = _scored("token-a-rhc-nopair", "A", score=90)
     scheduler._handle_scored(scored, "robinhood_chain", source="test", mc=50000.0)
     assert state.get_post_alert_monitor() == []
 
@@ -151,21 +168,68 @@ def test_cycle_handles_birdeye_failure_gracefully(monkeypatch):
     assert state.get_post_alert_monitor() == []
 
 
-def test_cycle_skips_robinhood_chain_entries_defensively(monkeypatch):
-    # Shouldn't normally happen (see test_robinhood_chain_alert_not_queued_
-    # no_birdeye_mapping), but defends the sweep itself against ever
-    # spending a Birdeye call on a chain it has no mapping for, if one
-    # somehow got in.
+def test_cycle_never_calls_birdeye_for_robinhood_chain_entries(monkeypatch):
+    # Robinhood Chain entries must go through the DexScreener snapshot
+    # path, never Birdeye (which has no mapping for this chain at all).
     queue = state.get_value(state.POST_ALERT_MONITOR_KEY) or []
     queue.append({"token": "rhc-token", "chain": "robinhood_chain", "headline": "h", "band": "A",
-                  "score": 90, "alert_ts": time.time() - 20 * 60})
+                  "score": 90, "alert_ts": time.time() - 20 * 60, "price_at_alert": 0.01})
     state.set_value(state.POST_ALERT_MONITOR_KEY, queue)
 
     def boom(*a, **kw):
         raise AssertionError("should never call fetch_birdeye_ohlcv for a non-Birdeye chain")
     monkeypatch.setattr(scheduler, "fetch_birdeye_ohlcv", boom)
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_token_price_usd", lambda chain, addr: 0.0095)
+    downgraded = scheduler._run_post_alert_monitor_cycle()
+    assert downgraded == 0  # 0.01 -> 0.0095 is only -5%, held up
+    assert state.get_post_alert_monitor() == []
+
+
+def test_cycle_downgrades_robinhood_chain_on_dexscreener_crater(monkeypatch):
+    alert_ts = time.time() - 20 * 60
+    state.post_alert_monitor_add("rhc-crashed", "robinhood_chain", "headline", "A", 90,
+                                  ts=alert_ts, price_at_alert=0.01)
+
+    def boom(*a, **kw):
+        raise AssertionError("should never call fetch_birdeye_ohlcv for a non-Birdeye chain")
+    monkeypatch.setattr(scheduler, "fetch_birdeye_ohlcv", boom)
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_token_price_usd", lambda chain, addr: 0.002)  # -80%
+    captured = {}
+    monkeypatch.setattr(scheduler, "send_alert", lambda alert: captured.setdefault("alert", alert) or {"sent": True})
+    downgraded = scheduler._run_post_alert_monitor_cycle()
+    assert downgraded == 1
+    assert "DOWNGRADE" in captured["alert"].headline
+    assert state.get_post_alert_monitor() == []
+
+
+def test_cycle_skips_robinhood_chain_entry_missing_price_at_alert(monkeypatch):
+    # Defensive: an entry that somehow got in without a valid snapshot
+    # (shouldn't happen given _handle_scored's own gate) must not crash or
+    # divide by zero/None -- just skipped, honest.
+    queue = state.get_value(state.POST_ALERT_MONITOR_KEY) or []
+    queue.append({"token": "rhc-no-price", "chain": "robinhood_chain", "headline": "h", "band": "A",
+                  "score": 90, "alert_ts": time.time() - 20 * 60, "price_at_alert": None})
+    state.set_value(state.POST_ALERT_MONITOR_KEY, queue)
+
+    def boom(*a, **kw):
+        raise AssertionError("should not fetch a current price with nothing to compare it against")
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_token_price_usd", boom)
     downgraded = scheduler._run_post_alert_monitor_cycle()
     assert downgraded == 0
+    assert state.get_post_alert_monitor() == []
+
+
+def test_cycle_skips_robinhood_chain_entry_when_current_price_unfetchable(monkeypatch):
+    state.post_alert_monitor_add("rhc-unfetchable", "robinhood_chain", "headline", "A", 90,
+                                  ts=time.time() - 20 * 60, price_at_alert=0.01)
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_token_price_usd", lambda chain, addr: None)
+
+    def boom(alert):
+        raise AssertionError("should not send anything when the current price can't be fetched")
+    monkeypatch.setattr(scheduler, "send_alert", boom)
+    downgraded = scheduler._run_post_alert_monitor_cycle()
+    assert downgraded == 0
+    assert state.get_post_alert_monitor() == []
 
 
 def test_cycle_respects_per_cycle_cap(monkeypatch):
