@@ -136,6 +136,7 @@ from layers.layer2b_pumpfun_smart_money import process_trade as pumpfun_process_
 from layers.layer7_correlation import AlertEvent, detect_mega_alerts
 import layers.layer10_insider_cluster as layer10
 from layers.layer4_news import fetch_cryptopanic_posts, parse_cryptopanic_posts, \
+    fetch_coindesk_rss, parse_coindesk_rss, \
     fetch_binance_new_listings, parse_binance_new_listings
 from layers.layer6_exit_realizable import fetch_wallet_portfolio
 from layers.layer8_momentum_override import detect_momentum_override, mc_moved_enough
@@ -1074,6 +1075,13 @@ def run_poll_fast():
     # only posts that actually name a currency alert (pure macro/opinion posts with
     # no `currencies` tag are skipped -- they're not actionable per-token signal),
     # deduped the same way Binance's feed is below.
+    # CryptoPanic's free plan was discontinued (Sept 28 2026, see
+    # layers/layer4_news.py's fetch_cryptopanic_posts docstring) -- replaced
+    # with CoinDesk's free, keyless RSS feed. The old CryptoPanic call/print
+    # is left in place, still gated behind the readiness flag, so it starts
+    # working again on its own the moment Ali upgrades to a paid CryptoPanic
+    # plan and updates CONFIG.cryptopanic_base_url -- no code change needed
+    # then, just delete/replace this CoinDesk block.
     if report["stage1"]["layer4_news_exchange"]["cryptopanic"]:
         cp = _safe(fetch_cryptopanic_posts, "rising")
         if cp["ok"]:
@@ -1096,9 +1104,35 @@ def run_poll_fast():
                 just_alerted.append(post.get("id"))
             state.mark_cryptopanic_seen(just_alerted)
         else:
-            print(f"[layer4:cryptopanic] fetch failed: {describe_fetch_failure(cp)}")
+            print(f"[layer4:cryptopanic] fetch failed (expected -- see docstring): {describe_fetch_failure(cp)}")
     else:
         print("[layer4:cryptopanic] BLOCKED: CRYPTOPANIC_AUTH_TOKEN not set (see README -- separate free signup)")
+
+    # CoinDesk RSS -- keyless, so it runs regardless of whether
+    # CRYPTOPANIC_AUTH_TOKEN is configured (unlike the CryptoPanic block
+    # above, which is gated on that token).
+    cd = _safe(fetch_coindesk_rss)
+    if cd["ok"]:
+        posts = parse_coindesk_rss((cd["raw"].get("json") is None and cd["raw"].get("text")) or "")
+        seen = state.coindesk_seen_posts()
+        actionable = [p for p in posts if p.get("currencies") and p.get("id") not in seen]
+        print(f"[layer4:coindesk] {len(posts)} post(s) fetched, "
+              f"{len(actionable)} new coin-tagged post(s)")
+        just_alerted = []
+        for post in actionable[:5]:
+            coins = ", ".join(post["currencies"])
+            alert = Alert(post["currencies"][0], "n/a", "n/a", post.get("title") or "CoinDesk post")
+            alert.set_tag("News", f"CoinDesk ({coins})")
+            send_res = send_alert(alert)
+            state.log_full_alert("layer4_news", alert.chain, alert.token_symbol, alert.token_address,
+                                  alert.headline, dict(alert.tags))
+            print(f"[layer4:coindesk] {coins} -> {send_res}")
+            if send_res.get("sent"):
+                alerts_sent += 1
+            just_alerted.append(post.get("id"))
+        state.mark_coindesk_seen(just_alerted)
+    else:
+        print(f"[layer4:coindesk] fetch failed: {describe_fetch_failure(cd)}")
 
     # Binance new-listing feed REMOVED (Ali, Sept 24 2026: "do we really need it
     # for memecoins"). Binance only lists coins after its own formal review, which

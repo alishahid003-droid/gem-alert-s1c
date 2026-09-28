@@ -456,6 +456,28 @@ def mark_cryptopanic_seen(post_ids) -> None:
     set_value("cryptopanic_seen_posts", merged)
 
 
+def coindesk_seen_posts() -> set:
+    """Same no-dedup problem as cryptopanic_seen_posts (see its docstring)
+    -- CoinDesk's RSS feed always returns its current front page, so the
+    same story would re-alert every cycle without this. Keyed by the RSS
+    item's guid (falls back to link/title if a feed item is missing one --
+    see parse_coindesk_rss)."""
+    return set(get_value("coindesk_seen_posts") or [])
+
+
+COINDESK_SEEN_CAP = 500
+
+
+def mark_coindesk_seen(post_ids) -> None:
+    existing = list(get_value("coindesk_seen_posts") or [])
+    existing_set = set(existing)
+    new_ones = [p for p in post_ids if p and p not in existing_set]
+    merged = existing + new_ones
+    if len(merged) > COINDESK_SEEN_CAP:
+        merged = merged[-COINDESK_SEEN_CAP:]
+    set_value("coindesk_seen_posts", merged)
+
+
 def layer0c_seen_mints() -> set:
     """Layer 0c (StonkFun) has no documented 'since' cursor on
     /tokens?sort=newest, unlike Layer 1's MadeOnSol endpoint -- so dedup

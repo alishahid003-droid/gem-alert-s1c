@@ -109,6 +109,11 @@ class Config:
     adanos_base_url: str = "https://api.adanos.org"
     fomoapi_base_url: str = "https://api.fomoapi.io"
     cryptopanic_base_url: str = "https://cryptopanic.com/api/developer/v2"
+    # CryptoPanic's free plan was discontinued (Sept 28 2026, see
+    # layers/layer4_news.py's fetch_cryptopanic_posts docstring) -- CoinDesk's
+    # public RSS feed is the free, keyless, no-signup replacement Layer 4 now
+    # uses. Been running for years, real uptime, no key/account needed.
+    coindesk_rss_url: str = "https://www.coindesk.com/arc/outboundfeeds/rss/"
     jupiter_quote_base_url: str = "https://lite-api.jup.ag/swap/v1"  # free tier, no key
     # StonkFun (Sept 22, 2026 addition) -- confirmed public, free, no API key,
     # no signup, 300 req/min per IP (see layers/layer0c_stonkfun_scoring.py
