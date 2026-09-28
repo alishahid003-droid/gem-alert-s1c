@@ -74,6 +74,23 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Local-only auto-load of a .env file (Sept 29 2026 -- real bug found and
+# fixed: scheduler.py/worker_pulse_websocket.py/backtest.py all call
+# load_dotenv() before importing config/state, but dashboard.py never did,
+# despite reading the exact same os.environ-backed CONFIG/state module.
+# This is the actual root cause of dashboard.py showing "state backend:
+# local_json" instead of "upstash" -- not which CMD window it's run from,
+# the script itself just never loaded .env. Must happen BEFORE `import
+# state` below, same ordering reason as scheduler.py's own comment: config.py
+# builds CONFIG from os.environ at import time, so loading .env any later
+# leaves CONFIG holding stale/missing values. No-op if python-dotenv isn't
+# installed or no .env file exists.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import state
 import links
 from scheduler import readiness_report
