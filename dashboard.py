@@ -312,7 +312,7 @@ function __notify(title, body) {
   if (__notifyReady && "Notification" in window && Notification.permission === "granted") {
     try { new Notification(title, { body: body }); } catch (e) {}
   }
-  document.title = "\uD83D\uDD34 " + title;
+  document.title = "🔴 " + title;
   setTimeout(() => { document.title = "S1c Dashboard"; }, 8000);
 }
 
