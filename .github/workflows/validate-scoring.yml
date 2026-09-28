@@ -16,8 +16,16 @@ jobs:
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
           BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
-        run: python backtest_point_in_time.py --skip-onchain
+          PYTHONUNBUFFERED: "1"
+        # PYTHONUNBUFFERED + python -u: without this, Python block-buffers
+        # stdout when it isn't a real terminal (exactly the case here, piped
+        # into GitHub's log capture) -- prints can sit invisible for many
+        # minutes even while the script is actively working. `timeout` is a
+        # hard ceiling so a slow/rate-limited API call fails loudly instead
+        # of silently eating the whole job.
+        run: timeout 480 python -u backtest_point_in_time.py --skip-onchain
       - name: Categorized credibility / sniper-accuracy backtest
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
-        run: python backtest_categorized.py
+          PYTHONUNBUFFERED: "1"
+        run: timeout 480 python -u backtest_categorized.py
