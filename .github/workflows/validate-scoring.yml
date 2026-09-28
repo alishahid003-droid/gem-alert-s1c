@@ -2,6 +2,18 @@ name: Validate scoring (Section 1 -- point-in-time + categorized backtests)
 
 on:
   workflow_dispatch: {}
+  # TEMPORARY, Sept 29 2026 -- cron doesn't support "run once", so this is a
+  # one-shot alarm timed for just after MadeOnSol's daily budget resets
+  # (00:00 UTC), so this run gets a real, clean, budget-fresh read with
+  # zero manual clicking (no GitHub write token available from either the
+  # Cowork cloud sandbox or Ali's own device shell -- both are proxied and
+  # can't reach madeonsol.com directly or call the Actions API, confirmed
+  # live tonight -- same restriction the README already documents for
+  # every other data source in this project). REMOVE this schedule block
+  # after tonight's run completes, or it'll keep firing daily at 00:07 UTC
+  # and burning budget every day going forward.
+  schedule:
+    - cron: "7 0 * * *"
 
 jobs:
   validate:
