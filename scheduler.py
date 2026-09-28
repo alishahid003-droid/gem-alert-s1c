@@ -127,6 +127,11 @@ from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum,
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
 from layers.layer2_convergence import poll_layer2
 from executor.entrypoint import handle_stage1_candidate, handle_stage2_candidate
+import executor.position_state as position_state
+import executor.moonbag as moonbag
+import executor.defensive_sell as defensive_sell
+import executor.campaign_milestones as campaign_milestones
+from layers.layer0_scoring import RawSignals, fetch_dexscreener_snapshot
 from layers.layer3_backing_check import check_backing_spike
 from layers.layer11_social_buzz import fetch_boost_board, check_buzz
 from layers.layer12_caller_channels import fetch_caller_channel_posts, extract_token_addresses
@@ -836,6 +841,80 @@ def _send_post_alert_downgrade(token: str, chain: str, q: dict, dd: float, now: 
     return send_res
 
 
+def _run_position_management_cycle() -> dict:
+    """Closes a real, live gap found and fixed Sept 28 2026 (Ali: "you fix
+    it live let the test run"). moonbag.check_and_trim and
+    defensive_sell.check_and_defend were both fully built and tested, but
+    until now NOTHING in any of Ali's three real scheduled tasks (fast/
+    slow/MadeOnSol crons) ever called them -- the only caller was
+    worker_stonkfun_snipe.py's own manage_open_stonkfun_positions(), which
+    isn't wired into any scheduled task either. With EXECUTION_ENABLED=true
+    and a real Solana signing key live, that meant real buys could sit
+    open with zero automated profit-taking or rug-defense follow-up. This
+    runs every fast cycle (see run_poll_fast, called right after the
+    post-alert-monitor pass) against EVERY open position this executor
+    holds, on ANY chain/source -- not just StonkFun-sourced ones the way
+    worker_stonkfun_snipe.py's version is scoped.
+
+    Re-prices each open position via fetch_dexscreener_snapshot (one call
+    per position, covers solana/bsc/base/robinhood_chain -- same chain
+    coverage already proven live for fetch_dexscreener_token_price_usd).
+    A position DexScreener can't currently price (delisted pair, network
+    hiccup) is skipped for this cycle rather than guessed at -- fail-closed,
+    same posture as the rest of this module.
+
+    Per position, in order: moonbag trim check (fires at most one rung),
+    then the account-wide sequential campaign-milestone check ($25k -> $150k
+    auto-close, $500k-$1M alert-only -- Ali, Sept 28 2026 message; see
+    executor/campaign_milestones.py's own docstring), then the defensive
+    rug-exit check (needs a previous liquidity reading to detect a DROP,
+    not just a low absolute number -- state stores the last-seen liquidity
+    per chain:token, same pattern worker_stonkfun_snipe.py already uses,
+    so this is correct across cycles/restarts too)."""
+    managed, trims_fired, milestones_fired, defends_fired = [], [], [], []
+    for pos in position_state.list_open_positions():
+        chain, token = pos.get("chain"), pos.get("token")
+        if not chain or not token:
+            continue
+
+        snap = _safe(fetch_dexscreener_snapshot, chain, token)
+        if not (isinstance(snap, dict) and snap.get("mcap_usd") is not None):
+            continue
+        current_mcap = snap["mcap_usd"]
+        current_liq = snap.get("liquidity_usd")
+        managed.append(f"{chain}:{token[:8]}")
+
+        trim_result = moonbag.check_and_trim(chain, token, current_mcap)
+        if trim_result is not None:
+            trims_fired.append(trim_result)
+            print(f"[position-mgmt:{chain}] MOONBAG TRIM {token[:8]}: {trim_result['trim_decision'].reason}")
+
+        milestone_result = _safe(campaign_milestones.check_and_apply, chain, token, current_mcap)
+        if isinstance(milestone_result, dict) and milestone_result.get("action"):
+            milestones_fired.append(milestone_result)
+            print(f"[position-mgmt:{chain}] CAMPAIGN MILESTONE {token[:8]}: "
+                  f"{milestone_result['action']} (~${milestone_result.get('value_usd', 0):,.0f})")
+
+        prev_liq_key = f"exec_position_prev_liq:{chain}:{token}"
+        prev_liq = state.get_value(prev_liq_key)
+        if prev_liq is not None and current_liq is not None:
+            prev_signals = RawSignals(liquidity_usd=prev_liq)
+            curr_signals = RawSignals(liquidity_usd=current_liq)
+            defend_result = defensive_sell.check_and_defend(chain, token, prev_signals, curr_signals)
+            if defend_result is not None:
+                defends_fired.append(defend_result)
+                print(f"[position-mgmt:{chain}] DEFENSIVE EXIT {token[:8]}: {defend_result['rug_reasons']}")
+        if current_liq is not None:
+            state.set_value(prev_liq_key, current_liq)
+
+    if managed:
+        print(f"[position-mgmt] re-priced {len(managed)} open position(s); "
+              f"{len(trims_fired)} trim(s), {len(milestones_fired)} milestone action(s), "
+              f"{len(defends_fired)} defensive exit(s) fired this cycle.")
+    return {"managed": managed, "trims_fired": trims_fired,
+            "milestones_fired": milestones_fired, "defends_fired": defends_fired}
+
+
 def _run_post_alert_monitor_cycle() -> int:
     """Sweeps state.get_post_alert_monitor() -- tokens a real alert was
     just sent for -- and, for any entry that's now at least 15 minutes old
@@ -1498,6 +1577,13 @@ def run_poll_fast():
     # every fast cycle too, same reasoning as the soft-fail sweep above.
     # See _run_post_alert_monitor_cycle's docstring for what this closes. ---
     _safe(_run_post_alert_monitor_cycle)
+
+    # --- Live position management (Ali, Sept 28 2026 -- "fix it live
+    # let the test run") -- moonbag trims, campaign milestones, and
+    # defensive rug-exits for every OPEN EXECUTOR POSITION, every fast
+    # cycle. See _run_position_management_cycle's docstring for the real
+    # gap this closes. ---
+    _safe(_run_position_management_cycle)
 
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "

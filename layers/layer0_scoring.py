@@ -498,6 +498,67 @@ def fetch_dexscreener_token_price_usd(chain: str, address: str) -> Optional[floa
         return None
 
 
+def fetch_dexscreener_snapshot(chain: str, address: str) -> Optional[dict]:
+    """Position-management snapshot (Ali, Sept 28 2026 -- "fix it live let
+    the test run"): scheduler.py's run_poll_fast previously never re-priced
+    OPEN EXECUTOR POSITIONS at all -- moonbag.check_and_trim and
+    defensive_sell.check_and_defend existed and were fully tested, but the
+    only caller that ever invoked them was worker_stonkfun_snipe.py's own
+    manage_open_stonkfun_positions(), which isn't wired into any of Ali's
+    three real scheduled tasks. With EXECUTION_ENABLED=true and a real
+    Solana signing key live, that meant real buys could fire with zero
+    automated profit-taking or rug-defense follow-up. This function is what
+    closes that gap generically (any chain DexScreener covers, any position
+    source -- StonkFun, GeckoTerminal fallback, Mobula pulse, Fomo/pump.fun
+    convergence -- not just StonkFun-sourced ones).
+
+    Deliberately ONE network call returning price + mcap + liquidity
+    together (same best-liquidity-pair pick as fetch_dexscreener_token_price_usd
+    above) rather than three separate fetches, to keep the added per-cycle
+    call cost down -- position management runs once per OPEN position per
+    fast cycle, not once per discovered token.
+
+    mcap_usd reads DexScreener's own "marketCap" field, falling back to
+    "fdv" (fully-diluted valuation) when marketCap is absent -- the same
+    fdv/mcap duality already normalized in flatten_geckoterminal_pools
+    above and in Mobula's own pulse response, so a position's entry_mcap
+    (recorded from whichever of those sources fired the buy) stays
+    comparable to this current-side reading; multiple_achieved() only ever
+    needs the RATIO of the two, not a single canonical mcap definition.
+
+    Returns None (never a guess, never a partial dict) on any failure --
+    unsupported chain, no pairs, missing/unparseable fields -- exactly the
+    same fail-closed posture as the price-only function above."""
+    slug = DEXSCREENER_CHAIN_SLUG.get(chain)
+    if not slug or not address:
+        return None
+    result = get_json(f"https://api.dexscreener.com/token-pairs/v1/{slug}/{address}")
+    if not result.get("ok"):
+        return None
+    pairs = result.get("json")
+    if not isinstance(pairs, list) or not pairs:
+        return None
+    best = max(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
+    try:
+        price_usd = float(best["priceUsd"])
+    except (KeyError, TypeError, ValueError):
+        price_usd = None
+    mcap_raw = best.get("marketCap")
+    if mcap_raw is None:
+        mcap_raw = best.get("fdv")
+    try:
+        mcap_usd = float(mcap_raw) if mcap_raw is not None else None
+    except (TypeError, ValueError):
+        mcap_usd = None
+    try:
+        liquidity_usd = float((best.get("liquidity") or {}).get("usd"))
+    except (TypeError, ValueError):
+        liquidity_usd = None
+    if price_usd is None and mcap_usd is None and liquidity_usd is None:
+        return None
+    return {"price_usd": price_usd, "mcap_usd": mcap_usd, "liquidity_usd": liquidity_usd}
+
+
 GOPLUS_CHAIN_IDS = {"bsc": "56", "base": "8453", "ethereum": "1"}  # GoPlus's numeric chain ids
 
 # GoPlus's Solana token_security endpoint is a DIFFERENT URL shape from the

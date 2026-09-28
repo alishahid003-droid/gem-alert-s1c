@@ -61,10 +61,31 @@ from executor.config import EXECUTOR_CONFIG
 
 # (multiple vs entry mcap, pct of ORIGINAL position to sell at this rung)
 DEFAULT_TRIM_LADDER = [
-    (3.0, 0.35),
-    (10.0, 0.25),
-    (50.0, 0.20),
-]  # trims 80% total -> 20% moonbag rides
+    (3.0, 0.20),
+    (10.0, 0.20),
+    (50.0, 0.15),
+]  # Revised Sept 28 2026 (Ali, live): "u r trimming way too much percentage
+# on short levels...leaving nothing for a massive gain n hold...only 20%
+# wont suit my purpose if coin explodes." Old ladder trimmed 80% by 50x,
+# leaving only a 20% moonbag -- fine for de-risking a merely-good trade,
+# but self-defeating for the actual goal (memory: catch one real 500x+
+# moonshot off a small deployed stake). New ladder trims 55% total across
+# the same three checkpoints -> 45% moonbag rides uncapped. Recovery math
+# still holds: by the 10x checkpoint alone (20%+20% fired) the position has
+# already returned 0.20*3 + 0.20*10 = 2.6x the original stake in realized
+# cash, so real capital is back well before any explosive move even starts
+# -- the remaining 45% is genuinely free-roll size for a 100x/500x/1000x
+# run, not capital still at risk. This is the LOW-conviction ladder --
+# assess_conviction() already routes any position that scores >= 4
+# (elite/good deployer, 2-3+ wallet convergence, double-confirmed Stage1+
+# Stage2, low insider ratio, news catalyst) onto HIGH_CONVICTION_LADDER
+# below instead, which was already far more moonbag-friendly (55%) even
+# before this change, or onto compute_hard_target_ladder's real-dollar
+# milestones (10%/rung at each of hard_target_usd_levels, ~70% riding
+# after all three) -- so a position the system is actually CONFIDENT about
+# was never the 20%-moonbag problem Ali flagged; this default ladder is
+# the fallback for lower-conviction entries and is the one that needed
+# widening.
 
 # Lighter ladder for a position multiple corroborating signals flagged as
 # real moonshot material at entry (Ali, Sept 22, 2026: "there must be
@@ -77,7 +98,10 @@ HIGH_CONVICTION_LADDER = [
     (3.0, 0.15),
     (10.0, 0.15),
     (50.0, 0.15),
-]  # trims 45% total -> 55% moonbag rides
+]  # trims 45% total -> 55% moonbag rides. Left unchanged Sept 28 2026 --
+# already well past what Ali flagged as too small on the default ladder;
+# a position confident enough to earn this ladder deserves to ride most
+# of its size toward the moonshot target already.
 
 LADDERS_BY_NAME = {
     "default": DEFAULT_TRIM_LADDER,
