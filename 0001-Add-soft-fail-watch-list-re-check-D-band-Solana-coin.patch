@@ -1,0 +1,644 @@
+From 6e9745c1115f27325b0d3126e2dfaeded810a7cb Mon Sep 17 00:00:00 2001
+From: Ali <ali.shahid003@gmail.com>
+Date: Mon, 28 Sep 2026 11:46:15 +0500
+Subject: [PATCH] Add soft-fail watch list: re-check D-band Solana coins that
+ never get a KOL-triggered re-score
+
+Real gap Ali flagged live: a D-band Solana token only gets re-queued for a
+real re-score via _maybe_queue_rescan, which fires ONLY when a fresh MC
+point arrives -- and the only source of MC points today is Layer 2's
+tracked-KOL-wallet feed. A token no tracked wallet ever trades never gets a
+second look, even if it quietly becomes structurally clean within its first
+hours.
+
+- state.py: new soft_fail_watch list (watch_add/get_soft_fail_watch/
+  watch_remove/watch_touch), capped at 12h age / 300 items.
+- layer0_scoring.py: free_recheck_solana_signals -- zero-MadeOnSol-budget
+  recheck of top10 concentration + holder growth via the existing free RPC
+  signals.
+- scheduler.py: _handle_scored adds a D-band Solana token (no momentum
+  override) to the watch list, and drops it once a real re-score clears
+  the band. _run_soft_fail_watch_cycle sweeps the list every fast cycle
+  (0 MadeOnSol cost) and only queues a real 3-call re-score once a free
+  signal shows genuine improvement (top10 <=35% or holder growth >=10/hr).
+- layer8_momentum_override.py: fixed a real pre-existing bug caught while
+  testing this -- _parse_time only handled datetime/ISO strings, but
+  state.py's real mc_history stores plain float epoch timestamps, so
+  detect_momentum_override crashed on its first real call with actual
+  recorded MC history (2+ points). Not hypothetical: this is the exact
+  path scheduler._handle_scored's band-D branch hits live.
+- 20 new tests (state + scheduler + the RPC-gate logic), all mocked, no
+  real network calls. Full suite: 408 passed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Ubddr6BU3zyCkGX6s1cwTA
+---
+ layers/layer0_scoring.py           |  31 ++++++
+ layers/layer8_momentum_override.py |  19 +++-
+ scheduler.py                       | 110 +++++++++++++++++-
+ state.py                           |  90 +++++++++++++++
+ tests/test_soft_fail_watch.py      | 173 +++++++++++++++++++++++++++++
+ tests/test_state.py                |  70 ++++++++++++
+ 6 files changed, 489 insertions(+), 4 deletions(-)
+ create mode 100644 tests/test_soft_fail_watch.py
+
+diff --git a/layers/layer0_scoring.py b/layers/layer0_scoring.py
+index f9eb44a..5572391 100644
+--- a/layers/layer0_scoring.py
++++ b/layers/layer0_scoring.py
+@@ -1187,6 +1187,37 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
+     return {"chain": chain, "address": mint, "score": score_token(sig)}
+ 
+ 
++def free_recheck_solana_signals(mint: str) -> dict:
++    """Cheap, keyless re-check of a Solana mint's two free RPC signals (top10
++    holder concentration, holder growth rate) -- ZERO MadeOnSol budget spent.
++
++    Built Sept 28 2026 for state.py's soft-fail watch list (see
++    watch_add/get_soft_fail_watch's docstrings), which exists to close a real
++    gap Ali flagged live: _maybe_queue_rescan only re-queues a D-band token
++    for a real re-score when a fresh market-cap point comes in for it, and
++    the ONLY source of fresh MC points today is Layer 2's tracked-KOL-wallet
++    feed. A token no tracked wallet ever trades never gets a second MC point,
++    so it never re-queues -- even if it quietly becomes structurally clean
++    (liquidity locked, concentration drops, organic holder growth starts)
++    within its first hours, exactly the scenario Ali described. This lets the
++    scheduler check for that kind of real improvement on its own cadence,
++    independent of KOL activity, without spending real (budget-capped) money
++    on a full MadeOnSol re-score for every watched token every cycle.
++
++    Returns {"top10_holder_pct": Optional[float],
++    "holder_growth_rate_per_hr": Optional[float]} -- either can be None on an
++    RPC failure, same as their underlying fetchers; never fabricates a value.
++    Also records the holder point via state.record_holder_point (same as
++    score_solana_mint's real wiring) so a later real re-score, if this
++    triggers one, sees continuous history instead of a cold start."""
++    top10 = fetch_solana_top10_holder_pct(mint)
++    holder_count = fetch_solana_holder_count(mint)
++    if holder_count is not None:
++        state.record_holder_point(mint, holder_count)
++    growth = compute_holder_growth_rate_per_hr(state.get_holder_history(mint))
++    return {"top10_holder_pct": top10, "holder_growth_rate_per_hr": growth}
++
++
+ def scan_stage1(mints_by_chain: dict) -> list:
+     """mints_by_chain: {"solana": [(mint, is_pregrad), ...], "base": [mint,...], ...}
+     Returns list of dicts: {chain, address, score_result}."""
+diff --git a/layers/layer8_momentum_override.py b/layers/layer8_momentum_override.py
+index 5ef2223..9ab4afd 100644
+--- a/layers/layer8_momentum_override.py
++++ b/layers/layer8_momentum_override.py
+@@ -16,7 +16,7 @@ source's public docs show one clean "MC history" endpoint. This is called
+ out explicitly rather than fabricating an endpoint.
+ """
+ from dataclasses import dataclass
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, timezone
+ from typing import List, Tuple
+ 
+ LOW_BASE_MC_USD = 10_000
+@@ -53,8 +53,25 @@ class MomentumResult:
+ 
+ 
+ def _parse_time(ts):
++    """Real bug caught live Sept 28 2026, while testing the new soft-fail
++    watch list (see state.py's watch_add docstring): this only ever handled
++    a datetime or an ISO-format string, but state.py's real mc_history (via
++    record_mc_point -> get_mc_history, the ACTUAL data source this function
++    is fed in production, scheduler.py's `mc_hist = state.get_mc_history(mint)`)
++    stores plain float unix-epoch timestamps (time.time()), never ISO
++    strings. datetime.fromisoformat(str(1790577283.87...)) raises
++    ValueError -- meaning detect_momentum_override would crash on its very
++    first real call with genuine recorded MC history (2+ points), not just
++    on some edge case. No existing test caught this because
++    tests/test_layer8_momentum_override.py always constructed its own
++    datetime/ISO-string fixtures directly, never round-tripped through
++    state.py's real storage format. Not a hypothetical -- this is the exact
++    call path scheduler._handle_scored's band-D branch hits on every D-band
++    token with 2+ recorded MC points."""
+     if isinstance(ts, datetime):
+         return ts
++    if isinstance(ts, (int, float)):
++        return datetime.fromtimestamp(ts, tz=timezone.utc)
+     return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+ 
+ 
+diff --git a/scheduler.py b/scheduler.py
+index 7999e54..83894dd 100644
+--- a/scheduler.py
++++ b/scheduler.py
+@@ -121,7 +121,7 @@ except ImportError:
+ 
+ from config import CONFIG
+ from layers.kol_feed import fetch_kol_feed_both
+-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age
++from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals
+ from layers.layer1_deployer import poll_layer1, chain_for_cycle
+ from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
+     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
+@@ -318,7 +318,8 @@ def _alert(alert: Alert, layer: str) -> dict:
+     return send_res
+ 
+ 
+-def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, board: dict = None) -> bool:
++def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, board: dict = None,
++                    is_pregraduation: bool = None) -> bool:
+     """Sends an alert for one scored token if appropriate, and records the
+     score for future event-triggered re-scoring (state.set_last_score).
+     Returns True iff an alert was actually delivered.
+@@ -448,11 +449,29 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
+         mc_hist = state.get_mc_history(mint) if mint else []
+         mom = detect_momentum_override(sr.band, mc_hist)
+         if not mom.triggered:
++            # Soft-fail watch list (Ali, Sept 28 2026 -- see state.py's
++            # watch_add docstring for the real gap this closes): a token no
++            # tracked KOL wallet ever trades never gets a fresh MC point, so
++            # _maybe_queue_rescan's MC-triggered path never re-checks it --
++            # this gives it a second, MC-independent path back into
++            # consideration via cheap free-RPC signals. Solana only (the
++            # free signals are SPL-specific -- see
++            # free_recheck_solana_signals -- RHC uses a different token
++            # standard and isn't covered by them).
++            if mint and chain == "solana":
++                state.watch_add(mint, chain, bool(is_pregraduation), sr.score, sr.reasons)
+             return False  # fails safety score, no momentum yet -- suppressed, per spec
+         alert = Alert((mint or "?")[:8], mint, chain, "HIGH-RISK MOMENTUM override")
+         alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band D)")
+         alert.set_tag("HIGH-RISK MOMENTUM", mom.reason)
+     else:
++        # Cleared band D on a real re-score (soft-fail watch or MC-triggered
++        # -- either path lands here) -- drop it from the watch list so it
++        # doesn't sit there stale; this IS the "coin quietly became solid"
++        # case Ali described, now actually alerting instead of being stuck
++        # silently rejected forever.
++        if mint:
++            state.watch_remove(mint)
+         alert = Alert((mint or "?")[:8], mint, chain, f"Layer 0{'b' if source == 'mobula' else ''} structural score")
+         alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band {sr.band})")
+     if backing_tag:
+@@ -486,6 +505,84 @@ def _maybe_queue_rescan(token: str, chain: str, new_mc: float):
+               f"queued for re-score")
+ 
+ 
++# Soft-fail watch cycle (Ali, Sept 28 2026) -- see state.py's watch_add
++# docstring for the real gap this closes and free_recheck_solana_signals'
++# docstring for why this costs ZERO MadeOnSol budget. Capped per cycle same
++# philosophy as LAYER2B_MAX_SIGNATURES_PER_CYCLE below -- the free Solana RPC
++# pool (executor/rpc_pool.py) has no real SLA, so this is additive load on
++# it, not a MadeOnSol budget concern (this path spends none).
++SOFT_FAIL_RECHECK_MAX_PER_CYCLE = 8
++
++# Thresholds a free re-check needs to clear before this queues a real
++# 3-call MadeOnSol re-score on a token that already failed once -- kept
++# deliberately stricter than "any improvement at all" (burning real,
++# budget-capped calls on a token that's barely better than before isn't
++# worth it). Both mirror the same structural bar score_token itself already
++# uses: top10 concentration's credit curve zeroes out at >=60%, so <=35%
++# is comfortably in "real, not marginal" territory; holder growth's credit
++# curve maxes out at 30/hr, so >=10/hr is a genuine signal, not noise.
++SOFT_FAIL_WATCH_TOP10_OK = 0.35
++SOFT_FAIL_WATCH_HOLDER_GROWTH_OK = 10.0
++
++
++def _run_soft_fail_watch_cycle() -> int:
++    """Sweeps state.get_soft_fail_watch() -- D-band Solana tokens
++    _handle_scored couldn't clear and that never got MC-triggered back into
++    _maybe_queue_rescan's path (no tracked KOL wallet ever traded them, so
++    no fresh MC point ever arrived -- see state.py's watch_add docstring).
++    Spends ZERO MadeOnSol budget -- only the two free RPC signals already
++    wired for real scoring (layer0_scoring.free_recheck_solana_signals). A
++    token that clears either bar above gets queued into the SAME
++    state.queue_rescan/pop_pending_rescans path _maybe_queue_rescan already
++    uses -- the next slow cycle spends one real 3-call MadeOnSol re-score on
++    it, and _handle_scored's own band-D-cleared branch fires a normal alert
++    and drops it from the watch list if it actually clears. No separate
++    alerting path needed -- this only decides WHETHER a real re-score is
++    worth spending, not what happens after. A token that doesn't clear
++    either bar just gets last_checked_ts bumped and ages out naturally past
++    state.SOFT_FAIL_WATCH_MAX_AGE_SECONDS (pruned on state.get_soft_fail_watch's
++    own read). Returns the number newly queued for a real re-score."""
++    watch = state.get_soft_fail_watch()
++    if not watch:
++        return 0
++    # Oldest-checked-first so the whole list gets a turn across successive
++    # cycles instead of the same few tokens (whatever sorts first) hogging
++    # every cycle's cap -- same round-robin intent as Layer 8's overflow
++    # re-queue.
++    watch.sort(key=lambda w: w.get("last_checked_ts", 0))
++    to_check = [w for w in watch if w.get("chain") == "solana"][:SOFT_FAIL_RECHECK_MAX_PER_CYCLE]
++    queued = 0
++    for w in to_check:
++        token = w["token"]
++        sig = _safe(free_recheck_solana_signals, token)
++        state.watch_touch(token)
++        if not isinstance(sig, dict):
++            continue
++        top10 = sig.get("top10_holder_pct")
++        growth = sig.get("holder_growth_rate_per_hr")
++        improved = (top10 is not None and top10 <= SOFT_FAIL_WATCH_TOP10_OK) or \
++                   (growth is not None and growth >= SOFT_FAIL_WATCH_HOLDER_GROWTH_OK)
++        if improved:
++            reasons = []
++            if top10 is not None and top10 <= SOFT_FAIL_WATCH_TOP10_OK:
++                reasons.append(f"top10 now {top10*100:.1f}%")
++            if growth is not None and growth >= SOFT_FAIL_WATCH_HOLDER_GROWTH_OK:
++                reasons.append(f"+{growth:.0f} holders/hr")
++            print(f"[soft-fail-watch] {token[:8]} shows real improvement ({', '.join(reasons)}) -- "
++                  f"queued for a real re-score")
++            state.queue_rescan(token, w["chain"], w.get("is_pregraduation", True))
++            # The next real re-score (via the queue above) is the
++            # authoritative verdict either way -- leaving this entry in the
++            # watch list too would just double-check the same token via two
++            # separate paths for no benefit.
++            state.watch_remove(token)
++            queued += 1
++    if to_check:
++        print(f"[soft-fail-watch] checked {len(to_check)}/{len(watch)} watched token(s), "
++              f"{queued} queued for a real re-score (0 MadeOnSol calls spent)")
++    return queued
++
++
+ LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
+ 
+ 
+@@ -886,6 +983,12 @@ def run_poll_fast():
+     else:
+         print("[layer6] BLOCKED: MOBULA_API_KEY and/or WALLET_ADDRESSES not set")
+ 
++    # --- Soft-fail watch sweep (Ali, Sept 28 2026) -- free RPC only (0
++    # MadeOnSol calls), so this runs every fast cycle same as Layer 2b/6
++    # above, not gated behind the slow cycle's budget concerns. See
++    # _run_soft_fail_watch_cycle's docstring for what this closes. ---
++    _safe(_run_soft_fail_watch_cycle)
++
+     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
+           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "
+           f"pass). See README's call-budget section for how this compares to the 200/day cap.")
+@@ -932,7 +1035,8 @@ def _run_layer8_cycle(board):
+                     continue
+                 scored = _safe(score_solana_mint, p["token"], chain, is_pregraduation=p["is_pregraduation"])
+                 madeonsol_calls += 3  # risk + holders + bundle
+-                if _handle_scored(scored, chain, source="madeonsol", board=board):
++                if _handle_scored(scored, chain, source="madeonsol", board=board,
++                                   is_pregraduation=p["is_pregraduation"]):
+                     alerts_sent += 1
+             if to_process:
+                 print(f"[layer0/8:{chain}] deep-scored {len(to_process)} token(s) "
+diff --git a/state.py b/state.py
+index c34330b..e619548 100644
+--- a/state.py
++++ b/state.py
+@@ -604,3 +604,93 @@ def release_lock(key: str):
+         get_json(f"{CONFIG.upstash_redis_rest_url}/del/{key}", headers=_upstash_headers())
+     except ApiUnreachable:
+         pass
++
++
++# --- Soft-fail watch list (Ali, Sept 28 2026) -----------------------------
++# Real gap Ali flagged live: a Solana/RHC token that fails Layer 0's
++# structural score (band D) only gets a second look via
++# scheduler._maybe_queue_rescan, which triggers ONLY when a fresh market-cap
++# point comes in for it -- and the only source of fresh MC points today is
++# Layer 2's tracked-KOL-wallet feed. A token no tracked wallet ever trades
++# never gets a second MC point, so it silently never re-queues, even if it
++# quietly becomes structurally clean (liquidity locked, concentration drops,
++# real holder growth starts) within its first hours -- exactly the scenario
++# Ali described: "our system not detecting it further as it had done the
++# scan of the coin earlier."
++#
++# This tracks D-band Solana tokens independent of MC/KOL activity, so
++# scheduler._run_soft_fail_watch_cycle can cheaply re-check them (via
++# layer0_scoring.free_recheck_solana_signals -- ZERO MadeOnSol budget, only
++# free RPC) on its own cadence and queue a real re-score (via the SAME
++# queue_rescan/pop_pending_rescans path _maybe_queue_rescan already uses)
++# only once a real improvement signal shows up. Bounded in both directions:
++# capped item count (a busy night shouldn't grow this without bound, same
++# philosophy as ALERT_FEED_MAX_ITEMS) and capped age -- Ali's own framing
++# was "minutes and hours", not an indefinite hold, so a token that hasn't
++# turned around within the window is dropped for good, same as a real
++# hard-fail (mint/freeze authority live, honeypot) that was never likely to
++# change in the first place.
++SOFT_FAIL_WATCH_KEY = "soft_fail_watch"
++SOFT_FAIL_WATCH_MAX_AGE_SECONDS = 12 * 3600
++SOFT_FAIL_WATCH_MAX_ITEMS = 300
++
++
++def watch_add(token: str, chain: str, is_pregraduation: bool, score: int, reasons: list,
++              ts: Optional[float] = None):
++    """Adds a D-band token to the soft-fail watch list, deduped by token --
++    an already-watched token keeps its original first_seen_ts (the age
++    window is measured from when it FIRST failed, not refreshed on a repeat
++    D score every cycle) but gets its last-known score/reasons updated."""
++    ts = ts if ts is not None else time.time()
++    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
++    existing = next((w for w in watch if w.get("token") == token), None)
++    if existing:
++        existing["last_score"] = score
++        existing["last_reasons"] = reasons
++    else:
++        watch.append({
++            "token": token, "chain": chain, "is_pregraduation": is_pregraduation,
++            "first_seen_ts": ts, "last_checked_ts": ts,
++            "last_score": score, "last_reasons": reasons, "free_checks_done": 0,
++        })
++    cutoff = ts - SOFT_FAIL_WATCH_MAX_AGE_SECONDS
++    watch = [w for w in watch if w.get("first_seen_ts", 0) >= cutoff][-SOFT_FAIL_WATCH_MAX_ITEMS:]
++    set_value(SOFT_FAIL_WATCH_KEY, watch)
++
++
++def get_soft_fail_watch() -> list:
++    """Returns the current watch list, pruned of anything past
++    SOFT_FAIL_WATCH_MAX_AGE_SECONDS -- self-cleaning on read, same pattern
++    as the other capped lists in this file, so a token that never turns
++    around ages out on its own without a separate sweep job."""
++    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
++    cutoff = time.time() - SOFT_FAIL_WATCH_MAX_AGE_SECONDS
++    fresh = [w for w in watch if w.get("first_seen_ts", 0) >= cutoff]
++    if len(fresh) != len(watch):
++        set_value(SOFT_FAIL_WATCH_KEY, fresh)
++    return fresh
++
++
++def watch_remove(token: str):
++    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
++    remaining = [w for w in watch if w.get("token") != token]
++    if len(remaining) != len(watch):
++        set_value(SOFT_FAIL_WATCH_KEY, remaining)
++
++
++def watch_touch(token: str, ts: Optional[float] = None):
++    """Bumps last_checked_ts/free_checks_done for a watched token after a
++    free-signal recheck, regardless of outcome -- lets the scheduler's
++    per-cycle cap round-robin across the whole list (oldest-checked-first)
++    instead of the same few tokens (whatever sorts first) hogging every
++    cycle."""
++    ts = ts if ts is not None else time.time()
++    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
++    changed = False
++    for w in watch:
++        if w.get("token") == token:
++            w["last_checked_ts"] = ts
++            w["free_checks_done"] = w.get("free_checks_done", 0) + 1
++            changed = True
++    if changed:
++        set_value(SOFT_FAIL_WATCH_KEY, watch)
+diff --git a/tests/test_soft_fail_watch.py b/tests/test_soft_fail_watch.py
+new file mode 100644
+index 0000000..6f4a2c2
+--- /dev/null
++++ b/tests/test_soft_fail_watch.py
+@@ -0,0 +1,173 @@
++"""
++Tests for the soft-fail watch list (Ali, Sept 28 2026 -- the real gap he
++flagged live: a Solana/RHC token that fails Layer 0's structural score (band
++D) only gets re-checked via scheduler._maybe_queue_rescan, which triggers
++ONLY on a fresh market-cap point -- and the only source of those is Layer 2's
++tracked-KOL-wallet feed. A token no tracked wallet ever trades never gets a
++second MC point, so it silently never re-queues, even if it quietly becomes
++structurally clean within its first hours. This covers the three pieces that
++close that gap: scheduler._handle_scored adding a D-band Solana token to the
++watch list (state.py), free_recheck_solana_signals doing a zero-MadeOnSol-
++budget re-check, and scheduler._run_soft_fail_watch_cycle deciding whether
++that re-check earns a real re-score.
++"""
++import pytest
++
++import state
++import scheduler
++from layers.layer0_scoring import ScoreResult
++
++
++@pytest.fixture(autouse=True)
++def isolated_state(tmp_path, monkeypatch):
++    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
++    yield
++
++
++def _scored(address, band, score=40, reasons=None):
++    return {"chain": "ignored", "address": address,
++            "score": ScoreResult(score=score, band=band, liquidity_flag="thin", reasons=reasons or [])}
++
++
++# --- _handle_scored wiring: band D, no momentum -> added to watch list ---
++
++def test_band_d_solana_with_no_momentum_gets_added_to_watch_list():
++    scored = _scored("token-d-solana", "D", score=35, reasons=["top10 holds 70%"])
++    sent = scheduler._handle_scored(scored, "solana", source="test", mc=None,
++                                     is_pregraduation=True)
++    assert sent is False  # suppressed, per spec -- no alert
++    watch = state.get_soft_fail_watch()
++    assert len(watch) == 1
++    assert watch[0]["token"] == "token-d-solana"
++    assert watch[0]["is_pregraduation"] is True
++    assert watch[0]["last_score"] == 35
++
++
++def test_band_d_robinhood_chain_not_added_to_watch_list():
++    # Free RPC signals are SPL-specific -- RHC uses a different token
++    # standard, so watching it would just burn RPC calls for nothing.
++    scored = _scored("token-d-rhc", "D", score=35)
++    scheduler._handle_scored(scored, "robinhood_chain", source="test", mc=None,
++                              is_pregraduation=False)
++    assert state.get_soft_fail_watch() == []
++
++
++def test_band_d_bsc_not_added_to_watch_list():
++    scored = _scored("token-d-bsc", "D", score=35)
++    scheduler._handle_scored(scored, "bsc", source="test", mc=None)
++    assert state.get_soft_fail_watch() == []
++
++
++def test_band_d_with_momentum_override_does_not_add_to_watch_list(monkeypatch):
++    # Momentum override already alerts on this token -- no need to also
++    # watch it for a quiet turnaround, it's already being surfaced.
++    import time as time_mod
++    now = time_mod.time()
++    # Real trigger shape per detect_momentum_override: min MC in the last
++    # 30 min <= LOW_BASE_MC_USD (10k) and the latest point >= SIX_FIGURES_MC_USD (100k).
++    state.record_mc_point("token-momentum", 5_000.0, ts=now - 600)
++    state.record_mc_point("token-momentum", 150_000.0, ts=now)
++    monkeypatch.setattr(scheduler, "send_alert", lambda alert: {"sent": True})
++    scored = _scored("token-momentum", "D", score=20)
++    sent = scheduler._handle_scored(scored, "solana", source="test", mc=None, is_pregraduation=True)
++    assert sent is True
++    assert state.get_soft_fail_watch() == []
++
++
++def test_clearing_band_d_removes_token_from_watch_list(monkeypatch):
++    state.watch_add("token-recovered", "solana", True, 35, ["top10 holds 70%"])
++    monkeypatch.setattr(scheduler, "send_alert", lambda alert: {"sent": True})
++    scored = _scored("token-recovered", "B", score=68)
++    scheduler._handle_scored(scored, "solana", source="test", mc=None, is_pregraduation=True)
++    assert state.get_soft_fail_watch() == []
++
++
++def test_missing_mint_does_not_crash_watch_wiring():
++    scored = {"chain": "solana", "address": None,
++              "score": ScoreResult(score=20, band="D", liquidity_flag="thin", reasons=[])}
++    scheduler._handle_scored(scored, "solana", source="test", mc=None, is_pregraduation=True)
++    assert state.get_soft_fail_watch() == []
++
++
++# --- _run_soft_fail_watch_cycle: free-signal gate before a real re-score ---
++
++def test_watch_cycle_queues_rescan_when_top10_concentration_improved(monkeypatch):
++    state.watch_add("token-improved", "solana", True, 35, ["top10 holds 70%"])
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals",
++                         lambda mint: {"top10_holder_pct": 0.20, "holder_growth_rate_per_hr": None})
++    queued = scheduler._run_soft_fail_watch_cycle()
++    assert queued == 1
++    assert state.pending_rescan_count() == 1
++    # queued for a real re-score -- removed from the watch list, the
++    # re-score itself is now the authoritative next check
++    assert state.get_soft_fail_watch() == []
++
++
++def test_watch_cycle_queues_rescan_when_holder_growth_improved(monkeypatch):
++    state.watch_add("token-growing", "solana", True, 35, ["holder growth unknown"])
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals",
++                         lambda mint: {"top10_holder_pct": 0.55, "holder_growth_rate_per_hr": 25.0})
++    queued = scheduler._run_soft_fail_watch_cycle()
++    assert queued == 1
++    assert state.pending_rescan_count() == 1
++
++
++def test_watch_cycle_does_not_queue_when_signals_still_bad(monkeypatch):
++    state.watch_add("token-still-bad", "solana", True, 35, [])
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals",
++                         lambda mint: {"top10_holder_pct": 0.55, "holder_growth_rate_per_hr": 2.0})
++    queued = scheduler._run_soft_fail_watch_cycle()
++    assert queued == 0
++    assert state.pending_rescan_count() == 0
++    # still on the watch list, but its check counter moved
++    watch = state.get_soft_fail_watch()
++    assert len(watch) == 1
++    assert watch[0]["free_checks_done"] == 1
++
++
++def test_watch_cycle_handles_rpc_failure_gracefully(monkeypatch):
++    state.watch_add("token-rpc-down", "solana", True, 35, [])
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals",
++                         lambda mint: {"top10_holder_pct": None, "holder_growth_rate_per_hr": None})
++    queued = scheduler._run_soft_fail_watch_cycle()
++    assert queued == 0
++    assert state.get_soft_fail_watch()[0]["free_checks_done"] == 1
++
++
++def test_watch_cycle_skips_robinhood_chain_entries(monkeypatch):
++    # Shouldn't normally happen (see test_band_d_robinhood_chain_not_added_
++    # to_watch_list), but defends the sweep itself against ever spending an
++    # SPL-specific RPC call on a non-Solana chain if one somehow got in.
++    watch = state.get_value(state.SOFT_FAIL_WATCH_KEY) or []
++    watch.append({"token": "rhc-token", "chain": "robinhood_chain", "is_pregraduation": False,
++                  "first_seen_ts": __import__("time").time(), "last_checked_ts": 0,
++                  "last_score": 35, "last_reasons": [], "free_checks_done": 0})
++    state.set_value(state.SOFT_FAIL_WATCH_KEY, watch)
++
++    def boom(mint):
++        raise AssertionError("should never call free_recheck_solana_signals for a non-solana chain")
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals", boom)
++
++    queued = scheduler._run_soft_fail_watch_cycle()
++    assert queued == 0
++
++
++def test_watch_cycle_respects_per_cycle_cap(monkeypatch):
++    import time as time_mod
++    now = time_mod.time()
++    for i in range(scheduler.SOFT_FAIL_RECHECK_MAX_PER_CYCLE + 5):
++        state.watch_add(f"token-{i}", "solana", True, 35, [], ts=now - i)
++    calls = []
++    def fake_recheck(mint):
++        calls.append(mint)
++        return {"top10_holder_pct": 0.55, "holder_growth_rate_per_hr": None}  # never clears -> stays watched
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals", fake_recheck)
++    scheduler._run_soft_fail_watch_cycle()
++    assert len(calls) == scheduler.SOFT_FAIL_RECHECK_MAX_PER_CYCLE
++
++
++def test_watch_cycle_empty_list_is_a_noop(monkeypatch):
++    def boom(mint):
++        raise AssertionError("should not be called on an empty watch list")
++    monkeypatch.setattr(scheduler, "free_recheck_solana_signals", boom)
++    assert scheduler._run_soft_fail_watch_cycle() == 0
+diff --git a/tests/test_state.py b/tests/test_state.py
+index 5709c7d..aafc4cc 100644
+--- a/tests/test_state.py
++++ b/tests/test_state.py
+@@ -210,3 +210,73 @@ def test_cryptopanic_seen_cap_keeps_most_recent(tmp_path, monkeypatch):
+     assert len(seen) == state_module.CRYPTOPANIC_SEEN_CAP
+     assert ids[-1] in seen
+     assert ids[0] not in seen
++
++
++# --- Soft-fail watch list (Ali, Sept 28 2026) -- see state.py's watch_add
++# docstring for the real gap this closes ---
++
++def test_watch_add_creates_new_entry(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    state_module.watch_add("MintA", "solana", True, 40, ["top10 holds 70%"])
++    watch = state_module.get_soft_fail_watch()
++    assert len(watch) == 1
++    assert watch[0]["token"] == "MintA"
++    assert watch[0]["chain"] == "solana"
++    assert watch[0]["is_pregraduation"] is True
++    assert watch[0]["last_score"] == 40
++    assert watch[0]["free_checks_done"] == 0
++
++
++def test_watch_add_dedupes_and_preserves_first_seen_ts(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    now = time.time()
++    state_module.watch_add("MintA", "solana", True, 40, ["r1"], ts=now - 3600)
++    state_module.watch_add("MintA", "solana", True, 35, ["r2"], ts=now - 1800)
++    watch = state_module.get_soft_fail_watch()
++    assert len(watch) == 1
++    assert watch[0]["first_seen_ts"] == now - 3600  # not refreshed on repeat D score
++    assert watch[0]["last_score"] == 35          # but last-known score IS updated
++    assert watch[0]["last_reasons"] == ["r2"]
++
++
++def test_get_soft_fail_watch_prunes_stale_entries(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    now = time.time()
++    state_module.watch_add("Old", "solana", True, 40, [], ts=now - state_module.SOFT_FAIL_WATCH_MAX_AGE_SECONDS - 1)
++    state_module.watch_add("Fresh", "solana", True, 40, [], ts=now)
++    watch = state_module.get_soft_fail_watch()
++    tokens = {w["token"] for w in watch}
++    assert tokens == {"Fresh"}
++
++
++def test_watch_remove(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    state_module.watch_add("MintA", "solana", True, 40, [])
++    state_module.watch_remove("MintA")
++    assert state_module.get_soft_fail_watch() == []
++
++
++def test_watch_remove_nonexistent_token_is_a_noop(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    state_module.watch_add("MintA", "solana", True, 40, [])
++    state_module.watch_remove("NeverAdded")
++    assert len(state_module.get_soft_fail_watch()) == 1
++
++
++def test_watch_touch_increments_check_count(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    state_module.watch_add("MintA", "solana", True, 40, [])
++    state_module.watch_touch("MintA")
++    state_module.watch_touch("MintA")
++    watch = state_module.get_soft_fail_watch()
++    assert watch[0]["free_checks_done"] == 2
++
++
++def test_watch_add_caps_item_count(tmp_path, monkeypatch):
++    _reset_local_state(tmp_path, monkeypatch)
++    for i in range(state_module.SOFT_FAIL_WATCH_MAX_ITEMS + 10):
++        state_module.watch_add(f"Mint{i}", "solana", True, 40, [], ts=time.time())
++    watch = state_module.get_soft_fail_watch()
++    assert len(watch) == state_module.SOFT_FAIL_WATCH_MAX_ITEMS
++    # newest entries survive the cap, oldest (lowest index) get dropped
++    assert "Mint0" not in {w["token"] for w in watch}
+-- 
+2.43.0
+
