@@ -2,7 +2,13 @@ name: Poll fast (discovery -- Layer 1, Layer 0b, Layer 4, Layer 6)
 
 on:
   workflow_dispatch: {}
-  schedule:
+  # PAUSED Sept 28 2026, 16:11 PKT -- schedule commented out to stop burning
+  # MadeOnSol's shared 200/day BASIC-tier quota so validate-scoring.yml can
+  # get a clean read right after tonight's midnight-UTC reset. Manual
+  # workflow_dispatch still works if you need a poll cycle in the meantime.
+  # Re-enable by uncommenting the `schedule:` block below once the backtest
+  # run is done.
+  # schedule:
     # Every 10 minutes, UNCHANGED. This is the discovery cadence -- Layer 1
     # (deployer alerts) and Layer 0b (Mobula Pulse scoring) finding
     # brand-new tokens. Deliberately left fast per Ali's explicit direction:
@@ -16,7 +22,7 @@ on:
     # pieces into their own slower cycle (see poll-slow.yml) doesn't fix
     # this on its own, because Layer 1 itself isn't one of the pieces this
     # split slows down (on purpose). See README for the options.
-    - cron: "*/10 * * * *"
+    # - cron: "*/10 * * * *"
 
 jobs:
   poll-fast:

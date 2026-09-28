@@ -2,7 +2,11 @@ name: Poll slow (Layer 8 deep-scoring, Layer 2+9 wallet activity)
 
 on:
   workflow_dispatch: {}
-  schedule:
+  # PAUSED Sept 28 2026, 16:11 PKT -- same reason as poll-fast.yml: stop
+  # burning the shared MadeOnSol 200/day quota so validate-scoring.yml gets
+  # a clean read right after tonight's midnight-UTC reset. Re-enable by
+  # uncommenting once the backtest run is done.
+  # schedule:
     # Every 20 minutes -- the expensive pieces (Layer 8's per-token MadeOnSol
     # deep scoring, 3 calls/token, plus Layers 2+9's KOL-feed/wallet-balance
     # checks). Per Ali's direction: 15-20 min is enough here (it's not the
@@ -13,7 +17,7 @@ on:
     # 200/day cap -- see README's call-budget table for the 15 vs 20 numbers
     # and change this to */15 if you'd rather trade some safety margin for
     # a bit more freshness once you've confirmed the real cap.
-    - cron: "*/20 * * * *"
+    # - cron: "*/20 * * * *"
 
 jobs:
   poll-slow:

@@ -23,9 +23,9 @@ jobs:
         # minutes even while the script is actively working. `timeout` is a
         # hard ceiling so a slow/rate-limited API call fails loudly instead
         # of silently eating the whole job.
-        run: timeout 480 python -u backtest_point_in_time.py --skip-onchain
+        run: timeout 900 python -u backtest_point_in_time.py --skip-onchain
       - name: Categorized credibility / sniper-accuracy backtest
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
           PYTHONUNBUFFERED: "1"
-        run: timeout 480 python -u backtest_categorized.py
+        run: timeout 900 python -u backtest_categorized.py
