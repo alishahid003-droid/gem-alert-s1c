@@ -1,0 +1,23 @@
+name: Validate scoring (Section 1 -- point-in-time + categorized backtests)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Point-in-time credibility backtest
+        env:
+          MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
+          BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
+        run: python backtest_point_in_time.py --skip-onchain
+      - name: Categorized credibility / sniper-accuracy backtest
+        env:
+          MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
+        run: python backtest_categorized.py
