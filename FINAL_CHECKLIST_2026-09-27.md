@@ -13,12 +13,13 @@ resets — 00:00 UTC = ~5:00 AM PKT. Nothing below can start for real until
 that reset, except step 0.
 
 ## 0. Right now, before the reset (no MadeOnSol budget needed)
-- [ ] Confirm all local commits are actually pushed: `git status`, `git log
-  origin/main..HEAD` should be empty. (Last check showed 40aeab4 pushed —
-  re-verify, don't assume.)
-- [ ] Clean up the two untracked diagnostic files sitting in the repo
-  (`diag_raw_json.py`, `diag_rug_signals.py`) — delete or `git add` if
-  they're worth keeping, don't leave stray files uncommitted.
+- [x] DONE Sept 28 2026: confirmed pushed and clean. `git status` shows a
+  clean working tree, `origin/main` at `6cb6101` matches local HEAD exactly
+  (verified via a fresh `git fetch`, not assumed from an old check).
+- [x] DONE (already, turned out): `diag_raw_json.py` and `diag_rug_signals.py`
+  are both already tracked and committed (`git ls-files` confirms both,
+  alongside `diag_goplus.py`) — this line was stale, written before they
+  were actually added. Nothing left to clean up here.
 - [ ] Watch `state.get_alert_feed()` for anything the keyless layers
   (stonkfun discovery/momentum, DexScreener buzz, news/exchange,
   correlation) catch overnight — these don't touch the MadeOnSol budget
@@ -162,31 +163,63 @@ that reset, except step 0.
   workarounds get IP-blocked within hours and break on every frontend
   change -- not building that. This item stays paid-only, no free
   substitute for Twitter specifically.
-- [ ] Build instead (Ali's push Sept 27 2026 -- right call, there IS a
-  free path for the same underlying goal, just not via Twitter):
-  monitor public Telegram channels via Telegram's own official, free
-  Bot API or Telethon -- this is where most real pump.fun
-  "caller"/signal activity actually lives, more than Twitter for this
-  specific niche, and it's ToS-compliant (unlike scraping X). Track
-  which known caller channels post a buy call and which wallets act
-  right after -- same purpose as "KOL activity," different free
-  source. Needs: pick 3-5 real, established Solana/pump.fun caller
-  channels to start with (not guessed at -- find ones with an actual
-  track record), a Telegram bot/client reading their public messages,
-  and a way to correlate a post to the token's contract address.
-- [ ] Check Dune Analytics' free API tier for pulling community-built
-  Solana "smart money" wallet-labeling dashboards programmatically
-  (one exists live: dune.com/wallet_dig/smart-money-solana) -- free to
-  view in-browser, exact free API credit limit not yet confirmed live
-  (Dune isn't reachable from this session's sandbox, same restriction
-  as MadeOnSol/Birdeye/DexScreener -- needs checking from Ali's own PC
-  or browser). If the free API tier covers enough query volume, this
-  is a free, no-build-required source of wallet labels rather than
-  something we'd have to construct ourselves.
+- [x] BUILT Sept 28 2026 (infra done; channel list is Ali's real remaining
+  step, not a build task). `layers/layer12_caller_channels.py` +
+  `scheduler.poll_layer12_caller_channels` + wiring into `_handle_scored`
+  as a `[Caller: channel (Nm ago)]` tag, same convention as Backing/Buzz
+  -- never folded into the structural score. Uses Telegram's own free,
+  keyless (beyond a bot token) Bot API `getUpdates`, filtered to
+  configured channel IDs only. Real, honest gap: getting the actual
+  channel list right needed genuine research, and that research turned
+  up only SEO "best telegram groups" listicles with zero verified
+  call/outcome track record -- exactly the kind of unconfirmed source
+  this codebase has a standing rule against building on (same discipline
+  as pumpfun_trades.py's instruction-decoding rule). So `TELEGRAM_CALLER_
+  BOT_TOKEN` / `TELEGRAM_CALLER_CHANNEL_IDS` are deliberately left unset
+  -- this is CONFIG-driven and fails closed until Ali supplies real
+  channels he already trusts (he already follows 13-20+ traders on the
+  Fomo app for this same underlying signal). One more real, disclosed
+  step once channels ARE supplied: Telegram's Bot API can only read a
+  channel's posts if the bot is invited as an ADMIN of it first (no
+  "read any public channel" call exists) -- a one-time manual step per
+  channel, documented in config.py's own docstring for how to get each
+  channel's real numeric ID afterward. 27 new tests, all passing
+  (tests/test_layer12_caller_channels.py, tests/test_state_caller_
+  signals.py, tests/test_layer12_scheduler_wiring.py), full suite green
+  (459/459).
+- [x] CLOSED Sept 28 2026 -- confirmed dead, not building against it.
+  Checked Dune's own docs directly (docs.dune.com/learning/how-tos/
+  credit-system, plus real reporting on their Sept 10 2026 policy
+  change): "Free access is view-only and includes no monthly credits,
+  query execution, or API access." Legacy free accounts got a one-time
+  14-day Plus trial (2,500 credits) that reverts to pure view-only after
+  -- no ongoing programmatic access at any credit level. So the
+  smart-money-solana dashboard is real and free to LOOK at in a browser,
+  but there is no free API path to pull it into this system, not a
+  budget/reachability issue like MadeOnSol/Birdeye -- a real, confirmed
+  product-policy dead end. Not worth revisiting unless Ali wants to pay
+  for Dune's Analyst tier ($65/mo).
 - [ ] Decide (optional, not blocking): MadeOnSol PRO tier ($43-49/mo) for
   its own risk `factors` (mint/freeze authority, lp_lock) beyond what
   GoPlus's fallback already covers. Not urgent since the free RPC signals
   closed the bigger gap (holder concentration) already.
+- [x] CHECKED Sept 28 2026 -- real, actionable finding, not previously
+  known. Of Axiom/Photon/BonkBot/Trojan, none document a public API.
+  **GMGN does**: a real, official "Agent API" (docs.gmgn.ai/index/
+  gmgn-agent-api, official GitHub GMGNAI/gmgn-skills) that lets an
+  external agent read live market data AND execute real on-chain swaps
+  on Solana, BSC, and Base (Ethereum "in progress" -- **no Robinhood
+  Chain support**, so it wouldn't cover every chain this system trades).
+  Auth is a generated API key + a private key GMGN's own docs say is
+  needed "for trading features" -- meaning real custody/trust exposure
+  handing a private key to a third party's API, not a neutral technical
+  detail; pricing isn't documented anywhere found. Genuinely worth a
+  real look if execution speed becomes the bottleneck later (this is
+  exactly the "our scoring + their speed" combination the Advanced
+  Upgrades section below speculated about), but NOT a decision to make
+  solo -- handing a real funded wallet's private key to an external
+  service is Ali's call, not something to wire in without him reviewing
+  the custody model first.
 
 ## 4. Only after 1-3 look good — Track B, real money go-live
 - [ ] Export Phantom's Solana private key + EVM private key (needed for

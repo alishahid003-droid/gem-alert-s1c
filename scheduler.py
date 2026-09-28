@@ -129,6 +129,7 @@ from layers.layer2_convergence import poll_layer2
 from executor.entrypoint import handle_stage1_candidate, handle_stage2_candidate
 from layers.layer3_backing_check import check_backing_spike
 from layers.layer11_social_buzz import fetch_boost_board, check_buzz
+from layers.layer12_caller_channels import fetch_caller_channel_posts, extract_token_addresses
 from layers.pumpfun_trades import fetch_recent_signatures, fetch_transaction, decode_trade
 from layers.layer2b_pumpfun_smart_money import process_trade as pumpfun_process_trade, \
     detect_pumpfun_convergence, get_smart_money_roster, single_wallet_buy_events
@@ -250,6 +251,18 @@ def readiness_report() -> dict:
                     "'robinhood' confirmed Sept 23, 2026 while checking Ali's RBD/RobinDog "
                     "question). 2 calls total per poll cycle, not per token -- rides as a "
                     "[Buzz: boosted/surging] tag on the same alert, not a separate one.",
+        },
+        "layer12_caller_channels": {
+            "ready": CONFIG.layer12_ready(),
+            "note": "built Sept 28, 2026 -- free, keyless beyond a Telegram bot token (Twitter/X "
+                    "confirmed paid-only, see layer11's own note above). Requires the caller bot "
+                    "invited as ADMIN of each target channel (Telegram's Bot API has no other way "
+                    "to read a channel's posts) plus TELEGRAM_CALLER_CHANNEL_IDS -- both left unset "
+                    "deliberately: the channel list has to come from Ali's own real, verified "
+                    "channels, not scraped from an SEO 'best telegram groups' listicle with no "
+                    "actual track record (see layers/layer12_caller_channels.py's docstring). "
+                    "Rides as a [Caller: channel (Nm ago)] tag on a real alert, same convention as "
+                    "Backing/Buzz -- never folds into the structural score itself.",
         },
         "stage2": {
             "layer2_convergence": CONFIG.layer1_ready(),  # same MadeOnSol key powers the KOL feed
@@ -392,6 +405,21 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             buzz_tag = buzz.tag
             print(f"[layer11] {mint[:8]} buzz={buzz_tag} (total_amount={buzz.total_amount})")
 
+    # -- Layer 12: Telegram caller-channel mention (Ali, Sept 28 2026, see
+    # layers/layer12_caller_channels.py's docstring). Pure state lookup --
+    # poll_layer12_caller_channels already did the real work of recording
+    # this earlier in the cycle, so this costs no extra call at all. Never
+    # gates or scores anything, corroborating color only, same as
+    # Backing/Buzz above -- a token still has to pass real structural
+    # scoring on its own merits to reach this point in the first place. --
+    caller_tag = None
+    if mint:
+        caller = state.get_caller_signal(mint)
+        if caller:
+            mins_ago = max(0, (time.time() - caller.get("ts", time.time())) / 60)
+            caller_tag = f"{caller.get('channel', 'unknown channel')} ({mins_ago:.0f}m ago)"
+            print(f"[layer12] {mint[:8]} caller_mention={caller_tag}")
+
     # -- Dev-wallet current-holding-% (Ali, Sept 28 2026 -- checklist item,
     # built same night as fetch_solana_token_deployer/
     # fetch_solana_dev_holding_pct in layer0_scoring.py). Solana only --
@@ -479,6 +507,8 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         alert.set_tag("Backing", backing_tag)
     if buzz_tag:
         alert.set_tag("Buzz", buzz_tag)
+    if caller_tag:
+        alert.set_tag("Caller", caller_tag)
     if dev_tag:
         alert.set_tag("Dev holding", dev_tag)
     if age_tag:
@@ -722,6 +752,39 @@ def _run_post_alert_monitor_cycle() -> int:
     return downgraded
 
 
+def poll_layer12_caller_channels() -> dict:
+    """One getUpdates call against the caller bot (free, keyless beyond the
+    bot token itself -- no MadeOnSol/Birdeye/DexScreener budget touched),
+    parses every configured channel's posts for candidate token addresses,
+    and records each one via state.record_caller_signal for
+    scheduler._handle_scored to ride as a "Caller" tag later. No-ops
+    cleanly (never raises) if CONFIG.layer12_ready() is False -- see
+    layers/layer12_caller_channels.py's docstring for why the channel list
+    starts empty and stays that way until Ali supplies real ones."""
+    if not CONFIG.layer12_ready():
+        return {"ok": False, "reason": "Layer 12 not configured (TELEGRAM_CALLER_BOT_TOKEN / "
+                                        "TELEGRAM_CALLER_CHANNEL_IDS)"}
+    offset = state.get_caller_update_offset()
+    result = _safe(fetch_caller_channel_posts, offset=offset)
+    if not (isinstance(result, dict) and result.get("ok")):
+        reason = result.get("reason") if isinstance(result, dict) else str(result)
+        print(f"[layer12] caller-channel fetch failed this cycle: {reason}")
+        return {"ok": False, "reason": reason}
+    posts = result.get("posts") or []
+    recorded = 0
+    for post in posts:
+        addresses = extract_token_addresses(post.text)
+        for addr in addresses["solana"] + addresses["evm"]:
+            state.record_caller_signal(addr, post.channel_name, ts=post.date)
+            recorded += 1
+    next_offset = result.get("next_offset")
+    if next_offset is not None:
+        state.set_caller_update_offset(next_offset)
+    if posts:
+        print(f"[layer12] {len(posts)} caller-channel post(s) this cycle, {recorded} address mention(s) recorded")
+    return {"ok": True, "posts_checked": len(posts), "addresses_recorded": recorded}
+
+
 LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
 
 
@@ -914,6 +977,11 @@ def run_poll_fast():
     if not (isinstance(board, dict) and board.get("ok")):
         print(f"[layer11] boost board fetch failed this cycle: {board}")
         board = None
+
+    # --- Layer 12: Telegram caller-channel monitoring (Ali, Sept 28 2026)
+    # -- free, keyless beyond the bot token, no-ops cleanly if not
+    # configured. See poll_layer12_caller_channels' docstring. ---
+    _safe(poll_layer12_caller_channels)
 
     # --- Layer 1: deployer alerts. MOVED off GitHub Actions (Ali, Sept 24
     # 2026): confirmed live that MadeOnSol's free key rate-limits on IP

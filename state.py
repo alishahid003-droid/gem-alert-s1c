@@ -768,3 +768,54 @@ def post_alert_monitor_remove(token: str):
     remaining = [q for q in queue if q.get("token") != token]
     if len(remaining) != len(queue):
         set_value(POST_ALERT_MONITOR_KEY, remaining)
+
+
+# --- Layer 12 -- Telegram caller-channel signals (Ali, Sept 28 2026) ---
+# See layers/layer12_caller_channels.py's module docstring for the full
+# picture: a token address mentioned in a configured caller channel gets
+# recorded here, and scheduler._handle_scored rides it as a "Caller" tag on
+# a real alert if that token also independently passes structural scoring
+# within CALLER_SIGNAL_WINDOW_SECONDS of the mention. Never a detection
+# mechanism on its own -- corroborating color only, same as Backing/Buzz.
+CALLER_SIGNALS_KEY = "caller_signals"
+CALLER_SIGNAL_MAX_AGE_SECONDS = 2 * 3600
+CALLER_SIGNAL_MAX_ITEMS = 500
+CALLER_UPDATE_OFFSET_KEY = "caller_update_offset"
+
+
+def record_caller_signal(token: str, channel_name: str, ts: Optional[float] = None):
+    """Records that `token` was mentioned in `channel_name` at `ts` (default
+    now). Deliberately does NOT dedupe by token -- the same token called in
+    two different channels, or called twice, is itself a real signal (see
+    get_caller_signal, which returns the single most recent match, not a
+    count) -- callers wanting "was this token called more than once" can
+    read every match themselves via get_value(CALLER_SIGNALS_KEY)."""
+    ts = ts if ts is not None else time.time()
+    signals = get_value(CALLER_SIGNALS_KEY) or []
+    signals.append({"token": token, "channel": channel_name, "ts": ts})
+    cutoff = ts - CALLER_SIGNAL_MAX_AGE_SECONDS
+    signals = [s for s in signals if s.get("ts", 0) >= cutoff][-CALLER_SIGNAL_MAX_ITEMS:]
+    set_value(CALLER_SIGNALS_KEY, signals)
+
+
+def get_caller_signal(token: str) -> Optional[dict]:
+    """Returns the most recent still-live caller-channel mention of `token`
+    (within CALLER_SIGNAL_MAX_AGE_SECONDS), or None if it was never
+    mentioned or its mention has aged out."""
+    signals = get_value(CALLER_SIGNALS_KEY) or []
+    cutoff = time.time() - CALLER_SIGNAL_MAX_AGE_SECONDS
+    matches = [s for s in signals if s.get("token") == token and s.get("ts", 0) >= cutoff]
+    if not matches:
+        return None
+    return max(matches, key=lambda s: s.get("ts", 0))
+
+
+def get_caller_update_offset() -> Optional[int]:
+    """Telegram getUpdates cursor -- the next update_id to request, so a
+    poll cycle never reprocesses updates Telegram already delivered."""
+    return get_value(CALLER_UPDATE_OFFSET_KEY)
+
+
+def set_caller_update_offset(offset: Optional[int]):
+    if offset is not None:
+        set_value(CALLER_UPDATE_OFFSET_KEY, offset)

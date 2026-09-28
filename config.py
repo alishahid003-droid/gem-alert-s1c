@@ -37,6 +37,35 @@ class Config:
     telegram_bot_token: Optional[str] = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))
     telegram_chat_id: Optional[str] = field(default_factory=lambda: _env("TELEGRAM_CHAT_ID"))
 
+    # Layer 12 -- Telegram caller-channel monitoring (Ali, Sept 27 2026 push:
+    # "there IS a free path for the same underlying goal" as Twitter buzz,
+    # via the public Telegram channels most real pump.fun call activity
+    # actually happens in). A SEPARATE bot from telegram_bot_token above --
+    # that bot sends alerts OUT to Ali's own chat; this one needs to be
+    # invited as an ADMIN of each target caller channel to receive its posts
+    # via getUpdates (Telegram's Bot API has no way to read a channel's
+    # messages otherwise -- confirmed against their own docs; MTProto/
+    # Telethon with a real phone-authenticated user session could read
+    # public channel history without that step, but that's materially
+    # heavier and riskier -- a real user account, not just a bot token --
+    # so this starts with the plain Bot API path). See
+    # layers/layer12_caller_channels.py's module docstring for the real,
+    # honest reason the channel list itself is NOT filled in here with
+    # anything scraped from "best telegram groups" listicle sites -- those
+    # have no verified call/outcome track record, several are paid
+    # placements, and this codebase has a standing rule against building on
+    # unverified data. Ali fills this in himself with channels he already
+    # knows have a real track record (he already follows 13-20+ traders on
+    # the Fomo app for the same underlying signal -- likely overlapping
+    # people/channels).
+    telegram_caller_bot_token: Optional[str] = field(default_factory=lambda: _env("TELEGRAM_CALLER_BOT_TOKEN"))
+    # Comma-separated numeric Telegram chat IDs (NOT @usernames -- getUpdates'
+    # channel_post.chat.id is always numeric). Get a channel's real ID by
+    # adding the caller bot as admin, having anyone post once, then reading
+    # https://api.telegram.org/bot<TOKEN>/getUpdates in a browser -- the
+    # chat.id shown there is the real one to use, never guessed.
+    telegram_caller_channel_ids_raw: Optional[str] = field(default_factory=lambda: _env("TELEGRAM_CALLER_CHANNEL_IDS"))
+
     # Ali's own wallet addresses, one per chain, PUBLIC address only.
     # Comma-separated "chain:address" pairs, e.g.
     # "solana:Abc123...,base:0xdef...,ethereum:0xdef..."
@@ -141,6 +170,24 @@ class Config:
 
     def telegram_ready(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_chat_id)
+
+    def telegram_caller_channel_ids(self) -> list:
+        raw = self.telegram_caller_channel_ids_raw
+        if not raw:
+            return []
+        out = []
+        for piece in raw.split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            try:
+                out.append(int(piece))
+            except ValueError:
+                continue
+        return out
+
+    def layer12_ready(self) -> bool:
+        return bool(self.telegram_caller_bot_token and self.telegram_caller_channel_ids())
 
 
 CONFIG = Config()
