@@ -16,7 +16,7 @@ import re
 import xml.etree.ElementTree as ET
 
 from config import CONFIG
-from utils.http import get_json
+from utils.http import get, get_json
 
 
 def fetch_cryptopanic_posts(filter_: str = "rising") -> dict:
@@ -115,11 +115,19 @@ def _extract_coindesk_currencies(title: str, summary: str = "") -> list:
 
 
 def fetch_coindesk_rss() -> dict:
-    result = get_json(CONFIG.coindesk_rss_url)
-    # RSS is XML, not JSON -- get_json's json.loads fails on it as expected
-    # and falls back to result["text"] (see utils/http.py's get_json), which
-    # is what we actually want here.
-    return {"ok": result["ok"], "raw": result}
+    """Uses utils.http.get() directly, NOT get_json(). Real bug found and
+    fixed live Sept 28 2026: get_json()'s non-JSON fallback truncates the
+    response body to result["text"] = resp.text[:2000] (fine for a short
+    error message, which is what that fallback was built for) -- but
+    CoinDesk's real RSS feed is much longer than 2000 chars, so every fetch
+    silently returned a truncated, syntactically-broken XML document.
+    ET.fromstring correctly refused to parse it and parse_coindesk_rss
+    returned an empty list every time -- "0 posts fetched" with ok=True and
+    a real 200, looking like a working call that just found nothing, when
+    the real cause was truncation. get() returns the raw requests.Response
+    with the FULL .text, no truncation."""
+    resp = get(CONFIG.coindesk_rss_url)
+    return {"ok": resp.ok, "raw": {"status_code": resp.status_code, "text": resp.text}}
 
 
 def parse_coindesk_rss(xml_text: str) -> list:

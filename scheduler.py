@@ -1113,7 +1113,7 @@ def run_poll_fast():
     # above, which is gated on that token).
     cd = _safe(fetch_coindesk_rss)
     if cd["ok"]:
-        posts = parse_coindesk_rss((cd["raw"].get("json") is None and cd["raw"].get("text")) or "")
+        posts = parse_coindesk_rss(cd["raw"].get("text") or "")  # fetch_coindesk_rss returns raw text directly now, no "json" key
         seen = state.coindesk_seen_posts()
         actionable = [p for p in posts if p.get("currencies") and p.get("id") not in seen]
         print(f"[layer4:coindesk] {len(posts)} post(s) fetched, "
