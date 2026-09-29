@@ -5,18 +5,13 @@ position_state.py, and moonbag.py itself. This is glue, not new decision
 logic: everything it does is delegate to those three modules in the correct
 sequence, and it makes no network calls of its own.
 
-STATUS: built and tested, but NOT called from scheduler.py's actual poll
-loop yet -- same as the rest of executor/ (see README.md's "Before this can
-ever go live" list). As of Sept 25, 2026 this DOES call the real
+STATUS: built and tested. As of Sept 25, 2026 this DOES call the real
 swap_executor.execute_buy_* functions and record real fills on a fire --
 previously it only decided a position WOULD be opened. It remains safe by
 construction either way: execute_buy_* refuses unless EXECUTION_ENABLED is
 "true" and a wallet key is configured, so nothing here moves real money
-until Ali turns that on. Wiring THIS module into scheduler.py's live poll
-loop is still a separate step, deliberately left until after the Part A
-backtest and Ali's review -- calling handle_stage1_candidate/
-handle_stage2_candidate today has no live effect because nothing in the
-poll loop calls IT yet.
+until Ali turns that on. handle_stage1_candidate/handle_stage2_candidate
+are wired into scheduler.py's live poll loop (see _handle_scored).
 
 Usage (once wired): for each candidate Layers 0/0b, 1, 2 have already
 scored on a poll cycle, call handle_stage1_candidate with whatever's known
@@ -24,6 +19,15 @@ at launchpad level. For a coin graduating with Fomo convergence, call
 handle_stage2_candidate. Both return a dict describing what happened either
 way (fired or not, and why) so the caller can log or alert on the outcome
 without re-deriving it.
+
+handle_compound_scalper_candidate (added Sept 29 2026, Ali's explicit ask
+for a fast/aggressive compounding mode -- see executor/compound_scalper.py's
+own module docstring for the full honesty flag and design rationale) is a
+SEPARATE, independent entry path alongside the two above -- it evaluates
+its own isolated pool via executor.compound_scalper, never touches Stage 1/
+Stage 2's position_state or budget, and is a no-op unless
+COMPOUND_SCALPER_ENABLED="true" AND compound_scalper.init_pool() has
+already been called (deliberate manual start, not automatic).
 """
 from typing import Optional
 
@@ -31,6 +35,7 @@ import executor.position_state as position_state
 import executor.triggers as triggers
 import executor.moonbag as moonbag
 import executor.swap_executor as swap_executor
+import executor.compound_scalper as compound_scalper
 
 
 _BUY_FUNCTIONS = {
@@ -124,4 +129,26 @@ def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[f
         "fired": True, "stage": "stage2", "position_usd": decision.position_usd,
         "reason": decision.reason, "double_confirmed": double_confirmed,
         "conviction_score": conviction["score"], "trim_ladder": conviction["ladder"], "buy": buy_result,
+    }
+
+
+def handle_compound_scalper_candidate(chain: str, token: str, score_band: Optional[str],
+                                       entry_mcap: Optional[float],
+                                       liquidity_usd: Optional[float] = None) -> dict:
+    """Evaluates executor.compound_scalper's own entry gate and, if it
+    fires, opens the scalp position through that module. Independent of
+    Stage 1/Stage 2 -- a token can fire this AND a stage entry in the same
+    cycle, since they draw from separate pools/budgets. No-op (should_fire
+    always False) unless COMPOUND_SCALPER_ENABLED="true" and
+    compound_scalper.init_pool() has already been called -- see that
+    module's own docstring for why the pool start is a deliberate manual
+    step rather than automatic."""
+    decision = compound_scalper.entry_gate(chain, token, score_band, liquidity_usd=liquidity_usd)
+    if not decision.should_fire:
+        return {"fired": False, "mode": "compound_scalper", "reason": decision.reason}
+
+    open_result = compound_scalper.open_scalp(chain, token, decision.position_usd, entry_mcap, decision.reason)
+    return {
+        "fired": True, "mode": "compound_scalper", "position_usd": decision.position_usd,
+        "reason": decision.reason, "open": open_result,
     }

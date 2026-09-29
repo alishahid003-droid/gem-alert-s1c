@@ -126,7 +126,8 @@ from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
 from layers.layer2_convergence import poll_layer2
-from executor.entrypoint import handle_stage1_candidate, handle_stage2_candidate
+from executor.entrypoint import handle_stage1_candidate, handle_stage2_candidate, handle_compound_scalper_candidate
+import executor.compound_scalper as compound_scalper
 import executor.position_state as position_state
 import executor.moonbag as moonbag
 import executor.defensive_sell as defensive_sell
@@ -522,6 +523,18 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             if _stats():
                 _stats().note_execution(1, chain, mint, stage1["position_usd"], stage1["conviction_score"])
 
+        # Compound scalper (Ali, Sept 29 2026) -- independent isolated-pool
+        # entry path, draws its own gate off the same score band. No-op
+        # unless COMPOUND_SCALPER_ENABLED="true" and the pool was manually
+        # started -- see executor/compound_scalper.py's own docstring.
+        liq_usd = (scored.get("raw") or {}).get("liquidity_usd")
+        scalp = handle_compound_scalper_candidate(
+            chain, mint, score_band=sr.band, entry_mcap=mc, liquidity_usd=liq_usd,
+        )
+        if scalp["fired"]:
+            print(f"[compound-scalper:{chain}] SCALP OPENED {mint[:8]} -- "
+                  f"${scalp['position_usd']:.2f} ({scalp['reason']})")
+
     # -- Layer 3: Reddit-backing check (Ali, Sept 23 2026 -- built Sept 7,
     # never called). Only attempted on an actual Stage 1 fire, not every
     # scored token -- Adanos's free tier is 250 CALLS/MONTH TOTAL, so this
@@ -913,6 +926,35 @@ def _run_position_management_cycle() -> dict:
               f"{len(defends_fired)} defensive exit(s) fired this cycle.")
     return {"managed": managed, "trims_fired": trims_fired,
             "milestones_fired": milestones_fired, "defends_fired": defends_fired}
+
+
+def _run_compound_scalper_cycle() -> dict:
+    """Manages the compound-scalper pool's one open position, if any --
+    that pool's state is deliberately separate from position_state.py's
+    Stage 1/2 positions (see executor/compound_scalper.py's module
+    docstring for why: isolated capital, sequential-only, its own circuit
+    breaker), so it gets its own small cycle here rather than folding into
+    _run_position_management_cycle above. A true no-op whenever the pool
+    has no open position -- including whenever the mode is disabled or was
+    never manually started."""
+    pool_status = compound_scalper.status()
+    pos = pool_status.get("open_position")
+    if not pos:
+        return {"managed": False}
+
+    chain, token = pos.get("chain"), pos.get("token")
+    if not chain or not token:
+        return {"managed": False}
+
+    snap = _safe(fetch_dexscreener_snapshot, chain, token)
+    if not (isinstance(snap, dict) and snap.get("mcap_usd") is not None):
+        return {"managed": False, "reason": "could not re-price open scalp position this cycle"}
+
+    result = compound_scalper.check_and_manage(snap["mcap_usd"])
+    if result and result.get("sell_attempted"):
+        d = result["exit_decision"]
+        print(f"[compound-scalper:{chain}] {d.exit_type.upper()} {token[:8]}: {d.reason}")
+    return {"managed": True, "result": result}
 
 
 def _run_post_alert_monitor_cycle() -> int:
@@ -1584,6 +1626,11 @@ def run_poll_fast():
     # cycle. See _run_position_management_cycle's docstring for the real
     # gap this closes. ---
     _safe(_run_position_management_cycle)
+
+    # --- Compound scalper pool management (Ali, Sept 29 2026) -- separate
+    # from the position management pass above on purpose. See
+    # _run_compound_scalper_cycle's docstring. ---
+    _safe(_run_compound_scalper_cycle)
 
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "
