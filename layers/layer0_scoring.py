@@ -254,6 +254,37 @@ def score_token(sig: RawSignals) -> ScoreResult:
                             f"({sig.price_drawdown_from_peak_pct:.1f}% from peak) -- band {band} -> D")
             band = "D"
 
+    # Multi-signal agreement gate for band A, added Sept 29 2026 (Ali's
+    # "80%+ precision" push, checklist item #2). Real failure mode this
+    # closes: a blended average score can clear band A off several
+    # signals that are each individually UNKNOWN and only contributing
+    # their neutral-default partial credit (see every "-- scored
+    # ...-neutral" branch above) -- no single real, confirmed-favorable
+    # signal actually has to exist for that to happen. That's exactly the
+    # kind of false-positive the launch-window collapse override above
+    # doesn't catch (it only fires on a CONFIRMED bad drawdown -- it can't
+    # help when the problem is an absence of real confirming data, not a
+    # presence of real bad data). Requires at least 2 of the 4 strongest,
+    # most rug-diagnostic signals to be independently CONFIRMED favorable
+    # (real data, not a None-default) before a token can hold band A --
+    # otherwise it's demoted to B, never lower (this is a precision gate
+    # on the TOP tier only, not a new rejection path; B/C/D tokens are
+    # already below the "elite tier only" bar scheduler.py trades from).
+    if band == "A":
+        confirmed_favorable = 0
+        if sig.mint_authority_revoked is True and sig.freeze_authority_revoked is True:
+            confirmed_favorable += 1
+        if sig.lp_locked_or_curve_healthy is True:
+            confirmed_favorable += 1
+        if sig.price_drawdown_from_peak_pct is not None and sig.price_drawdown_from_peak_pct >= -10.0:
+            confirmed_favorable += 1
+        if sig.bundler_sniper_pct is not None and sig.bundler_sniper_pct < 0.15:
+            confirmed_favorable += 1
+        if confirmed_favorable < 2:
+            reasons.append(f"GATE: only {confirmed_favorable}/4 strong signals independently "
+                            f"confirmed favorable (need 2) -- band A -> B")
+            band = "B"
+
     if sig.liquidity_usd is None:
         liq_flag = "unknown"
     elif sig.liquidity_usd < TYPICAL_POSITION_USD * 3:

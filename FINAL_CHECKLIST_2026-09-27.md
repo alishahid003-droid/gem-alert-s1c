@@ -462,6 +462,19 @@ launch time, plus a free/fast API to add as a pre-filter.
   pointing the same way). Trades fewer total signals for much higher
   precision on the ones that do fire -- the right tradeoff with only
   10-20 real trades to spend.
+  [x] DONE Sept 29 2026 ~6:55 PM PKT: implemented as a band-A gate in
+  score_token -- real failure mode closed: several UNKNOWN signals each
+  contributing neutral-default partial credit could blend up to a band-A
+  numeric score with ZERO signals actually confirmed favorable. Now
+  requires >=2 of the 4 strongest, most rug-diagnostic signals (both
+  mint+freeze authority confirmed revoked, LP locked/curve healthy
+  confirmed, launch-window drawdown confirmed <=-10% from peak,
+  bundler/sniper % confirmed <15%) to be independently CONFIRMED (real
+  data, not a None-default) before a token can hold band A -- otherwise
+  demoted to B, never lower. Only touches band A; B/C/D unaffected. 3 new
+  tests (holds A with 2+ confirmed, demotes to B with only 1 confirmed
+  despite score >=80, never fires below band A). Full suite: 518 passed /
+  1 pre-existing unrelated failure. Committed locally, not yet pushed.
 - [ ] Pull the categorized backtest's per-token breakdown for every false
   positive (scored high, was actually a rug/pump-dump) and find the
   common thread -- same deployer pattern, same liquidity-lock gap, same

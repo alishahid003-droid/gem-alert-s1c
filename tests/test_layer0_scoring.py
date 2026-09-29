@@ -74,6 +74,81 @@ def test_bundler_sniper_pct_none_when_bundle_json_empty():
     assert sig.bundler_sniper_pct is None
 
 
+def test_band_a_multi_signal_gate_holds_a_with_2_confirmed_favorable_signals(monkeypatch):
+    # Sept 29 2026 (Ali's "80%+ precision" push, checklist item #2): band A
+    # requires >=2 of the 4 strongest signals to be independently CONFIRMED
+    # favorable, not just a high blended average. This token has all 4
+    # confirmed favorable -- must hold band A.
+    from layers.layer0_scoring import RawSignals
+    sig = RawSignals(
+        top10_holder_pct=0.1,
+        lp_locked_or_curve_healthy=True,
+        mint_authority_revoked=True,
+        freeze_authority_revoked=True,
+        vol_to_liq_ratio=5.0,
+        holder_growth_rate_per_hr=30.0,
+        bundler_sniper_pct=0.05,
+        price_drawdown_from_peak_pct=-2.0,
+        liquidity_usd=50000.0,
+        is_pregraduation_solana=True,
+    )
+    result = score_token(sig)
+    assert result.band == "A"
+    assert not any("GATE:" in r for r in result.reasons)
+
+
+def test_band_a_multi_signal_gate_demotes_to_b_when_signals_are_mostly_unknown(monkeypatch):
+    # Real failure mode this closes: several UNKNOWN signals each
+    # contribute their neutral-default partial credit (see every
+    # "...-- scored ...-neutral" branch in score_token) and the blended
+    # average alone can still clear the band-A numeric threshold, with
+    # ZERO signals actually confirmed favorable. Must demote to B.
+    # Constructed so the BLENDED score clears band A (>=80) mostly off
+    # unknown-neutral credit plus real-but-partial signals, while only 1 of
+    # the 4 strict gate signals is independently confirmed: freeze
+    # authority is confirmed revoked but mint authority is unknown, so the
+    # blended score still gives full auth credit (1 known bit, favorable)
+    # while the gate correctly refuses to count it (needs BOTH confirmed).
+    from layers.layer0_scoring import RawSignals
+    sig = RawSignals(
+        top10_holder_pct=0.0,
+        lp_locked_or_curve_healthy=None,
+        mint_authority_revoked=None,
+        freeze_authority_revoked=True,
+        vol_to_liq_ratio=5.0,
+        holder_growth_rate_per_hr=30.0,
+        bundler_sniper_pct=None,
+        price_drawdown_from_peak_pct=-2.0,
+        liquidity_usd=50000.0,
+        is_pregraduation_solana=True,
+    )
+    result = score_token(sig)
+    assert result.score >= 80  # confirms this really did clear band A structurally
+    assert result.band == "B"
+    assert any("GATE: only 1/4" in r for r in result.reasons)
+
+
+def test_band_a_multi_signal_gate_does_not_touch_band_b_or_below(monkeypatch):
+    # The gate only ever demotes FROM band A -- it must never fire (or
+    # matter) for a token that never reached A in the first place.
+    from layers.layer0_scoring import RawSignals
+    sig = RawSignals(
+        top10_holder_pct=0.5,
+        lp_locked_or_curve_healthy=False,
+        mint_authority_revoked=False,
+        freeze_authority_revoked=False,
+        vol_to_liq_ratio=0.1,
+        holder_growth_rate_per_hr=2.0,
+        bundler_sniper_pct=0.4,
+        price_drawdown_from_peak_pct=-30.0,
+        liquidity_usd=5000.0,
+        is_pregraduation_solana=True,
+    )
+    result = score_token(sig)
+    assert result.band != "A"
+    assert not any("GATE:" in r for r in result.reasons)
+
+
 def test_launch_shape_scores_low_on_severe_drawdown_high_near_peak():
     # New signal wired live Sept 27 2026 -- Birdeye real launch-window
     # price shape. Confirms the actual scoring curve: a token still near
