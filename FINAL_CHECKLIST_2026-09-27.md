@@ -566,3 +566,67 @@ priority order, not build order.
   which move in minutes, not hours -- same category of fix as the
   arXiv-measured "0.08 tx/hr rug vs 299 tx/hr legitimate" signal, just at
   finer time resolution.
+
+## Pre-flight check for tomorrow's ~5:05 AM PKT run (Sept 29, ~9:00 PM PKT)
+
+Ali asked for a full cross-check before tomorrow's run: no duplicate triggers,
+no bugs eating budget silently, every API confirmed working. Real findings:
+
+- [x] DONE: cron-job.org has exactly 3 jobs, no duplicates (poll-fast 10min,
+  poll-slow 20min, validate-scoring daily 5:05 AM PKT) -- confirmed live on
+  the dashboard.
+- [x] DONE, REAL BUG FIXED: poll-fast.yml and poll-slow.yml both still had
+  GitHub's own native `schedule:` trigger enabled at the SAME cadence as
+  their cron-job.org jobs -- the two were firing in parallel. Live GitHub
+  API check of the last 50 runs of each: poll-fast 1/50 and poll-slow 21/50
+  runs were schedule-triggered on top of the cron-job.org dispatches, and
+  most runs were coming back `cancelled` with zero jobs ever started (the
+  1-running/1-queued concurrency group was overflowing from the two
+  triggers competing) -- real double-spend of MadeOnSol budget AND real
+  discovery/deep-scoring cycles silently dropped. Native `schedule:` removed
+  from both; cron-job.org's workflow_dispatch is now the sole trigger for
+  both, matching validate-scoring.yml's already-correct pattern. Committed
+  f08f5fb.
+- [x] DONE, REAL BUG FIXED: poll-slow.yml never forwarded WALLET_ADDRESSES
+  to the job -- Layer 6 (exit-realizable / wallet portfolio snapshot) needs
+  it and MOBULA_API_KEY both to report ready, and poll-slow's own job
+  summary confirmed `layer6_exit_realizable: false` on a real run despite
+  MOBULA_API_KEY being set. poll-fast.yml already had this env line;
+  poll-slow.yml -- where Layer 6 actually executes -- didn't. Same
+  missing-env-line bug pattern as two earlier fixes today (MOBULA_API_KEY
+  in the categorized backtest, UPSTASH in validate-scoring). Fixed,
+  committed cba8f7a.
+- [x] CONFIRMED (not a bug): MadeOnSol's daily call budget is bucketed by
+  UTC calendar day (`madeonsol_calls:{date}` in state.py) -- it hard-resets
+  to 0 automatically at 00:00 UTC every day, no manual reconcile needed for
+  tomorrow's reset specifically. reconcile_budget.py exists only to correct
+  drift against the real MadeOnSol account if our local tracking ever
+  undercounts (the earlier Upstash-network-isolation bug), not to perform
+  the daily reset itself.
+- [x] EXPLAINED (root cause, not a new bug): validate-scoring.yml's run #4
+  (04:39 UTC today, a same-day re-run after run #3 already spent real
+  budget) died at exit code 124 -- the 900s hard `timeout` ceiling, not a
+  crash. Real pre-flight budget checks already exist in both backtest
+  scripts (added earlier today, commit dceeb3e) and would have refused to
+  start outright on insufficient budget -- so this run passed that initial
+  check but then ran into real MadeOnSol 429s mid-loop, most likely because
+  poll-fast/poll-slow's now-fixed double-firing was consuming budget
+  CONCURRENTLY while the 15-minute backtest was still running. Each 429
+  with a real Retry-After header can cost up to ~60s in utils/http.py's
+  bounded retry logic (2 retries, 30s cap each) -- enough tokens hitting
+  that path back-to-back adds up to the full 900s window. With the
+  double-fire bug now fixed, tomorrow's run should not face concurrent
+  budget contention from poll-fast/poll-slow while it runs.
+- [x] CONFIRMED clean: poll-fast and poll-slow's own job-summary readiness
+  output (self-reported by scheduler.py on every real run) shows every
+  core layer used by tomorrow's scoring path (layer0 structural scoring,
+  layer1 deployer alerts, layer8 deep-scoring) as ready:true on real runs
+  today. The two `false` flags found (layer4 cryptopanic, layer12 caller
+  channels) are both pre-existing, intentional config gaps (a free
+  secondary signup not yet done, and caller-channel IDs deliberately left
+  unset per their own docstrings) -- not something broken tonight, and
+  neither is used by validate-scoring.yml's scripts.
+- [ ] STILL PENDING: git push of f08f5fb and cba8f7a from Ali's machine --
+  both fixes are committed locally only as of this entry. MUST be pushed
+  before tomorrow's run for either fix to actually take effect (GitHub
+  Actions only reads the default branch's pushed HEAD).
