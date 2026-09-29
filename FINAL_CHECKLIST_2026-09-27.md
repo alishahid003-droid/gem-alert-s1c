@@ -400,3 +400,45 @@ Tiers, cheapest to most expensive, only spend from real profit:
   added the real secret value Sept 29 2026, ~08:44 PKT) -- queued, blocked
   tonight only by the Chrome browser session needed to manually trigger
   `workflow_dispatch` being minimized/unreachable from this session.
+
+## Update — Sept 29 2026, ~1:31 PM PKT (external scheduling + budget reconciliation)
+
+- [x] DONE: cron-job.org set up as the real external trigger source
+  (GitHub's own `schedule:` trigger confirmed unreliable) for poll-fast
+  (every 10 min) and poll-slow (every 20 min, custom crontab
+  `*/20 * * * *`). Both confirmed firing successfully via
+  `workflow_dispatch`.
+- [x] DONE: found and fixed a real concurrency gap -- nothing stopped
+  GitHub's own schedule trigger and cron-job.org's ping from overlapping
+  and double-spending the shared MadeOnSol daily budget in the same
+  window. Added `concurrency:` guards (queue, don't cancel) to
+  `poll-fast.yml` / `poll-slow.yml`. Commit `bfdc0a4`, pushed.
+- [x] DONE: root-caused tonight's second batch of real MadeOnSol 429s --
+  today's (Sept 29) real 200/day account quota was already spent by two
+  pre-fix `validate-scoring` runs this morning (03:02 / 04:39 UTC),
+  before the Upstash env-var fix existed. Confirmed live via MadeOnSol's
+  own 429 body (`resets_at: 2026-09-30T00:00:00.000Z`). Not a new bug.
+- [x] DONE: found a second, separate bug during that investigation -- the
+  Claude session's own local (`device_bash`) environment cannot reach
+  Upstash's REST API at all (proxy blocks `*.upstash.io`), so every prior
+  local "budget check" was silently failing and returning false default
+  data (0 used / 190 remaining) instead of real state. This produced a
+  false "verified 190 remaining, clear to trigger" claim given to Ali
+  before a run that then hit real 429s -- acknowledged and corrected to
+  him directly, same night.
+- [x] DONE: built `reconcile_budget.py` + one-off `reconcile-budget.yml`
+  GitHub Actions workflow (only environment with real Upstash network
+  access) to push the shared daily counter to reflect today's real
+  exhausted state. Ali pushed commit `e01208c` and manually ran the
+  workflow -- run completed `conclusion: success`.
+- [x] DONE: third cron-job.org job created -- "gem-alert validate-scoring
+  (post-reset)" -- POSTs to `workflow_dispatch` on `validate-scoring.yml`
+  automatically every day at 5:05 AM PKT (00:05 UTC), right after
+  MadeOnSol's real daily reset. Headers (Content-Type, Accept,
+  Authorization with Ali's own token) confirmed set and saved.
+- [ ] NEXT: tomorrow's ~00:05 UTC automatic validate-scoring run is the
+  next real, honest read of sniper accuracy -- off a genuinely fresh
+  MadeOnSol quota, with the concurrency guard and reconciled counter both
+  in place. Still the blocking gate before any `EXECUTION_ENABLED`
+  discussion (Section 4 boundary unchanged -- Ali physically present
+  only).
