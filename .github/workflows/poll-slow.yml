@@ -32,6 +32,7 @@ jobs:
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
           MOBULA_API_KEY: ${{ secrets.MOBULA_API_KEY }}
+          WALLET_ADDRESSES: ${{ secrets.WALLET_ADDRESSES }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
