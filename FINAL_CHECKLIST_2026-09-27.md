@@ -359,3 +359,44 @@ Tiers, cheapest to most expensive, only spend from real profit:
   three overrides from .env (or raise them back to $20/$17 and the real
   wallet total) -- otherwise every future position stays capped at the
   $3 test size indefinitely.
+
+## Sept 29 2026 morning -- isolated aggressive-compounding scalper module (Ali's request)
+- Ali's ask, verbatim in spirit: a fast, aggressive attempt at a small
+  target -- continuously enter fresh launches, catch 2-3x momentum, get
+  out, redeploy into the next one, compound repeatedly -- on an isolated
+  $25-30 pool, tens to hundreds of trades, over a 24-48h window.
+- [x] BUILT -- `executor/compound_scalper.py`, fully isolated from Stage
+  1/Stage 2 (separate state key, separate budget, separate circuit
+  breaker). Sequential only (one open position at a time) -- deliberate,
+  since fragmenting a $25-30 pool across concurrent positions makes the
+  near-fixed slippage/fee floor proportionally worse per trade.
+- [x] Cost-aware by design: `estimate_round_trip_cost_pct` refuses any
+  entry whose estimated buy+sell slippage/fee/liquidity-impact exceeds
+  12% (configurable) -- this is the actual point of the module: never
+  take a shot whose own friction eats the intended edge. This cost model
+  is a HEURISTIC (flagged in the module's own docstring) -- no real fill
+  data exists anywhere in this codebase yet to measure it against.
+- [x] 2.5x partial take-profit (60% sold, 40% rides under a 20% trailing
+  stop), 30% hard stop, 20-minute time stop if neither hits -- fast
+  in/out, matching the "get in, get out, repeat" ask.
+- [x] Position sized as 75% of the CURRENT pool balance each trade (not a
+  flat dollar amount) -- so a string of wins actually compounds.
+- [x] Wired into scheduler.py: fires alongside Stage 1 in `_handle_scored`,
+  managed every fast cycle via new `_run_compound_scalper_cycle`.
+- [x] 29 new tests, full suite 511 passed / 1 pre-existing expected
+  failure (unrelated -- the local $3/$7 test-sizing override).
+- OFF BY DEFAULT (`COMPOUND_SCALPER_ENABLED` unset). Even once enabled,
+  starting the pool is a second, deliberate, manual step
+  (`compound_scalper.init_pool()`) -- never automatic.
+- **HONEST VERDICT, stated plainly: this module does NOT fix the
+  underlying hit-rate.** Its entries are gated on the exact same
+  layers/layer0_scoring band that measured 43.8% overall credibility /
+  16.7% rug-filtering on the pre-BIRDEYE_API_KEY validate-scoring run.
+  Trading that filter more often takes more shots at the same odds, not
+  better ones. This module should not be turned on for real money until
+  a clean, post-BIRDEYE_API_KEY validate-scoring run shows real
+  separation -- same gate as everything else on this checklist.
+- NOT YET DONE: a live re-validation with BIRDEYE_API_KEY now added (Ali
+  added the real secret value Sept 29 2026, ~08:44 PKT) -- queued, blocked
+  tonight only by the Chrome browser session needed to manually trigger
+  `workflow_dispatch` being minimized/unreachable from this session.
