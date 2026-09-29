@@ -2,18 +2,10 @@ name: Validate scoring (Section 1 -- point-in-time + categorized backtests)
 
 on:
   workflow_dispatch: {}
-  # TEMPORARY, Sept 29 2026 -- cron doesn't support "run once", so this is a
-  # one-shot alarm timed for just after MadeOnSol's daily budget resets
-  # (00:00 UTC), so this run gets a real, clean, budget-fresh read with
-  # zero manual clicking (no GitHub write token available from either the
-  # Cowork cloud sandbox or Ali's own device shell -- both are proxied and
-  # can't reach madeonsol.com directly or call the Actions API, confirmed
-  # live tonight -- same restriction the README already documents for
-  # every other data source in this project). REMOVE this schedule block
-  # after tonight's run completes, or it'll keep firing daily at 00:07 UTC
-  # and burning budget every day going forward.
-  schedule:
-    - cron: "7 0 * * *"
+  # One-shot cron from Sept 29 2026 REMOVED here (Sept 29 2026, same night)
+  # -- it did its job (run #3, 03:02 UTC, real budget-fresh read). Back to
+  # workflow_dispatch-only so this doesn't silently recur and burn MadeOnSol
+  # budget every day.
 
 jobs:
   validate:
@@ -39,5 +31,13 @@ jobs:
       - name: Categorized credibility / sniper-accuracy backtest
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
+          MOBULA_API_KEY: ${{ secrets.MOBULA_API_KEY }}
           PYTHONUNBUFFERED: "1"
+        # Real gap found and fixed Sept 29 2026: this step never passed
+        # MOBULA_API_KEY at all (point-in-time's step above did, this one
+        # didn't) -- run #3's real log showed "BLOCKED: MOBULA_API_KEY not
+        # set -- cannot score any BSC entries" for the one BSC/Base labeled
+        # token, even though the secret itself exists in this repo (poll-
+        # fast.yml/poll-slow.yml already reference it). Just a missing env
+        # line in this one workflow step, not a missing secret.
         run: timeout 900 python -u backtest_categorized.py

@@ -26,15 +26,56 @@ that reset, except step 0.
   and are still live right now.
 
 ## 1. At/after the reset (~5:00 AM PKT) — validation, not new building
-- [ ] Run `python backtest_point_in_time.py --skip-onchain` ONCE, cleanly,
-  no other diagnostics run first that burn budget. This is the real
-  precision/recall number — the thing that actually answers "does this
-  system work," which nothing so far has measured end to end.
-- [ ] Run `python backtest_categorized.py` once, same rule — clean single
-  run, record the real output, don't re-run to chase a better number.
-- [ ] Read both outputs honestly and decide, in writing (Notion banner),
-  whether the current scoring is good enough to risk real money on, or
-  needs another pass before Track B (go-live) starts.
+- [x] DONE Sept 29 2026, 03:02-03:04 UTC (~8am PKT): ran both, for real,
+  right after reset, via a one-shot cron on validate-scoring.yml (run #3,
+  https://github.com/alishahid003-droid/gem-alert-s1c/actions/runs/36515371158,
+  both steps green, 2m21s total).
+
+  REAL NUMBERS, read honestly, not good enough yet:
+    - Point-in-time (settled tokens, launched <=30d ago): 4/13 (30.8%)
+      scored the band they should have.
+    - Categorized (OVERALL SNIPER CREDIBILITY): 7/16 (43.8%).
+      Broken down: moonshots caught 6/6 (100%) -- the system never misses
+      a real moonshot. Rugs correctly filtered to C/D: only 1/6 (16.7%).
+      Pump-dumps correctly filtered: 0/4 (0%). In plain terms: the system
+      is NOT currently distinguishing a rug/pump-dump from a real moonshot
+      -- almost everything clusters in band B regardless of real outcome.
+
+  ROOT CAUSE FOUND, not guessed: every single token in both runs logged
+  "launch-window shape: Birdeye FAILED -- BIRDEYE_API_KEY not configured".
+  This matters because the launch-window collapse override (see
+  layers/layer0_scoring.py, built Sept 28 2026 off real backtest evidence
+  from that same night) is the ONE mechanism in this whole scoring system
+  specifically built to force a real rug/pump-dump down to band D --
+  Ali's Sept 28 backtest showed this single check alone hit 76.9% (10/13)
+  separating real rugs from moonshots, far better than the blended
+  structural score's 30.8%. It never got to run tonight because
+  BIRDEYE_API_KEY exists in the local .env but was never added as a GitHub
+  Actions repository secret -- workflow_dispatch runs on GitHub's own
+  servers, which only see repo Secrets, not Ali's local .env. Separately,
+  found and fixed: backtest_categorized.py's BSC/Base step was completely
+  BLOCKED ("MOBULA_API_KEY not set") because validate-scoring.yml's second
+  step never passed that env var at all (the secret itself already exists
+  in the repo, poll-fast.yml/poll-slow.yml already use it) -- just a
+  missing line in the workflow YAML, fixed same commit.
+
+  ONE ACTION LEFT, only Ali can do it (can't type secret values into
+  GitHub myself): add BIRDEYE_API_KEY as a real repository secret --
+  github.com/alishahid003-droid/gem-alert-s1c/settings/secrets/actions ->
+  "New repository secret" -> name it exactly BIRDEYE_API_KEY -> paste the
+  same value that's in the local .env's BIRDEYE_API_KEY line. Once that's
+  done, one more validate-scoring run (budget allowing -- MadeOnSol's real
+  200/day cap isn't locally tracked for backtest.py's direct calls, so
+  don't burn it speculatively) should show the real, much-higher number
+  the collapse override is actually capable of.
+
+  VERDICT (honest, not hedged): as measured tonight, this scoring is NOT
+  good enough to risk real money on -- it can't yet tell a real rug from a
+  real moonshot most of the time. Don't flip EXECUTION_ENABLED or trust an
+  auto-buy off band alone until BIRDEYE_API_KEY is added and a clean
+  re-validation shows real separation. This is exactly the gate Section 1
+  existed to check, and it did its job -- the system caught its own gap
+  before money was on the line, not after.
 
 ## 2. Live-verify the new signals (needs real poll cycles running)
 - [ ] Let the fixed poll-fast loop run for at least a few real 20-min
