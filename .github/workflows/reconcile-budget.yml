@@ -1,0 +1,23 @@
+name: One-off - reconcile MadeOnSol budget counter
+
+# Manual, single-use. Not scheduled. See reconcile_budget.py's own
+# docstring for why this exists (Sept 29 2026, same night as the
+# validate-scoring Upstash-env fix). Safe to leave in the repo after
+# use -- it only ever runs when someone clicks "Run workflow".
+on:
+  workflow_dispatch: {}
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Reconcile MadeOnSol daily counter with real account state
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+        run: python reconcile_budget.py
