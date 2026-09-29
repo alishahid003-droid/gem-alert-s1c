@@ -95,6 +95,7 @@ import state
 import links
 from scheduler import readiness_report
 import executor.position_state as position_state
+import executor.compound_scalper as compound_scalper
 from layers.layer0_scoring import fetch_dexscreener_snapshot
 
 PORT = 8787
@@ -245,6 +246,16 @@ def build_data() -> dict:
     modules = _flatten_readiness(report)
     unrealized_total = sum(p["pnl_usd"] for p in positions if p.get("pnl_usd") is not None)
 
+    # Compound scalper pool (Ali, Sept 29 2026) -- entirely separate pool/
+    # state from position_state.py above, see executor/compound_scalper.py's
+    # own docstring for why. status() is read-only, never mutates.
+    scalper_status = compound_scalper.status()
+    if scalper_status.get("open_position"):
+        scalper_status["open_position"]["opened_fmt"] = (
+            _fmt_ts(scalper_status["open_position"].get("opened_ts"))
+            if scalper_status["open_position"].get("opened_ts") else "?"
+        )
+
     return {
         "generated_at": _fmt_ts(time.time()),
         "readiness": report,
@@ -258,6 +269,7 @@ def build_data() -> dict:
         "realized_pnl": position_state.realized_pnl_summary(),
         "unrealized_pnl_usd": unrealized_total,
         "state_backend": state.backend() if hasattr(state, "backend") else "?",
+        "compound_scalper": scalper_status,
     }
 
 
@@ -328,6 +340,11 @@ PAGE_TEMPLATE = """<!doctype html>
 <div class="statbar" id="statbar"></div>
 
 <section>
+  <h2>Compound Scalper <span class="tag" id="scalper-tag"></span></h2>
+  <div id="scalper_detail"></div>
+</section>
+
+<section>
   <h2>Open Positions</h2>
   <div id="positions"></div>
 </section>
@@ -369,12 +386,45 @@ function render(data) {
     `Generated ${data.generated_at} · state backend: ${data.state_backend}`;
 
   const pnl = data.realized_pnl || {};
+  const scalperTile = (() => {
+    const s = data.compound_scalper || {};
+    if (!s.started) return '<span class="na">not started</span>';
+    if (!s.enabled) return '<span class="na">disabled</span>';
+    const trip = s.tripped ? ' <span class="neg-pnl">(tripped)</span>' : '';
+    return '$' + (s.balance_usd || 0).toFixed(2) + trip;
+  })();
   document.getElementById("statbar").innerHTML = `
     <div class="stat"><div class="label">Open positions</div><div class="value">${data.open_positions.length}</div></div>
     <div class="stat"><div class="label">Unrealized P&amp;L</div><div class="value">${fmtUsd(data.unrealized_pnl_usd)}</div></div>
     <div class="stat"><div class="label">Realized P&amp;L</div><div class="value">${fmtUsd(pnl.total_realized_pnl_usd || 0)}</div></div>
     <div class="stat"><div class="label">Win / Loss (closed)</div><div class="value"><span class="pos-pnl">${pnl.wins || 0}W</span> / <span class="neg-pnl">${pnl.losses || 0}L</span></div></div>
+    <div class="stat"><div class="label">Scalper pool</div><div class="value">${scalperTile}</div></div>
     <div class="stat"><div class="label">Modules ready</div><div class="value">${data.modules_ready_count}/${data.modules_total_count}</div></div>`;
+
+  const s = data.compound_scalper || {};
+  document.getElementById("scalper-tag").textContent =
+    !s.started ? "not started" : (!s.enabled ? "disabled" : (s.tripped ? "tripped" : (s.session_expired ? "session expired" : "running")));
+  if (!s.started) {
+    document.getElementById("scalper_detail").innerHTML = '<div class="empty">Pool not started -- executor.compound_scalper.init_pool() hasn\'t been called yet (deliberate manual step, see that module\'s docstring).</div>';
+  } else {
+    const mult = s.multiple_of_seed != null ? s.multiple_of_seed.toFixed(2) + "x" : "-";
+    const op = s.open_position;
+    document.getElementById("scalper_detail").innerHTML = `
+      <div class="statbar">
+        <div class="stat"><div class="label">Balance</div><div class="value">$${(s.balance_usd||0).toFixed(2)}</div></div>
+        <div class="stat"><div class="label">Seed</div><div class="value">$${(s.seed_usd||0).toFixed(2)}</div></div>
+        <div class="stat"><div class="label">Multiple of seed</div><div class="value">${mult}</div></div>
+        <div class="stat"><div class="label">Realized P&amp;L</div><div class="value">${fmtUsd(s.realized_pnl_usd)}</div></div>
+        <div class="stat"><div class="label">Trades this session</div><div class="value">${s.trades_this_session||0}</div></div>
+        <div class="stat"><div class="label">Consecutive losses</div><div class="value">${s.consecutive_losses||0}</div></div>
+      </div>
+      ${s.tripped ? `<div class="empty" style="color:#e74c3c">Circuit tripped: ${esc(s.tripped_reason||"")}</div>` : ""}
+      ${op ? `<table><thead><tr><th>Token</th><th>Chain</th><th>Position $</th><th>Peak multiple</th><th>Partial TP done</th><th>Opened</th></tr></thead>
+        <tbody><tr><td class="mono">${esc(op.token)}</td><td>${esc(op.chain)}</td><td>$${(op.position_usd||0).toFixed(2)}</td>
+        <td>${(op.peak_multiple||1).toFixed(2)}x</td><td>${op.partial_tp_done ? "yes" : "no"}</td><td>${esc(op.opened_fmt||"?")}</td></tr></tbody></table>`
+        : '<div class="empty">No open scalp position right now.</div>'}
+    `;
+  }
 
   const pos = data.open_positions;
   document.getElementById("positions").innerHTML = pos.length ? `
