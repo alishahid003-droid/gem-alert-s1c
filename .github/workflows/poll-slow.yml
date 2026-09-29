@@ -14,6 +14,10 @@ on:
   schedule:
     - cron: "*/20 * * * *"
 
+concurrency:
+  group: poll-slow
+  cancel-in-progress: false
+
 jobs:
   poll-slow:
     runs-on: ubuntu-latest

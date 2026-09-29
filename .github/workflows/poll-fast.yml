@@ -20,6 +20,10 @@ on:
   schedule:
     - cron: "*/10 * * * *"
 
+concurrency:
+  group: poll-fast
+  cancel-in-progress: false
+
 jobs:
   poll-fast:
     runs-on: ubuntu-latest
