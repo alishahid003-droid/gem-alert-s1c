@@ -534,3 +534,35 @@ on Solana" -- measured, not anecdotal)
   skip) plus 5 existing tests updated for the new call order. Full suite:
   515 passed / 1 pre-existing unrelated failure (same one noted above,
   untouched by this change). Committed locally, not yet pushed.
+
+## Queued for AFTER tomorrow's ~5:05 AM PKT validate-scoring run (Sept 29, ~7:51 PM PKT)
+
+Deliberately held until tomorrow's post-Birdeye, post-pre-filter, post-band-A-gate
+number lands -- adding more signals before that number is honest data would make
+it impossible to tell which change actually moved precision. Order below is
+priority order, not build order.
+
+- [ ] Deployer wallet rug-history via Solana Tracker's documented `/search`
+  endpoint (`GET https://data.solanatracker.io/search?deployer=<wallet>`,
+  `x-api-key` header, free tier ~2,500 req/month). Returns every token a
+  wallet has deployed with live `liquidityUsd`/`marketCapUsd`/`status` per
+  token -- lets us compute a real rug ratio (past tokens now near-zero
+  liquidity vs. still active) for a deployer, without decoding pump.fun's
+  raw undocumented instruction format (a prior session deliberately
+  declined that approach -- documented in fetch_solana_wallet_first_seen_ts's
+  docstring -- after getting burned guessing at an unconfirmed binary
+  layout before). This is the clean, non-guessed alternative. Needs: Ali
+  to sign up for a free Solana Tracker API key and add it to GitHub
+  Secrets (never handled directly by Claude, per the hard credential
+  rule). Free-tier applicability to this exact `deployer=` filter still
+  needs final confirmation before wiring it in.
+- [ ] Recalibrate compound_scalper's slippage/fee model (currently a
+  12%-cap heuristic, flagged in its own code as unmeasured) against real
+  fills once real trades start -- first few live trades tell us if 12% is
+  too loose or too tight, and the compounding math (~10 consecutive wins
+  needed for the $100 target) is only as honest as this number.
+- [ ] Minute-level holder growth signal, not hourly. The current
+  holder_growth_rate_per_hr is too coarse to catch memecoin launches,
+  which move in minutes, not hours -- same category of fix as the
+  arXiv-measured "0.08 tx/hr rug vs 299 tx/hr legitimate" signal, just at
+  finer time resolution.
