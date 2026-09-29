@@ -442,3 +442,65 @@ Tiers, cheapest to most expensive, only spend from real profit:
   in place. Still the blocking gate before any `EXECUTION_ENABLED`
   discussion (Section 4 boundary unchanged -- Ali physically present
   only).
+
+## Next: raise rug/pump-dump precision toward 80%+ (Sept 29, ~1:53 PM PKT)
+
+Goal: moonshot recall is already 100% (6/6) -- the gap is precision (rugs/
+pump-dumps scoring as moonshots). These are the concrete engineering steps
+to close it, plus real research on what actually distinguishes a rug at
+launch time, plus a free/fast API to add as a pre-filter.
+
+- [ ] Re-validate tomorrow's post-Birdeye number on a BIGGER sample before
+  trusting it. The last categorized backtest was 16 tokens -- a jump from
+  43.8% to anything higher on 16 tokens isn't statistically trustworthy on
+  its own. Pull a wider, out-of-sample token set (more launches, wider
+  date range) once the Birdeye-enabled number comes back, before sizing
+  any real trade against it.
+- [ ] Require 2+ independent signals to agree before promoting a token to
+  a tradeable band, instead of one composite score threshold (e.g.
+  collapse-window override AND deployer-tier AND holder-distribution all
+  pointing the same way). Trades fewer total signals for much higher
+  precision on the ones that do fire -- the right tradeoff with only
+  10-20 real trades to spend.
+- [ ] Pull the categorized backtest's per-token breakdown for every false
+  positive (scored high, was actually a rug/pump-dump) and find the
+  common thread -- same deployer pattern, same liquidity-lock gap, same
+  social-signal spoof. Targeted fix from real data, not a guess.
+
+### Real research: what actually distinguishes a rug at launch time
+(arXiv 2603.24625, "From Hype to Collapse: Investigating Rug Pull Scams
+on Solana" -- measured, not anecdotal)
+- **Lifecycle**: rug median lifespan 0.0116 days vs. 375 days legitimate --
+  almost all rug activity happens same-day as creation.
+- **Holders**: median 9 holders (rug) vs. 41,026 (legitimate) at the point
+  measured.
+- **Liquidity growth ratio**: 7.6% (rug) vs. 4,636% (legitimate) -- real
+  projects show sustained liquidity growth, rugs don't.
+- **Transaction rate**: 0.08/hour (rug) vs. 299/hour (legitimate).
+- **Authority retention**: rugs typically KEEP freeze authority and LP
+  tokens; legitimate projects renounce freeze authority at creation --
+  this is a binary, checkable-at-launch signal, not a pattern that needs
+  time to develop.
+- **Timing**: rug frequency correlates with SOL price surges -- opportunistic,
+  not organic, launch timing.
+- **Off-chain**: 81% of rugs have no X account, 86% no website; where a
+  website exists, 70%+ are invalid or just redirect to a social page.
+- Actionable: freeze/LP-authority-retained is a same-block, zero-cost
+  check (no MadeOnSol call needed) and should gate BEFORE any paid call
+  is spent on a token, not after.
+
+### Free/fast alternative found for speed + budget conservation
+- **RugCheck.xyz public API** (`api.rugcheck.xyz`) has a genuinely free,
+  no-auth `tokenSummary()` endpoint (confirmed via its open-source CLI
+  docs) returning `score_normalised` and `lpLockedPct` per mint, fast
+  enough for a pre-filter pass.
+- Proposed use: run RugCheck's free summary as a same-block pre-filter
+  BEFORE spending a paid MadeOnSol call -- if freeze/LP authority isn't
+  renounced or `lpLockedPct` is near zero, reject immediately without
+  touching the 200/day MadeOnSol budget. This both speeds up rejection of
+  obvious rugs and conserves the scarce paid-call budget for tokens that
+  clear the free first pass.
+- Needs: a small `layers/` integration (fetch + parse RugCheck summary,
+  gate before `fetch_madeonsol_token_risk()`), plus a fallback path if
+  RugCheck itself rate-limits or is down (don't let it become a hard
+  blocker -- degrade to current behavior, not a crash).
