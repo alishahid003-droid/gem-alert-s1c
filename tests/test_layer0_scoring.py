@@ -125,6 +125,8 @@ def test_score_solana_mint_wires_real_birdeye_launch_shape(monkeypatch):
                 {"volume": {"h24": 50000.0}, "liquidity": {"usd": 20000.0},
                  "pairCreatedAt": int((time.time() - 3600) * 1000)},
             ]}
+        if "gopluslabs" in url:
+            return {"ok": False, "status_code": 500, "url": url, "json": {}}
         raise AssertionError(f"unexpected URL: {url}")
 
     captured = {}
@@ -164,6 +166,8 @@ def test_score_solana_mint_never_calls_birdeye_for_robinhood_chain(monkeypatch):
                 {"volume": {"h24": 50000.0}, "liquidity": {"usd": 20000.0},
                  "pairCreatedAt": int((time.time() - 3600) * 1000)},
             ]}
+        if "gopluslabs" in url:
+            return {"ok": False, "status_code": 500, "url": url, "json": {}}
         raise AssertionError(f"unexpected URL: {url}")
 
     def fake_fetch_birdeye_ohlcv(*args, **kwargs):
@@ -262,6 +266,8 @@ def test_score_solana_mint_uses_all_three_madeonsol_endpoints_plus_dexscreener(m
             return {"ok": True, "status_code": 200, "url": url, "json": [
                 {"volume": {"h24": 50000.0}, "liquidity": {"usd": 20000.0}},
             ]}
+        if "gopluslabs" in url:
+            return {"ok": False, "status_code": 500, "url": url, "json": {}}
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
@@ -269,11 +275,119 @@ def test_score_solana_mint_uses_all_three_madeonsol_endpoints_plus_dexscreener(m
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
     result = score_solana_mint("MINT123", "solana", is_pregraduation=True)
-    assert len(calls) == 4
+    # 5 calls total as of Sept 29 2026: 1 free GoPlus pre-filter (runs
+    # first) + 3 MadeOnSol (risk/holders/bundle) + 1 DexScreener.
+    assert len(calls) == 5
     assert any("dexscreener" in c for c in calls)
+    assert any("gopluslabs" in c for c in calls)
     assert "error" not in result
     assert result["address"] == "MINT123"
     assert result["score"].band in {"A", "B", "C", "D"}
+
+
+def test_score_solana_mint_prefilter_rejects_confirmed_rug_for_free_no_madeonsol_call(monkeypatch):
+    # Real fix, Sept 29 2026 (Ali's "80%+ precision, smart play" push): the
+    # single strongest measured rug signal (arXiv 2603.24625) -- freeze
+    # authority NOT renounced, or LP NOT locked -- is checked for free via
+    # GoPlus BEFORE any MadeOnSol call is spent. A confirmed-bad token must
+    # be rejected here without ever touching /risk, /holders, or /bundle.
+    import layers.layer0_scoring as l0
+
+    mint = "RUGMINT"
+    calls = []
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        calls.append(url)
+        if url.endswith("/solana/token_security"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {
+                "result": {mint: {"mintable": {"status": "0"}, "freezable": {"status": "1"},
+                                   "lp_holders": [{"balance": "1000", "is_locked": 0}]}}}}
+        raise AssertionError(f"unexpected URL (MadeOnSol/DexScreener should never be called): {url}")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l0.score_solana_mint(mint, "solana", is_pregraduation=True)
+    assert result.get("pre_filter_rejected") is True
+    assert "error" in result
+    assert calls == ["https://api.gopluslabs.io/api/v1/solana/token_security"]
+
+
+def test_score_solana_mint_prefilter_does_not_reject_on_unknown_goplus_data(monkeypatch):
+    # Conservative-by-design: unknown/missing GoPlus fields (None) must
+    # never be treated as a red flag -- same "stay unknown, don't guess"
+    # philosophy as the rest of this module. Only an explicit False
+    # (confirmed bad) rejects. Falls through to the normal MadeOnSol flow.
+    import layers.layer0_scoring as l0
+
+    mint = "MINT123"
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/solana/token_security"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {
+                "result": {mint: {}}}}  # no mintable/freezable/lp_holders at all -- everything None
+        if url.endswith("/risk"):
+            return {"ok": True, "status_code": 200, "url": url, "json": _load("madeonsol_risk_sample.json")}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
+        if url.endswith("/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l0.score_solana_mint(mint, "solana", is_pregraduation=True)
+    assert result.get("pre_filter_rejected") is not True
+    assert "error" not in result
+
+
+def test_score_solana_mint_prefilter_falls_through_on_goplus_failure(monkeypatch):
+    # Never a hard dependency -- if GoPlus itself fails/times out, scoring
+    # must proceed to the normal MadeOnSol flow exactly as before this
+    # pre-filter existed, not error out or skip the token.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        if url.endswith("/solana/token_security"):
+            return {"ok": False, "status_code": 500, "url": url, "json": {}}
+        if url.endswith("/risk"):
+            return {"ok": True, "status_code": 200, "url": url, "json": _load("madeonsol_risk_sample.json")}
+        if url.endswith("/holders"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"top10_share": 30.0}}
+        if url.endswith("/bundle"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
+        if "dexscreener" in url:
+            return {"ok": True, "status_code": 200, "url": url, "json": []}
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
+
+    result = l0.score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    assert "error" not in result
+    assert result["score"].band in {"A", "B", "C", "D"}
+
+
+def test_score_solana_mint_prefilter_skips_goplus_without_api_key(monkeypatch):
+    # Pre-filter only runs when a real MadeOnSol call would actually be
+    # spent (madeonsol_api_key configured) -- otherwise fetch_madeonsol_
+    # token_risk's own "not configured" fail-fast still fires first, no
+    # network call attempted at all.
+    import layers.layer0_scoring as l0
+
+    def fake_get_json(url, headers=None, params=None, timeout=20):
+        raise AssertionError(f"no network call should happen without an API key: {url}")
+
+    monkeypatch.setattr(l0, "get_json", fake_get_json)
+    monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", None)
+
+    result = l0.score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    assert "error" in result
 
 
 def test_score_solana_mint_fails_closed_without_api_key(monkeypatch):
@@ -581,13 +695,28 @@ def test_score_solana_mint_falls_back_to_goplus_when_madeonsol_risk_is_tier_gate
     assert captured_kwargs["goplus_lp_locked"] is True
 
 
-def test_score_solana_mint_does_not_call_goplus_when_madeonsol_risk_succeeds(monkeypatch):
-    # Regression guard: GoPlus is a fallback for a real gap, never a
-    # second-guess of real MadeOnSol data -- must not even be called when
-    # /risk succeeds.
+def test_score_solana_mint_prefilter_calls_goplus_first_but_never_overrides_real_madeonsol_signals(monkeypatch):
+    # Updated Sept 29 2026: GoPlus IS now called first on every Solana mint
+    # (free pre-filter, see score_solana_mint's docstring) -- so the old
+    # "never called when /risk succeeds" guarantee no longer holds by
+    # design. What must still hold: even though GoPlus is now called first,
+    # it must never be used to second-guess/override real MadeOnSol signal
+    # data once /risk succeeds -- that's the real regression this test
+    # guards, just with the correct updated premise. The pre-filter call
+    # here returns a clean (not-flagged) result, so scoring proceeds to
+    # MadeOnSol as normal.
     import layers.layer0_scoring as l0
 
     calls = []
+    mint = "MINT123"
+    real_signals_from_madeonsol_risk = l0.signals_from_madeonsol_risk
+    captured_kwargs = {}
+
+    def spy_signals(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_signals_from_madeonsol_risk(*args, **kwargs)
+
+    monkeypatch.setattr(l0, "signals_from_madeonsol_risk", spy_signals)
 
     def fake_get_json(url, headers=None, params=None, timeout=20):
         calls.append(url)
@@ -599,15 +728,24 @@ def test_score_solana_mint_does_not_call_goplus_when_madeonsol_risk_succeeds(mon
             return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
         if "dexscreener" in url:
             return {"ok": True, "status_code": 200, "url": url, "json": []}
+        if url.endswith("/solana/token_security"):
+            return {"ok": True, "status_code": 200, "url": url, "json": {
+                "result": {mint: {"mintable": {"status": "0"}, "freezable": {"status": "0"},
+                                   "lp_holders": [{"balance": "1000", "is_locked": 1}]}}}}
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(l0, "get_json", fake_get_json)
     monkeypatch.setattr(l0, "fetch_solana_holder_count", lambda mint: None)
     monkeypatch.setattr(l0.CONFIG, "madeonsol_api_key", "msk_test")
 
-    result = l0.score_solana_mint("MINT123", "solana", is_pregraduation=True)
+    result = l0.score_solana_mint(mint, "solana", is_pregraduation=True)
     assert "error" not in result
-    assert not any("gopluslabs" in c or "solana/token_security" in c for c in calls)
+    # GoPlus WAS called (pre-filter) ...
+    assert any("solana/token_security" in c for c in calls)
+    # ... but never used as a signal-fallback source, since /risk succeeded.
+    assert captured_kwargs["goplus_mint_authority_revoked"] is None
+    assert captured_kwargs["goplus_freeze_authority_revoked"] is None
+    assert captured_kwargs["goplus_lp_locked"] is None
 
 
 def test_fetch_madeonsol_token_risk_fails_closed_when_budget_below_3(monkeypatch):
@@ -738,6 +876,8 @@ def test_score_solana_mint_records_holder_point_and_computes_growth(monkeypatch)
             return {"ok": True, "status_code": 200, "url": url, "json": {"bundle": {"held_pct_of_supply": 0.05}}}
         if "dexscreener" in url:
             return {"ok": True, "status_code": 200, "url": url, "json": []}
+        if "gopluslabs" in url:
+            return {"ok": False, "status_code": 500, "url": url, "json": {}}
         raise AssertionError(f"unexpected URL: {url}")
 
     holder_counts = iter([10, 40])  # simulate real growth across two cycles

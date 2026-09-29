@@ -1382,7 +1382,30 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
     Birdeye call adds no MadeOnSol budget cost (separate free-tier account,
     30k compute units/month, 1 req/sec) but does add one more real HTTP
     call per scored mint -- worth knowing if that budget ever needs
-    tightening too."""
+    tightening too.
+
+    Free GoPlus pre-filter (Sept 29 2026) runs first on Solana, only when a
+    MadeOnSol call would actually be spent (madeonsol_api_key configured) --
+    rejects
+    a mint for free, before any MadeOnSol call is spent, if freeze
+    authority is confirmed NOT renounced or LP is confirmed NOT locked
+    (the strongest single measured rug signal per arXiv 2603.24625).
+    Unknown/missing GoPlus data never rejects -- falls through to the
+    normal MadeOnSol-first flow unchanged."""
+    if chain == "solana" and CONFIG.madeonsol_api_key:
+        pf = fetch_goplus_security("solana", mint)
+        if pf.get("ok"):
+            pf_parsed = parse_goplus_solana_security(pf["data"])
+            if pf_parsed["freeze_authority_revoked"] is False or pf_parsed["lp_locked"] is False:
+                return {
+                    "chain": chain,
+                    "address": mint,
+                    "error": "rejected by free GoPlus pre-filter "
+                             f"(freeze_authority_revoked={pf_parsed['freeze_authority_revoked']}, "
+                             f"lp_locked={pf_parsed['lp_locked']}) -- no MadeOnSol call spent",
+                    "pre_filter_rejected": True,
+                }
+
     raw = fetch_madeonsol_token_risk(mint, chain)
     if not raw.get("ok"):
         return {"chain": chain, "address": mint, "error": raw.get("reason", "fetch failed")}

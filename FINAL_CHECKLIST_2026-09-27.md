@@ -504,3 +504,20 @@ on Solana" -- measured, not anecdotal)
   gate before `fetch_madeonsol_token_risk()`), plus a fallback path if
   RugCheck itself rate-limits or is down (don't let it become a hard
   blocker -- degrade to current behavior, not a crash).
+
+- [x] DONE Sept 29 2026 ~2:15 PM PKT: built using GoPlus instead of
+  RugCheck -- GoPlus's Solana security scan was ALREADY integrated in this
+  codebase (fetch_goplus_security / parse_goplus_solana_security, used as
+  a post-failure fallback) and already returns exactly the strongest
+  measured rug signal (freeze authority renounced, LP locked). Moved it to
+  run FIRST in score_solana_mint, free, before fetch_madeonsol_token_risk
+  -- rejects a confirmed-bad token (freeze_authority_revoked is False, or
+  lp_locked is False) without spending any of the 200/day MadeOnSol
+  budget. Only fires when a real MadeOnSol call would otherwise be spent
+  (madeonsol_api_key configured), never blocks on unknown/missing GoPlus
+  data, and degrades gracefully to the normal flow on any GoPlus failure.
+  4 new tests added (confirmed-rug rejection with zero MadeOnSol calls
+  made, unknown-data non-rejection, GoPlus-failure fallthrough, no-API-key
+  skip) plus 5 existing tests updated for the new call order. Full suite:
+  515 passed / 1 pre-existing unrelated failure (same one noted above,
+  untouched by this change). Committed locally, not yet pushed.
