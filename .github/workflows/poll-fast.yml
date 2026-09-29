@@ -2,23 +2,22 @@ name: Poll fast (discovery -- Layer 1, Layer 0b, Layer 4, Layer 6)
 
 on:
   workflow_dispatch: {}
-  # RE-ENABLED Sept 29 2026, ~03:10 UTC -- validate-scoring's backtest run
-  # (run #3) completed, so the reason this was paused is done. Every 10
-  # minutes, UNCHANGED. This is the discovery cadence -- Layer 1 (deployer
-  # alerts) and Layer 0b (Mobula Pulse scoring) finding brand-new tokens.
-  # Deliberately left fast per Ali's explicit direction: entry-timing speed
-  # is the single most valuable signal in this whole system, and this cycle
-  # is cheap (one batched call per source, no per-token MadeOnSol scoring)
-  # -- see README's call-budget section.
-  #
-  # HONEST NUMBER: even on its own, Layer 1's 2 MadeOnSol calls/cycle at
-  # this cadence is ~288 calls/day -- already over the stated 200/day cap,
-  # independent of anything in poll-slow.yml. Splitting the expensive
-  # pieces into their own slower cycle (see poll-slow.yml) doesn't fix
-  # this on its own, because Layer 1 itself isn't one of the pieces this
-  # split slows down (on purpose). See README for the options.
-  schedule:
-    - cron: "*/10 * * * *"
+  # NATIVE schedule: REMOVED Sept 29 2026, ~08:45 PM PKT (~15:45 UTC) --
+  # real bug found and fixed during a pre-flight check ahead of tomorrow's
+  # validate-scoring run. This native GitHub `schedule:` trigger was
+  # re-enabled earlier the same day (see git history) *alongside* the
+  # cron-job.org "gem-alert poll-fast" job that already covers this exact
+  # 10-minute cadence -- the whole reason cron-job.org exists is that
+  # GitHub's native schedule trigger is unreliable, not a second cadence
+  # to run in parallel with it. Live evidence pulled from the GitHub API:
+  # of the last 50 poll-fast runs, 1 was schedule-triggered on top of the
+  # cron-job.org dispatches, and most runs were coming back CANCELLED with
+  # zero jobs ever started -- the concurrency group (one running + one
+  # queued max) was overflowing from the two triggers competing, silently
+  # dropping some real discovery cycles. cron-job.org's workflow_dispatch
+  # is now the sole trigger, same pattern as validate-scoring.yml. Do not
+  # re-add a `schedule:` block here without also removing (or replacing)
+  # the cron-job.org job, or this bug comes back.
 
 concurrency:
   group: poll-fast

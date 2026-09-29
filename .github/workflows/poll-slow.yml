@@ -2,17 +2,18 @@ name: Poll slow (Layer 8 deep-scoring, Layer 2+9 wallet activity)
 
 on:
   workflow_dispatch: {}
-  # RE-ENABLED Sept 29 2026, ~03:10 UTC -- same reason as poll-fast.yml.
-  # Every 20 minutes -- the expensive pieces (Layer 8's per-token MadeOnSol
-  # deep scoring, 3 calls/token, plus Layers 2+9's KOL-feed/wallet-balance
-  # checks). Per Ali's direction: 15-20 min is enough here (it's not the
-  # discovery step, so a few extra minutes of latency on a convergence/
-  # sell-mirror/re-score check doesn't cost the thing that actually
-  # matters -- entry timing, which stays on poll-fast.yml's 10-min cycle).
-  # Set to 20 rather than 15 as the safer default under MadeOnSol's stated
-  # 200/day cap -- see README's call-budget table for the 15 vs 20 numbers.
-  schedule:
-    - cron: "*/20 * * * *"
+  # NATIVE schedule: REMOVED Sept 29 2026, ~08:45 PM PKT (~15:45 UTC) --
+  # same real bug and same fix as poll-fast.yml, worse here: live GitHub
+  # API check showed 21 of the last 50 poll-slow runs were fired by this
+  # native `schedule:` trigger on top of the cron-job.org "gem-alert
+  # poll-slow" job already covering the same 20-minute cadence -- real
+  # double-spend of the expensive per-token MadeOnSol deep-scoring calls
+  # (3/token), and the concurrency-group overflow this caused was also
+  # silently cancelling some real cycles outright (0 jobs ever started on
+  # those runs). cron-job.org's workflow_dispatch is now the sole trigger,
+  # same pattern as validate-scoring.yml. Do not re-add a `schedule:`
+  # block here without also removing (or replacing) the cron-job.org job,
+  # or this bug comes back.
 
 concurrency:
   group: poll-slow
