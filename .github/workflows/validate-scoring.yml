@@ -6,6 +6,18 @@ on:
   # -- it did its job (run #3, 03:02 UTC, real budget-fresh read). Back to
   # workflow_dispatch-only so this doesn't silently recur and burn MadeOnSol
   # budget every day.
+  #
+  # REAL BUG FOUND AND FIXED Sept 29 2026, later same morning: neither step
+  # below passed UPSTASH_REDIS_REST_URL/TOKEN, so state.py silently fell
+  # back to a fresh, empty local JSON file every run -- the real, shared
+  # MadeOnSol call-budget tracker (state.madeonsol_budget_remaining(),
+  # already wired into fetch_madeonsol_token_risk) was blind to usage from
+  # any OTHER run, including this workflow's own earlier run the same UTC
+  # day. That's why a second run today hit real MadeOnSol 429s instead of
+  # our own clean "budget exhausted" message -- the gate was real, it just
+  # never saw real numbers. Now fixed: both steps get the Upstash secrets,
+  # so the budget check is honest across runs, same as every other part of
+  # this system.
 
 jobs:
   validate:
@@ -20,6 +32,8 @@ jobs:
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
           BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           PYTHONUNBUFFERED: "1"
         # PYTHONUNBUFFERED + python -u: without this, Python block-buffers
         # stdout when it isn't a real terminal (exactly the case here, piped
@@ -32,6 +46,8 @@ jobs:
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
           MOBULA_API_KEY: ${{ secrets.MOBULA_API_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           PYTHONUNBUFFERED: "1"
         # Real gap found and fixed Sept 29 2026: this step never passed
         # MOBULA_API_KEY at all (point-in-time's step above did, this one

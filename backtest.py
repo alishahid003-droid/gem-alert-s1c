@@ -53,6 +53,8 @@ import argparse
 import sys
 from collections import Counter
 
+import state
+
 # Same fix as scheduler.py/backtest_named_coins.py (Sept 24-25, 2026): load
 # .env BEFORE importing config, since config.py builds CONFIG from
 # os.environ at import time. Without this, MADEONSOL_API_KEY (and every
@@ -116,6 +118,10 @@ def fetch_tier_sample(chain: str, tiers: set, sample_size: int) -> list:
         headers=headers,
         params={"tier": tier_list},
     )
+    state.record_madeonsol_calls(1)  # real call, must count against the shared
+    # daily budget (Sept 29 2026 fix -- this call was previously invisible to
+    # state.madeonsol_budget_remaining(), the same gate fetch_madeonsol_token_risk
+    # already honors for every other MadeOnSol call in this codebase).
     if not result.get("ok"):
         tier_param = ",".join(tier_list)
         print(f"FAILED fetching tier={tier_param} chain={chain}: "

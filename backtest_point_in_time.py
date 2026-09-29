@@ -38,6 +38,8 @@ Usage: python backtest_point_in_time.py [--skip-onchain] [--skip-birdeye]
 import argparse
 from datetime import datetime, timezone
 
+import state
+
 from backtest_categorized import SOLANA_LABELED, BSC_LABELED, CATEGORY_EXPECTATION
 from layers.layer0_scoring import fetch_dexscreener_vol_liq, score_solana_mint
 from layers.layer0d_point_in_time import (
@@ -136,6 +138,21 @@ def main():
     print("=" * 76)
     print("POINT-IN-TIME CREDIBILITY BACKTEST v2 -- multi-signal engine, no deployer dependency")
     print("=" * 76)
+
+    # Real pre-flight budget check, added Sept 29 2026 -- see
+    # backtest_categorized.py's identical check for the full reasoning (this
+    # script hit real MadeOnSol 429s mid-run the same morning, same root
+    # cause). score_solana_mint spends 3 MadeOnSol calls per Solana/RHC
+    # labeled token via fetch_madeonsol_token_risk.
+    required = len(SOLANA_LABELED) * 3
+    remaining = state.madeonsol_budget_remaining()
+    print(f"MadeOnSol budget check: need ~{required} calls for {len(SOLANA_LABELED)} Solana/RHC "
+          f"tokens, {remaining}/{state.MADEONSOL_DAILY_BUDGET} remaining today.")
+    if remaining < required:
+        print(f"REFUSING TO START: not enough real MadeOnSol budget left today "
+              f"({remaining} remaining, need ~{required}). Resets at 00:00 UTC. "
+              f"Not attempting a partial run.")
+        return []
 
     rows = []
     print(f"\n--- Solana / Robinhood Chain ({len(SOLANA_LABELED)} labeled tokens) ---")

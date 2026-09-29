@@ -135,6 +135,8 @@ Usage:
 import sys
 from collections import defaultdict
 
+import state
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -356,6 +358,23 @@ def main():
     print("=" * 70)
     print("CATEGORIZED BACKTEST -- moonshot / rug / pump_dump credibility check")
     print("=" * 70)
+
+    # Real pre-flight budget check, added Sept 29 2026 after this script hit
+    # real MadeOnSol 429s mid-run (root cause: a separate GitHub Actions env
+    # gap meant the budget tracker was blind to prior usage -- see
+    # validate-scoring.yml's own comment). This check is a second, independent
+    # safety net: 3 MadeOnSol calls per Solana/RHC labeled token, refuse to
+    # start rather than burn a 15-minute timeout on a run that can't finish.
+    required = len(SOLANA_LABELED) * 3
+    remaining = state.madeonsol_budget_remaining()
+    print(f"MadeOnSol budget check: need ~{required} calls for {len(SOLANA_LABELED)} Solana/RHC "
+          f"tokens, {remaining}/{state.MADEONSOL_DAILY_BUDGET} remaining today.")
+    if remaining < required:
+        print(f"REFUSING TO START: not enough real MadeOnSol budget left today "
+              f"({remaining} remaining, need ~{required}). Resets at 00:00 UTC. "
+              f"Not attempting a partial run.")
+        return []
+
     rows = []
     print(f"\n--- Solana / Robinhood Chain ({len(SOLANA_LABELED)} labeled tokens) ---")
     rows += score_solana_labeled(SOLANA_LABELED)
