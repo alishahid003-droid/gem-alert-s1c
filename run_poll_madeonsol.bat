@@ -7,4 +7,6 @@ REM so you can see what each cycle did.
 cd /d "%~dp0"
 if not exist logs mkdir logs
 echo ==== %date% %time% ==== >> logs\poll_madeonsol.log
-python scheduler.py --poll-madeonsol >> logs\poll_madeonsol.log 2>&1
+REM -u = unbuffered, so the log shows each step live instead of only when the run ends
+python -u scheduler.py --poll-madeonsol >> logs\poll_madeonsol.log 2>&1
+echo ==== finished %date% %time% (exit code %errorlevel%) ==== >> logs\poll_madeonsol.log
