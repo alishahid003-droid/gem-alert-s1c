@@ -145,6 +145,7 @@ def main():
     coins = [c for c in SOLANA_LABELED + BSC_LABELED if c[1] != "robinhood_chain"]
     skipped = [c[0] for c in SOLANA_LABELED + BSC_LABELED if c[1] == "robinhood_chain"]
     results = []  # (strategy, delay, name, category, pnl_usd, exit_type)
+    cached = []   # (name, category, candles, secs, cost) -- reused by the grid below
     print(f"Trade backtest: {len(coins)} labeled coins (skipped Robinhood Chain: {skipped})\n")
     for name, chain, address, category, _pregrad in coins:
         dex = fetch_dexscreener_vol_liq(chain, address)
@@ -157,6 +158,7 @@ def main():
             print(f"  {name:22s} SKIP: {err}")
             continue
         cost = estimate_round_trip_cost_pct(chain, POSITION_USD, (dex.get("liquidity_usd") if isinstance(dex, dict) else None))
+        cached.append((name, category, candles, secs, cost))
         line = []
         for delay in delays:
             idx = min(len(candles) - 2, max(0, int(delay * 60 / secs)))
@@ -183,6 +185,55 @@ def main():
     print("=" * 78)
     print("Limits: hand-picked labeled set (not a random sample); every coin bought (no score gate);\n"
           "pessimistic intra-candle order (stop before target); RHC coins skipped.")
+    run_grid(cached, delays)
+
+
+def entry_filter_ok(candles, idx) -> bool:
+    """Point-in-time filter -- only uses candles BEFORE the entry candle:
+    skip a coin already down >= 60% from its launch-window peak (the live
+    scorer's launch-window collapse override), or trading below its first
+    price (no momentum)."""
+    seen = candles[:idx + 1]
+    peak = max(c["h"] for c in seen)
+    entry = candles[idx]["o"]
+    return entry >= peak * 0.4 and entry >= candles[0]["o"]
+
+
+GRID = [(stop, be, trail) for stop in (0.25, 0.40, 0.55) for be in (1.5, 2.0) for trail in (0.35, 0.5)]
+
+
+def run_grid(cached, delays):
+    """Exit settings x entry filter. 24 coins is small: the best row is a
+    direction to paper-test, NOT a proven setting (it will overfit)."""
+    import os
+    print("\nPARAMETER GRID (stage exits), win rate / total P&L over coins actually entered")
+    print(f"{'stop':>5} {'lock':>5} {'trail':>5} {'filter':>7} " + " ".join(f"{'+' + str(d) + 'm':>18}" for d in delays))
+    rows_out = []
+    for stop, be, trail in GRID:
+        os.environ["STOP_LOSS_PCT"], os.environ["BREAKEVEN_TRIGGER_MULT"], os.environ["TRAIL_GIVEBACK_PCT"] = \
+            str(stop), str(be), str(trail)
+        for use_filter in (False, True):
+            cells, agg_w, agg_n = [], 0, 0
+            for d in delays:
+                w = n = 0
+                pnl = 0.0
+                for _name, _cat, candles, secs, cost in cached:
+                    idx = min(len(candles) - 2, max(0, int(d * 60 / secs)))
+                    if use_filter and not entry_filter_ok(candles, idx):
+                        continue
+                    p, _how = sim_stage(candles, secs, idx, cost)
+                    n += 1
+                    w += p > 0
+                    pnl += p
+                agg_w, agg_n = agg_w + w, agg_n + n
+                cells.append(f"{w:>2}/{n:<2} {(w / n * 100 if n else 0):>3.0f}% ${pnl:+7.0f}")
+            rows_out.append((agg_w / agg_n if agg_n else 0, stop, be, trail, use_filter))
+            print(f"{stop:>5.2f} {be:>5.1f} {trail:>5.2f} {('yes' if use_filter else 'no'):>7} " + " ".join(cells))
+    for k in ("STOP_LOSS_PCT", "BREAKEVEN_TRIGGER_MULT", "TRAIL_GIVEBACK_PCT"):
+        os.environ.pop(k, None)
+    best = max(rows_out)
+    print(f"\nBest combined win rate: {best[0] * 100:.0f}% (stop {best[1]}, lock {best[2]}x, trail {best[3]}, "
+          f"filter {'on' if best[4] else 'off'}) -- small sample, confirm on paper before trusting.")
 
 
 if __name__ == "__main__":
