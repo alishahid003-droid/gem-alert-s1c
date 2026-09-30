@@ -527,12 +527,55 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     if _stats():
         symbol = (scored.get("raw") or {}).get("symbol")
         _stats().note_band(chain, symbol or (mint or "?")[:8], sr.band, sr.score)
+    # -- Deployer wallet resolution, moved up ahead of the Stage 1 buy
+    # decision (it used to live further down, purely for the dev-holding/
+    # wallet-age tags -- see that block below, which now reuses this same
+    # lookup instead of fetching it twice). Solana only, same RPC
+    # restriction as always.
+    #
+    # Sept 30 2026, Ali: "build that and also do that vice versa on if any
+    # of my trade made loss or the developer rugged to add that in that
+    # list to blacklist this developer and avoid coins launched from him."
+    # Our own deployer track record (state.py's record_deployer_outcome,
+    # written every time executor/position_state.py's close_position
+    # resolves a real win/loss/rug on a closed position) is the ONLY thing
+    # that can mark a wallet blacklisted or trusted here -- never an
+    # external/unverified list, only wallets THIS system has actually
+    # traded against before and watched the outcome of. A blacklisted
+    # deployer hard-blocks Stage 1 on this token outright, before the
+    # score-band/convergence checks even run. A trusted deployer (2+ real
+    # wins, zero rugs, net positive P&L) is passed through as MadeOnSol's
+    # "good" tier for the existing OR condition in
+    # triggers.evaluate_stage1 -- that fire path was already built (Sept
+    # 28) but was permanently dead code here because deployer_tier was
+    # always passed as None; this is real data for it now.
+    deployer_wallet = None
+    deployer_blacklisted = False
+    if mint and chain == "solana":
+        try:
+            deployer_wallet = fetch_solana_token_deployer(mint)
+        except ApiUnreachable as e:
+            print(f"[layer0] {mint[:8]} deployer lookup skipped: network unreachable ({e})")
+            deployer_wallet = None
+        if deployer_wallet and state.is_deployer_blacklisted(deployer_wallet):
+            deployer_blacklisted = True
+            print(f"[layer0] {mint[:8]} deployer {deployer_wallet[:8]} is BLACKLISTED "
+                  f"(rugged/lost us money before) -- Stage 1 skipped regardless of "
+                  f"score/convergence")
+
     if mint:
         state.set_last_score(mint, sr.score, sr.band, mc)
-        stage1 = handle_stage1_candidate(
-            chain, mint, score_band=sr.band, deployer_tier=None,
-            convergence_count=0, entry_mcap=mc,
-        )
+        if deployer_blacklisted:
+            stage1 = {"fired": False, "stage": "stage1",
+                      "reason": f"deployer {deployer_wallet[:8]} blacklisted (past rug/loss)"}
+        else:
+            effective_deployer_tier = (
+                "good" if (deployer_wallet and state.is_deployer_trusted(deployer_wallet)) else None
+            )
+            stage1 = handle_stage1_candidate(
+                chain, mint, score_band=sr.band, deployer_tier=effective_deployer_tier,
+                convergence_count=0, entry_mcap=mc,
+            )
         if stage1["fired"]:
             print(f"[layer0/8:{chain}] STAGE1 FIRED for {mint[:8]} -- "
                   f"${stage1['position_usd']:.2f}, conviction {stage1['conviction_score']}, "
@@ -611,22 +654,36 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     # real alert without touching a score that's already been tuned once
     # for a documented reason. Only costs 2 extra RPC calls, both free,
     # both already used elsewhere tonight -- no MadeOnSol budget spent. --
+    # deployer_rep_tag: surfaces our own blacklisted/trusted verdict on the
+    # alert itself (Sept 30 2026) -- the blacklist gate above already
+    # blocked a real Stage 1 buy, but a blacklisted deployer's token can
+    # still reach here via a non-Stage-1 alert path (e.g. a band-D momentum
+    # override), so this keeps that risk visible even when nothing was
+    # bought. A trusted verdict shows for context too, same as Dev
+    # holding/Deployer age below.
     dev_tag = None
     age_tag = None
+    deployer_rep_tag = None
     if mint and chain == "solana":
+        # deployer_wallet was already resolved above (ahead of the Stage 1
+        # decision) -- reused here rather than fetched a second time.
         try:
-            deployer_wallet = fetch_solana_token_deployer(mint)
-            dev_pct = fetch_solana_dev_holding_pct(mint, deployer_wallet)
+            dev_pct = fetch_solana_dev_holding_pct(mint, deployer_wallet) if deployer_wallet else None
         except ApiUnreachable as e:
             # Same real gap _safe() exists for elsewhere in this file --
-            # both RPC helpers can raise on a genuine network-level failure
-            # (not just an ordinary API error, which they already handle),
+            # this RPC helper can raise on a genuine network-level failure
+            # (not just an ordinary API error, which it already handles),
             # and this call site had no guard for that until now. Caught
             # here rather than letting one network blip crash the whole
             # poll cycle over an optional tag.
             print(f"[layer0] {mint[:8]} dev-holding check skipped: network unreachable ({e})")
-            deployer_wallet = None
             dev_pct = None
+        if deployer_wallet:
+            rep = state.get_deployer_reputation(deployer_wallet)
+            if rep["tier"] in ("trusted", "blacklisted"):
+                deployer_rep_tag = (f"{rep['tier']} ({rep['wins']}W/{rep['losses']}L/"
+                                     f"{rep['rugs']}rug, net {rep['net_pnl_usd']:+.2f} USD)")
+                print(f"[layer0] {mint[:8]} deployer_reputation={deployer_rep_tag}")
         dev_tier = classify_dev_holding_pct(dev_pct)
         if dev_tier in ("notable", "risk"):
             dev_tag = f"{dev_tier} ({dev_pct*100:.1f}%)"
@@ -692,6 +749,8 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         alert.set_tag("Dev holding", dev_tag)
     if age_tag:
         alert.set_tag("Deployer age", age_tag)
+    if deployer_rep_tag:
+        alert.set_tag("Deployer track record", deployer_rep_tag)
     layer_name = "layer0b" if source in ("mobula", "geckoterminal") else "layer0"
     send_res = _alert(alert, layer_name)
     print(f"[layer0/8:{chain}] {mint} band {sr.band} -> {send_res}")

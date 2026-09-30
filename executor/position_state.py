@@ -130,7 +130,42 @@ def close_position(chain: str, token: str, reason: str, exit_usd: Optional[float
         pos["exit_usd"] = exit_usd
         pos["pnl_usd"] = exit_usd - pos["total_usd"]
     state.set_value(_key(chain, token), pos)
+    _record_deployer_outcome_for_close(chain, token, pos, reason)
     return pos
+
+
+def _record_deployer_outcome_for_close(chain: str, token: str, pos: dict, reason: str):
+    """Ties this position's real, priced outcome to the token's deployer
+    wallet so state.py's deployer track record builds up from our own
+    trade history (Sept 30 2026, Ali: "build that and also do that vice
+    versa... blacklist this developer and avoid coins launched from him").
+
+    Solana only -- layer0_scoring.fetch_solana_token_deployer is
+    Solana-RPC-specific, same restriction as every other deployer-wallet
+    lookup in this codebase. Best-effort and deliberately swallows any
+    lookup failure: a deployer-reputation write is a nice-to-have on top of
+    a real close_position() call, and must never be the thing that breaks
+    one. Skipped entirely on an unpriced close (pnl_usd is None) -- no real
+    outcome to attribute to the deployer either way."""
+    if chain != "solana":
+        return
+    pnl_usd = pos.get("pnl_usd")
+    if pnl_usd is None:
+        return
+    outcome = "rug" if reason.startswith("defensive_sell") else ("win" if pnl_usd > 0 else "loss")
+    try:
+        from layers.layer0_scoring import fetch_solana_token_deployer
+        deployer_wallet = fetch_solana_token_deployer(token)
+    except Exception as e:
+        print(f"[position_state] deployer lookup skipped for {token[:8]}: {e}")
+        return
+    if not deployer_wallet:
+        return
+    pos["deployer_wallet"] = deployer_wallet
+    state.set_value(_key(chain, token), pos)
+    state.record_deployer_outcome(deployer_wallet, token, chain, outcome, pnl_usd)
+    print(f"[position_state] deployer {deployer_wallet[:8]} outcome={outcome} "
+          f"pnl=${pnl_usd:.2f} for {token[:8]}")
 
 
 def list_open_positions() -> list:

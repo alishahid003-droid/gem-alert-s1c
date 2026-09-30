@@ -217,6 +217,81 @@ def get_holder_history(token: str) -> List[Tuple[float, float]]:
     return [(p[0], p[1]) for p in (get_value(f"holder_history:{token}") or [])]
 
 
+# --- Deployer track record -- self-built reputation from OUR OWN closed
+# trades (Sept 30 2026, Ali: "build that and also do that vice versa on if
+# any of my trade made loss or the developer rugged to add that in that
+# list to blacklist this developer and avoid coins launched from him").
+#
+# Keyed by deployer wallet address. Every entry here comes from a position
+# THIS system actually opened and closed -- never an external/unverified
+# claim about a wallet's history -- so "trusted"/"blacklisted" only ever
+# reflects a wallet we've directly traded against and watched the real
+# outcome of (see executor/position_state.py's close_position, which
+# writes here automatically on every close that resolves a deployer wallet
+# and a priced P&L). Same append-only capped-list pattern as
+# mc_history/holder_history above.
+DEPLOYER_HISTORY_MAX_POINTS = 50
+DEPLOYER_BLACKLIST_RUG_THRESHOLD = 1  # any single confirmed rug is enough -- zero tolerance
+DEPLOYER_TRUST_MIN_WINS = 2  # need repeat proof, not one lucky trade
+
+
+def record_deployer_outcome(deployer_wallet: str, token: str, chain: str,
+                             outcome: str, pnl_usd: Optional[float], ts: Optional[float] = None):
+    """outcome: 'win' | 'loss' | 'rug'. 'rug' means Layer 6's own
+    exit-risk detector fired a defensive sell on a position this deployer's
+    token was behind (see defensive_sell.py) -- a directly observed event,
+    not a guess."""
+    ts = ts if ts is not None else time.time()
+    key = f"deployer_history:{deployer_wallet}"
+    history = get_value(key) or []
+    history.append({"ts": ts, "token": token, "chain": chain, "outcome": outcome,
+                     "pnl_usd": pnl_usd})
+    history = history[-DEPLOYER_HISTORY_MAX_POINTS:]
+    set_value(key, history)
+
+
+def get_deployer_history(deployer_wallet: str) -> List[dict]:
+    return get_value(f"deployer_history:{deployer_wallet}") or []
+
+
+def get_deployer_reputation(deployer_wallet: str) -> dict:
+    """Summarizes get_deployer_history into wins/losses/rugs/net P&L plus a
+    tier label:
+      - 'blacklisted': >=1 confirmed rug against us. Zero tolerance -- a rug
+        here means our own Layer 6 exit-risk detector already fired a real
+        defensive sell against this exact wallet, so one is enough.
+      - 'trusted': zero rugs, 2+ real wins, net positive P&L -- repeat
+        proof, not a single lucky trade.
+      - 'neutral': not enough data yet, or a mixed record that clears
+        neither bar.
+    """
+    history = get_deployer_history(deployer_wallet)
+    wins = sum(1 for h in history if h.get("outcome") == "win")
+    losses = sum(1 for h in history if h.get("outcome") == "loss")
+    rugs = sum(1 for h in history if h.get("outcome") == "rug")
+    net_pnl_usd = sum((h.get("pnl_usd") or 0.0) for h in history)
+    if rugs >= DEPLOYER_BLACKLIST_RUG_THRESHOLD:
+        tier = "blacklisted"
+    elif rugs == 0 and wins >= DEPLOYER_TRUST_MIN_WINS and net_pnl_usd > 0:
+        tier = "trusted"
+    else:
+        tier = "neutral"
+    return {"wallet": deployer_wallet, "wins": wins, "losses": losses, "rugs": rugs,
+            "net_pnl_usd": net_pnl_usd, "sample_size": len(history), "tier": tier}
+
+
+def is_deployer_blacklisted(deployer_wallet: Optional[str]) -> bool:
+    if not deployer_wallet:
+        return False
+    return get_deployer_reputation(deployer_wallet)["tier"] == "blacklisted"
+
+
+def is_deployer_trusted(deployer_wallet: Optional[str]) -> bool:
+    if not deployer_wallet:
+        return False
+    return get_deployer_reputation(deployer_wallet)["tier"] == "trusted"
+
+
 # ---------------------------------------------------------------------------
 # MadeOnSol daily call budget -- added Sept 25 2026, real production bug
 # caught live: Ali's BASIC-tier key has a real, confirmed 200-calls/day cap
