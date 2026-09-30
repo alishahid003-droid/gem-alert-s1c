@@ -383,7 +383,8 @@ def signal_qualifies(score_band: Optional[str], momentum: bool = False) -> bool:
 
 
 def entry_gate(chain: str, token: str, score_band: Optional[str],
-               liquidity_usd: Optional[float] = None, momentum: bool = False) -> ScalpDecision:
+               liquidity_usd: Optional[float] = None, momentum: bool = False,
+               lane: bool = False) -> ScalpDecision:
     """Pure decision logic, no network -- same should-vs-how split as
     executor/triggers.py. Call once per poll cycle per freshly-scored
     candidate."""
@@ -417,7 +418,7 @@ def entry_gate(chain: str, token: str, score_band: Optional[str],
     if pool.get("open_position") is not None:
         return ScalpDecision(False, "a position is already open -- sequential mode, one at a time")
 
-    if not signal_qualifies(score_band, momentum):
+    if not lane and not signal_qualifies(score_band, momentum):
         return ScalpDecision(False, f"band {score_band or '?'} below minimum "
                                      f"({MOMENTUM_MIN_SCORE_BAND if momentum else SCALPER_CONFIG.min_score_band}) for this mode")
 
@@ -440,7 +441,8 @@ _BUY_FN = {
 }
 
 
-def open_scalp(chain: str, token: str, position_usd: float, entry_mcap: Optional[float], reason: str) -> dict:
+def open_scalp(chain: str, token: str, position_usd: float, entry_mcap: Optional[float], reason: str,
+               profile: Optional[str] = None) -> dict:
     """Executes the real buy via swap_executor (inert until
     EXECUTION_ENABLED + a real key -- unchanged from every other buy path
     in this repo), and on success records the position onto the pool and
@@ -465,7 +467,7 @@ def open_scalp(chain: str, token: str, position_usd: float, entry_mcap: Optional
         "chain": chain, "token": token, "entry_mcap": entry_mcap,
         "position_usd": position_usd, "amount_tokens": result.filled_amount_tokens or 0.0,
         "opened_ts": time.time(), "peak_multiple": 1.0, "partial_tp_done": False,
-        "reason": reason,
+        "reason": reason, "profile": profile,
     }
     pool["balance_usd"] = round(pool.get("balance_usd", 0.0) - position_usd, 2)
     _save_pool(pool)
@@ -497,31 +499,47 @@ def evaluate_exit(current_mcap_usd: Optional[float]) -> ExitDecision:
     mult = current_mcap_usd / entry_mcap
     peak = max(pos.get("peak_multiple", 1.0), mult)
     elapsed_min = (time.time() - pos.get("opened_ts", time.time())) / 60.0
-    return scalp_exit_decision(mult, peak, elapsed_min, bool(pos.get("partial_tp_done")))
+    return scalp_exit_decision(mult, peak, elapsed_min, bool(pos.get("partial_tp_done")), pos.get("profile"))
 
 
-def scalp_exit_decision(mult: float, peak: float, elapsed_min: float, partial_tp_done: bool) -> ExitDecision:
+def _exit_params(profile: Optional[str]) -> tuple:
+    """(hard_stop_pct, take_profit_multiple, partial_tp_pct, trail_stop_pct,
+    time_stop_minutes). "quick" = the sprint momentum lane (layer16)."""
+    if profile == "quick":
+        return (_env_float("LANE_STOP_PCT", 0.08), _env_float("LANE_TP_MULT", 1.12),
+                _env_float("LANE_TP_SELL_PCT", 0.70), _env_float("LANE_TRAIL_PCT", 0.06),
+                _env_float("LANE_TIME_STOP_MIN", 20.0))
+    return (SCALPER_CONFIG.hard_stop_pct, SCALPER_CONFIG.take_profit_multiple, SCALPER_CONFIG.partial_tp_pct,
+            SCALPER_CONFIG.trail_stop_pct, SCALPER_CONFIG.time_stop_minutes)
+
+
+def scalp_exit_decision(mult: float, peak: float, elapsed_min: float, partial_tp_done: bool,
+                        profile: Optional[str] = None) -> ExitDecision:
     """PURE scalper exit rules (split out Sept 30 2026 so the paper ledger
     and backtest_trades run exactly the same logic as the live pool)."""
-    if not partial_tp_done and mult <= (1 - SCALPER_CONFIG.hard_stop_pct):
+    hard_stop_pct, tp_mult, tp_sell, trail_pct, time_stop = _exit_params(profile)
+    if partial_tp_done and profile == "quick" and elapsed_min >= time_stop:
+        return ExitDecision(True, f"{elapsed_min:.0f} min -- quick lane closes the remainder",
+                             pct_to_sell=1.0, exit_type="time_stop")
+    if not partial_tp_done and mult <= (1 - hard_stop_pct):
         return ExitDecision(True, f"{mult:.2f}x hit hard stop "
-                                    f"({SCALPER_CONFIG.hard_stop_pct*100:.0f}% below entry)",
+                                    f"({hard_stop_pct*100:.0f}% below entry)",
                              pct_to_sell=1.0, exit_type="hard_stop")
 
-    if not partial_tp_done and mult >= SCALPER_CONFIG.take_profit_multiple:
+    if not partial_tp_done and mult >= tp_mult:
         return ExitDecision(True, f"{mult:.2f}x reached take-profit target "
-                                    f"({SCALPER_CONFIG.take_profit_multiple}x)",
-                             pct_to_sell=SCALPER_CONFIG.partial_tp_pct, exit_type="take_profit_partial")
+                                    f"({tp_mult}x)",
+                             pct_to_sell=tp_sell, exit_type="take_profit_partial")
 
     if partial_tp_done:
         pullback = (peak - mult) / peak if peak > 0 else 0.0
-        if pullback >= SCALPER_CONFIG.trail_stop_pct:
+        if pullback >= trail_pct:
             return ExitDecision(True, f"{mult:.2f}x pulled back {pullback*100:.0f}% from peak "
                                         f"{peak:.2f}x after partial take-profit",
                                  pct_to_sell=1.0, exit_type="trail_stop")
         return ExitDecision(False, f"riding remainder, {mult:.2f}x (peak {peak:.2f}x)")
 
-    if elapsed_min >= SCALPER_CONFIG.time_stop_minutes:
+    if elapsed_min >= time_stop:
         return ExitDecision(True, f"{elapsed_min:.0f} min elapsed with no target hit "
                                     f"({mult:.2f}x) -- momentum thesis invalidated",
                              pct_to_sell=1.0, exit_type="time_stop")
@@ -571,7 +589,7 @@ def check_and_manage(current_mcap_usd: Optional[float]) -> Optional[dict]:
         pool.setdefault("trades", []).append({
             "chain": pos["chain"], "token": pos["token"], "exit_type": decision.exit_type,
             "reason": decision.reason, "pct_sold": decision.pct_to_sell,
-            "filled_usd": result.filled_usd, "pnl_usd": pnl, "ts": time.time(),
+            "filled_usd": result.filled_usd, "pnl_usd": pnl, "ts": time.time(), "profile": pos.get("profile"),
         })
 
         if decision.exit_type == "take_profit_partial":

@@ -143,7 +143,8 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
     from executor.compound_scalper import scalp_exit_decision
     mult = mcap / pos["entry_mcap"]
     peak = pos["peak_mcap"] / pos["entry_mcap"]
-    d = scalp_exit_decision(mult, peak, (now - pos["opened_ts"]) / 60.0, pos.get("tp_done", False))
+    d = scalp_exit_decision(mult, peak, (now - pos["opened_ts"]) / 60.0, pos.get("tp_done", False),
+                            pos.get("exit_profile"))
     if not d.should_exit:
         return False
     if d.exit_type == "take_profit_partial":
@@ -234,7 +235,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 closed_now.append(_close(pos, d.exit_type, d.reason, now))
                 del book[pid]
             continue
-        if pos.get("strategy") == "scalper":
+        if pos.get("strategy") in ("scalper", "quick"):
             if _manage_scalper(pos, mcap, now):
                 closed_now.append(pos)
                 del book[pid]

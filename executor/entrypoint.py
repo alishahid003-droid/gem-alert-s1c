@@ -211,8 +211,9 @@ def handle_compound_scalper_candidate(chain: str, token: str, score_band: Option
                                 paper_ledger.PAPER_SCALP_USD, entry_mcap, band=score_band,
                                 liquidity_usd=liquidity_usd, strategy="scalper",
                                 guard="pass" if guard_ok else "blocked")
+    lane = ctx.get("lane") == "momentum"
     decision = compound_scalper.entry_gate(chain, token, score_band, liquidity_usd=liquidity_usd,
-                                           momentum=momentum)
+                                           momentum=momentum, lane=lane)
     if decision.should_fire and not guard_ok:
         return {"fired": False, "mode": "compound_scalper", "reason": f"entry guard: {guard_why}"}
     if decision.should_fire and compound_scalper.sprint_mode():
@@ -223,7 +224,9 @@ def handle_compound_scalper_candidate(chain: str, token: str, score_band: Option
     if not decision.should_fire:
         return {"fired": False, "mode": "compound_scalper", "reason": decision.reason}
 
-    open_result = compound_scalper.open_scalp(chain, token, decision.position_usd, entry_mcap, decision.reason)
+    open_result = compound_scalper.open_scalp(chain, token, decision.position_usd, entry_mcap,
+                                              ("momentum lane: " if lane else "") + decision.reason,
+                                              profile="quick" if lane else None)
     return {
         "fired": True, "mode": "compound_scalper", "position_usd": decision.position_usd,
         "reason": decision.reason, "open": open_result,
