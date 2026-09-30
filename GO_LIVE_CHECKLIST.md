@@ -15,6 +15,54 @@ target is a number we measure against every week — not something assumed.
 
 ---
 
+## ▶ WHERE WE STAND — read this first (updated Sept 30 2026, 20:15 PKT / 15:15 UTC)
+
+**Code:** everything is merged to `main` (PRs #1–#11). Ali's PC is on `main` (pulled at `bd86c0c`; pull again for `restart_fast_watch.bat`). 736 automated tests pass.
+**Real money:** OFF. No trading wallet key yet, and `EXECUTION_ENABLED` isn't set. The system alerts and paper-trades only.
+**Score:** 44 items done, 25 open (list below). Open items needing Ali, in order: 6.1 wallet → 6.2 key secret → 6.4 $2 live test → (after tomorrow's replay) 6.5 `EXECUTION_ENABLED=true`.
+
+**What's running live (all verified with heartbeats):**
+| Runner | Where | How often | Notes |
+|---|---|---|---|
+| poll-fast | GitHub, via cron-job.org | 10 min | discovery on all 4 chains, scoring, Stage 1, moonshot screen, stall alerts, daily Telegram summary |
+| poll-slow | GitHub | ~20 min | deep scoring, wallet layers |
+| poll-madeonsol | Ali's PC (Task Scheduler) | 15 min | MadeOnSol layers, paced within 190 calls/day |
+| fast-watch | Ali's PC (Startup folder) | 20 s with real money in a coin, otherwise 60 s | positions, scalper, paper ledger, revival watch. Restart with `restart_fast_watch.bat` after every `git pull` |
+| alert-replay | GitHub | daily 06:07 UTC | win rate of the system's own alerts (7-day archive, alerts ≥ 4 h old) |
+
+**Trading modes (what exists and whether it's on):**
+| Mode | Status | Real money |
+|---|---|---|
+| Stage 1: band A/B buy + exit rules + 25% free runner | built, tested, paper-trading | when `EXECUTION_ENABLED=true`. Band B floor; band C never |
+| Stage 2: Fomo roster convergence copy-trade + copy-exit | built, tested | same switch. Needs Fomo credits (monthly reset) |
+| Compound scalper (aggressor) | built, tested, paper-trading | separate switch `COMPOUND_SCALPER_ENABLED` + manual pool start (7.5) |
+| Moonshot (Layer 15): escape-velocity screen, half rides as runner | built, tested, alerts + paper | separate switch `MOONSHOT_ENABLED` (3.0d), $5/shot |
+| Revival watch (Layer 14) | built, tested, live | feeds the scalper / Stage 1 |
+| Chains | Solana, BSC, Robinhood: buy paths exist (only Solana has a wallet planned). Base: alerts + paper only, no buy path (7.3) | |
+
+### Tests & evidence log — already done, DO NOT re-run to "check" again
+| # | Test | When | Result | Where |
+|---|---|---|---|---|
+| T1 | Unit/integration suite | every commit | 736 pass | `tests/` |
+| T2 | Live diagnostic (real Secrets, read-only) | Sept 30 12:24 & later | all runners fresh, orphans repaired, keys present | `diag-live.yml` |
+| T3 | Test trade **dry-run** (no key, nothing sent) | Sept 30 13:50 UTC | passed: Jupiter quote + swap build OK | `test-trade.yml` |
+| T4 | Labeled-coin trade backtest (Birdeye candles, 24 coins) | Sept 30 | stop −55% / lock 1.5x / trail 50% → 75% wins (79% with entry filter); became the default exits | `backtest_trades.py` |
+| T5 | New loops make **zero** MadeOnSol calls | Sept 30 | verified at runtime (only DexScreener + GoPlus) | — |
+| T6 | Upstash usage measured | Sept 30 | 26 cmds/min → cut to ~9/min idle (5.4) | heartbeat notes |
+| T7 | Alert replay run 1 (`36725405507`) | 14:03 UTC | INVALID: GeckoTerminal 429 read as "no pool" → fixed | alert-replay |
+| T8 | Alert replay run 2 (`36726979727`) | 14:32 UTC | **band B 4/5 wins (+58..+149%, all Base); band C 1/13** (−60..−66% rugs) → band C blocked from real money (incl. momentum) | alert-replay |
+| T9 | Alert replay run 4 (`36730347993`) | 14:50 UTC | not conclusive: the feed held only ~2 h, so 71/82 trades were still open → 7-day archive + ≥4 h filter + daily schedule added | alert-replay |
+| T10 | Moonshot detector + runner exits | Sept 30 | 17 unit tests (gates, exit profile, handler, screen/alert/cooldown) | `tests/test_layer15_moonshot.py` |
+
+**Pending evidence (automatic, don't trigger by hand):**
+- Oct 1 06:07 UTC (11:07 PKT): daily alert replay → decides 2.5/2.8 and the go-live band.
+- Paper ledger → dashboard Positions tab (by signal / chain / band / source incl. `moonshot`, `runner`).
+- First Telegram daily summary → confirms 5.6.
+
+**Superseded files (history only — don't work from them):** `FINAL_CHECKLIST_2026-09-27.md`, `TASKS_LEFT_*.md`, `NEXT_STEPS.md`.
+
+---
+
 ## Phase 0 — Already fixed (Sept 30, branch `claude/kind-mayer-1ydst8`)
 
 - [x] Stage 2 copy-trade buy sat in the wrong loop and could never fire; large untracked buys crashed the cycle — `345d246`
@@ -129,3 +177,5 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - Sept 30 2026 17:28 PKT — PC: stash of old local layer13 edits (`pc-local-edits-before-sept30`), pull to 4fe41d0, setup_pc.bat OK, task re-registered; 1.4 done; 1.3 waiting on first `poll-madeonsol` heartbeat.
 - Sept 30 2026 12:35 UTC — 1.5 done. No PC heartbeat yet 7 min after the 17:28 PKT run; PC log was buffered (only header visible) -> run_poll_madeonsol.bat now runs `python -u` and writes a `finished ... exit code` line.
 - Sept 30 2026 12:37 UTC — 1.3 done (first PC heartbeat). Found: MadeOnSol 160/190 used by mid-day -> added 5.7.
+- Sept 30 2026 14:05–15:15 UTC — PR #7 (entry guards 3.1/3.3–3.6, retry 5.3, Telegram 5.5/5.6, copy-exit 4.5, Upstash 5.4), PR #8 (band B floor for momentum, from replay T8), PR #9 (moonshot Layer 15 + free runner; fixed: the 50% trail used to sell the moonbag), PR #10 (7-day replay archive + daily replay), PR #11 (`restart_fast_watch.bat`: a second copy had locked the log). All merged.
+- Sept 30 2026 20:15 PKT — PC pulled `bd86c0c`. Next: `git pull` + `restart_fast_watch.bat`; then 6.1 wallet, 6.2 key, 6.4 $2 test.
