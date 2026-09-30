@@ -157,8 +157,24 @@ def main():
     rows = []
     print(f"\n--- Solana / Robinhood Chain ({len(SOLANA_LABELED)} labeled tokens) ---")
     for name, chain, address, category, is_pregrad in SOLANA_LABELED:
-        rows.append(run_one(name, chain, address, category, is_pregrad,
-                             args.skip_onchain, args.skip_birdeye, args.skip_current_score))
+        # Real crash found Sept 30 2026 (tomorrow's first live post-reset
+        # run): a single flaky free Solana RPC endpoint
+        # (solana-rpc.publicnode.com) timed out on fetch_solana_top10_holder_pct,
+        # ApiUnreachable propagated uncaught all the way out of run_one(),
+        # and killed the ENTIRE backtest after only 2 of 17 labeled tokens --
+        # exactly the same failure mode backtest_categorized.py's
+        # score_solana_labeled already guards against (see its identical
+        # try/except below). This script was the one place missing that
+        # same protection -- scheduler.py's live poll path is already safe
+        # via _safe() wrapping score_solana_mint. One bad token's network
+        # hiccup must never cost the whole night's real, honest read.
+        try:
+            rows.append(run_one(name, chain, address, category, is_pregrad,
+                                 args.skip_onchain, args.skip_birdeye, args.skip_current_score))
+        except Exception as e:
+            print(f"[{category:10s}] {name} / {chain}: NETWORK ERROR (token skipped, run continues): {e}")
+            rows.append({"name": name, "chain": chain, "address": address, "category": category,
+                         "error": f"network error: {e}"})
 
     print(f"\n--- BSC / Base ({len(BSC_LABELED)} labeled tokens) ---")
     for name, chain, address, category, is_pregrad in BSC_LABELED:
