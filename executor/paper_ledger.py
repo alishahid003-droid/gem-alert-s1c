@@ -38,6 +38,7 @@ MAX_CLOSED_KEPT = 3000
 UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
+PAPER_SCALP_USD = 25.0   # compound-scalper paper size (the pool's seed scale)
 
 
 def _cost_pct(chain: str, usd: float, liquidity_usd: Optional[float]) -> float:
@@ -75,7 +76,7 @@ def _closed() -> list:
 def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
                entry_mcap: Optional[float], band: Optional[str] = None,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
-               now: Optional[float] = None) -> Optional[dict]:
+               now: Optional[float] = None, strategy: str = "stage") -> Optional[dict]:
     """Opens one paper position; no-op if the same (chain, token, source) is
     already open, the chain has no buy path, or the price is unknown."""
     if chain not in EXECUTABLE_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
@@ -90,7 +91,7 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
-           "unpriced_cycles": 0, "events": []}
+           "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False}
     book[pid] = pos
     state.set_value(OPEN_KEY, book)
     return pos
@@ -116,6 +117,24 @@ def _close(pos: dict, exit_type: str, reason: str, now: float) -> dict:
     pos["pnl_pct"] = round(pos["pnl_usd"] / pos["usd"] * 100, 2) if pos["usd"] else 0.0
     pos["win"] = pos["pnl_usd"] > 0
     return pos
+
+
+def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
+    """Compound-scalper exits (executor.compound_scalper.scalp_exit_decision)
+    on a paper position. Returns True when the position closed."""
+    from executor.compound_scalper import scalp_exit_decision
+    mult = mcap / pos["entry_mcap"]
+    peak = pos["peak_mcap"] / pos["entry_mcap"]
+    d = scalp_exit_decision(mult, peak, (now - pos["opened_ts"]) / 60.0, pos.get("tp_done", False))
+    if not d.should_exit:
+        return False
+    if d.exit_type == "take_profit_partial":
+        _sell(pos, d.pct_to_sell, mcap, d.exit_type, now)
+        pos["tp_done"] = True
+        return False
+    _sell(pos, pos["remaining"], mcap, d.exit_type, now)
+    _close(pos, d.exit_type, d.reason, now)
+    return True
 
 
 def manage(snapshot_fn: Callable[[str, str], Optional[dict]], now: Optional[float] = None) -> dict:
@@ -147,6 +166,11 @@ def manage(snapshot_fn: Callable[[str, str], Optional[dict]], now: Optional[floa
             del book[pid]
             continue
 
+        if pos.get("strategy") == "scalper":
+            if _manage_scalper(pos, mcap, now):
+                closed_now.append(pos)
+                del book[pid]
+            continue
         d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
                                      pos["remaining"], pos["breakeven_locked"], pos["cost_pct"])
         if d.action == "exit_all":

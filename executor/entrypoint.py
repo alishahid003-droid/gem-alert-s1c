@@ -169,7 +169,8 @@ def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[f
 
 def handle_compound_scalper_candidate(chain: str, token: str, score_band: Optional[str],
                                        entry_mcap: Optional[float],
-                                       liquidity_usd: Optional[float] = None) -> dict:
+                                       liquidity_usd: Optional[float] = None,
+                                       momentum: bool = False) -> dict:
     """Evaluates executor.compound_scalper's own entry gate and, if it
     fires, opens the scalp position through that module. Independent of
     Stage 1/Stage 2 -- a token can fire this AND a stage entry in the same
@@ -178,7 +179,15 @@ def handle_compound_scalper_candidate(chain: str, token: str, score_band: Option
     compound_scalper.init_pool() has already been called -- see that
     module's own docstring for why the pool start is a deliberate manual
     step rather than automatic."""
-    decision = compound_scalper.entry_gate(chain, token, score_band, liquidity_usd=liquidity_usd)
+    # Paper-trade every scalper-quality signal even while the pool is off, so
+    # the scalper's own win rate is measured before any money goes in.
+    if compound_scalper.signal_qualifies(score_band, momentum):
+        paper_ledger.open_paper(chain, token, "scalper",
+                                "scalper_momentum" if momentum else f"scalper_band_{score_band}",
+                                paper_ledger.PAPER_SCALP_USD, entry_mcap, band=score_band,
+                                liquidity_usd=liquidity_usd, strategy="scalper")
+    decision = compound_scalper.entry_gate(chain, token, score_band, liquidity_usd=liquidity_usd,
+                                           momentum=momentum)
     if not decision.should_fire:
         return {"fired": False, "mode": "compound_scalper", "reason": decision.reason}
 
