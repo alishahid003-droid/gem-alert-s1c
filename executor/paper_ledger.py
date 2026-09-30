@@ -39,6 +39,9 @@ UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3      # AND at least UNPRICEABLE_MINUTES_
 UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = 30.0  # time-based: the fast watcher ticks every 20 s
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
+# Base is paper-tracked too (no buy path yet -- checklist 7.3): the alert
+# replay's band-B winners were all on Base, so its record is measured now.
+PAPER_CHAINS = EXECUTABLE_CHAINS | {"base"}
 PAPER_SCALP_USD = 25.0   # compound-scalper paper size (the pool's seed scale)
 
 
@@ -78,10 +81,10 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
                entry_mcap: Optional[float], band: Optional[str] = None,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
                now: Optional[float] = None, strategy: str = "stage",
-               guard: Optional[str] = None) -> Optional[dict]:
+               guard: Optional[str] = None, exit_profile: Optional[str] = None) -> Optional[dict]:
     """Opens one paper position; no-op if the same (chain, token, source) is
     already open, the chain has no buy path, or the price is unknown."""
-    if chain not in EXECUTABLE_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
+    if chain not in PAPER_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
         return None
     now = now if now is not None else time.time()
     book = _open()
@@ -94,7 +97,7 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
            "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False,
-           "guard": guard or "n/a"}
+           "guard": guard or "n/a", "exit_profile": exit_profile}
     book[pid] = pos
     state.set_value(OPEN_KEY, book)
     return pos
@@ -201,7 +204,8 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
 
         if pos.get("strategy") == "runner":
             d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
-                                         exit_rules.moonshot_runner_pct(), True, pos["cost_pct"])
+                                         exit_rules.runner_pct_for(pos.get("exit_profile")), True, pos["cost_pct"],
+                                         profile=pos.get("exit_profile"))
             if d.action == "exit_all":
                 _sell(pos, pos["remaining"], mcap, d.exit_type, now)
                 closed_now.append(_close(pos, d.exit_type, d.reason, now))
@@ -213,7 +217,8 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 del book[pid]
             continue
         d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
-                                     pos["remaining"], pos["breakeven_locked"], pos["cost_pct"])
+                                     pos["remaining"], pos["breakeven_locked"], pos["cost_pct"],
+                                     profile=pos.get("exit_profile"))
         if d.action == "exit_all":
             _sell(pos, pos["remaining"], mcap, d.exit_type, now)
             closed_now.append(_close(pos, d.exit_type, d.reason, now))
@@ -236,6 +241,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 book["runner:" + pid] = {
                     **{k: pos[k] for k in ("chain", "token", "signal", "band", "tags", "entry_mcap",
                                            "peak_mcap", "cost_pct", "guard")},
+                    "exit_profile": pos.get("exit_profile"),
                     "id": "runner:" + pid, "source": "runner", "strategy": "runner",
                     "usd": pos["usd"] * runner_frac, "opened_ts": now, "remaining": 1.0,
                     "breakeven_locked": True, "ladder_scale": 1.0, "rungs_fired": [], "proceeds_usd": 0.0,

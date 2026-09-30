@@ -71,6 +71,16 @@ def runner_trail_giveback() -> float:    return _f("RUNNER_TRAIL_GIVEBACK_PCT", 
 def runner_floor_mult() -> float:        return _f("RUNNER_FLOOR_MULT", 0.5)
 
 
+# Exit profile for Layer 15 moonshot entries: the stake comes back at 2x
+# (not 1.5x), then HALF the original position rides as the runner.
+def _profile_breakeven_mult(profile: Optional[str]) -> float:
+    return _f("MOONSHOT_BREAKEVEN_MULT", 2.0) if profile == "moonshot" else breakeven_trigger_mult()
+
+
+def runner_pct_for(profile: Optional[str]) -> float:
+    return _f("MOONSHOT_SLEEVE_RUNNER_PCT", 0.5) if profile == "moonshot" else moonshot_runner_pct()
+
+
 @dataclass
 class ExitDecision:
     action: str                 # "hold" | "sell_partial" | "exit_all"
@@ -90,7 +100,7 @@ def breakeven_sell_fraction(multiple: float, round_trip_cost_pct: float) -> floa
 def evaluate_exit(entry_mcap: Optional[float], current_mcap: Optional[float],
                   peak_mcap: Optional[float], opened_ts: float, now_ts: float,
                   remaining_pct: float, breakeven_locked: bool,
-                  round_trip_cost_pct: float = 0.03) -> ExitDecision:
+                  round_trip_cost_pct: float = 0.03, profile: Optional[str] = None) -> ExitDecision:
     if not entry_mcap or not current_mcap or entry_mcap <= 0 or remaining_pct <= 0:
         return ExitDecision("hold", reason="no price or nothing left")
     mult = current_mcap / entry_mcap
@@ -100,12 +110,12 @@ def evaluate_exit(entry_mcap: Optional[float], current_mcap: Optional[float],
         return ExitDecision("exit_all", "stop_loss",
                             reason=f"{(mult - 1) * 100:.0f}% from entry hit the -{stop_loss_pct() * 100:.0f}% stop")
 
-    if not breakeven_locked and mult >= breakeven_trigger_mult():
+    if not breakeven_locked and mult >= _profile_breakeven_mult(profile):
         frac = min(breakeven_sell_fraction(mult, round_trip_cost_pct), remaining_pct)
         return ExitDecision("sell_partial", "breakeven_lock", pct_of_original=frac,
                             reason=f"{mult:.2f}x: sold {frac * 100:.0f}% to recover the full stake -- rest rides free")
 
-    runner = min(moonshot_runner_pct(), remaining_pct) if breakeven_locked else 0.0
+    runner = min(runner_pct_for(profile), remaining_pct) if breakeven_locked else 0.0
     tradeable = remaining_pct - runner
     if runner > 0 and tradeable <= 1e-6:
         # Only the free-ride runner is left.
@@ -156,7 +166,8 @@ def check_and_exit(chain: str, token: str, current_mcap: Optional[float],
     remaining = position_state.remaining_pct(chain, token)
     cost = estimate_round_trip_cost_pct(chain, pos.get("total_usd") or 0, liquidity_usd)
     decision = evaluate_exit(_entry_mcap(pos), current_mcap, peak, pos.get("opened_ts") or now_ts,
-                             now_ts, remaining, bool(pos.get("breakeven_locked")), cost)
+                             now_ts, remaining, bool(pos.get("breakeven_locked")), cost,
+                             profile=pos.get("exit_profile"))
     if decision.action == "hold":
         return None
 

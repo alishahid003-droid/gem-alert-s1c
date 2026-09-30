@@ -212,3 +212,53 @@ def handle_compound_scalper_candidate(chain: str, token: str, score_band: Option
         "fired": True, "mode": "compound_scalper", "position_usd": decision.position_usd,
         "reason": decision.reason, "open": open_result,
     }
+
+
+def moonshot_enabled() -> bool:
+    import os
+    return os.environ.get("MOONSHOT_ENABLED", "").strip().lower() == "true"
+
+
+def moonshot_position_usd() -> float:
+    import os
+    try:
+        return float(os.environ.get("MOONSHOT_POSITION_USD", "5"))
+    except ValueError:
+        return 5.0
+
+
+def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
+                              entry_mcap: Optional[float], liquidity_usd: Optional[float],
+                              moonshot_score: int, entry_ctx: Optional[dict] = None) -> dict:
+    """Layer 15 entry path (Sept 30 2026). Always paper-trades the moonshot
+    (profile "moonshot": stake back at 2x, half rides as a runner). Real money
+    only with MOONSHOT_ENABLED=true, band B+ safety (entry guards, momentum
+    rules), the normal position cap, and a buy path on the chain."""
+    usd = moonshot_position_usd()
+    ctx = dict(entry_ctx or {})
+    ctx.setdefault("liquidity_usd", liquidity_usd)
+    guard_ok, guard_why = entry_guards.check(score_band, usd, ctx, momentum=True)
+    paper_ledger.open_paper(chain, token, "moonshot", "moonshot", max(usd, 10.0), entry_mcap,
+                            band=score_band, liquidity_usd=liquidity_usd,
+                            tags={"moonshot_score": moonshot_score},
+                            guard="pass" if guard_ok else "blocked", exit_profile="moonshot")
+    if not moonshot_enabled():
+        return {"fired": False, "stage": "moonshot", "reason": "MOONSHOT_ENABLED is off (paper + alert only)"}
+    if chain not in _BUY_FUNCTIONS:
+        return {"fired": False, "stage": "moonshot", "reason": f"no buy path on {chain} yet (paper only)"}
+    if not guard_ok:
+        return {"fired": False, "stage": "moonshot", "reason": f"entry guard: {guard_why}"}
+    if position_state.has_stage(chain, token, "moonshot"):
+        return {"fired": False, "stage": "moonshot", "reason": "already holding this moonshot"}
+    block = triggers._concurrency_block()
+    if block:
+        return {"fired": False, "stage": "moonshot", "reason": block}
+    allowed, why = paper_ledger.signal_allowed("moonshot")
+    if not allowed:
+        return {"fired": False, "stage": "moonshot", "reason": f"paper-record gate: {why}"}
+    position_state.record_stage_entry(chain, token, "moonshot", usd, entry_mcap,
+                                      f"Layer 15 moonshot score {moonshot_score}")
+    position_state.set_exit_profile(chain, token, "moonshot")
+    buy_result = _attempt_buy_and_record_fill(chain, token, usd, stage="moonshot")
+    return {"fired": True, "stage": "moonshot", "position_usd": usd, "reason": f"moonshot score {moonshot_score}",
+            "buy": buy_result}

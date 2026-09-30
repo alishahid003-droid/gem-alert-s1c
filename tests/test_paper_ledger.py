@@ -33,7 +33,8 @@ def test_classify_signal():
 def test_open_dedupe_and_chain_filter():
     assert pl.open_paper("solana", "M", "stage1", "score_band_A", 30, 100_000, now=T0)
     assert pl.open_paper("solana", "M", "stage1", "score_band_A", 30, 100_000, now=T0) is None
-    assert pl.open_paper("base", "X", "stage1", "score_band_A", 30, 100_000, now=T0) is None
+    assert pl.open_paper("base", "X", "stage1", "score_band_A", 30, 100_000, now=T0)   # Base: paper-tracked
+    assert pl.open_paper("ethereum", "Y", "stage1", "score_band_A", 30, 100_000, now=T0) is None
 
 
 def test_stop_loss_trade_is_a_loss():

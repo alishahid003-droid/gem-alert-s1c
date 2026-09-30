@@ -388,3 +388,13 @@ def mark_breakeven_locked(chain: str, token: str, pct_sold: float):
     pos["ladder_scale"] = max(0.0, 1.0 - pct_sold)
     state.set_value(_key(chain, token), pos)
     return pos
+
+
+def set_exit_profile(chain: str, token: str, profile: str):
+    """Locks a position's exit profile (exit_rules), e.g. "moonshot"."""
+    pos = get_position(chain, token)
+    if not pos:
+        return None
+    pos["exit_profile"] = profile
+    state.set_value(_key(chain, token), pos)
+    return pos
