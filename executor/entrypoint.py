@@ -36,6 +36,16 @@ import executor.triggers as triggers
 import executor.moonbag as moonbag
 import executor.swap_executor as swap_executor
 import executor.compound_scalper as compound_scalper
+import executor.paper_ledger as paper_ledger
+
+# Refusals that are about MONEY (budget, position cap, loss breaker) rather
+# than signal quality -- the paper ledger still records those candidates so
+# the win-rate stats measure the signal, not the wallet (Sept 30 2026).
+_MONEY_LIMIT_MARKERS = ("budget exhausted", "max concurrent", "circuit breaker")
+
+
+def _paper_eligible(decision) -> bool:
+    return decision.should_fire or any(m in (decision.reason or "") for m in _MONEY_LIMIT_MARKERS)
 
 
 _BUY_FUNCTIONS = {
@@ -85,7 +95,8 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
                              deployer_tier: Optional[str], convergence_count: int,
                              entry_mcap: Optional[float], insider_ratio: Optional[float] = None,
                              has_news_catalyst: bool = False,
-                             signal_coverage: Optional[float] = None) -> dict:
+                             signal_coverage: Optional[float] = None,
+                             liquidity_usd: Optional[float] = None) -> dict:
     """Evaluates the Stage 1 trigger and, if it fires, records the position
     and locks in its moonbag ladder in the same step. entry_mcap is the
     launchpad-level mcap at the moment of firing -- the caller (a future
@@ -93,6 +104,15 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
     it isn't re-fetched here."""
     decision = triggers.evaluate_stage1(chain, token, score_band, deployer_tier, convergence_count,
                                         signal_coverage=signal_coverage)
+    signal = paper_ledger.classify_stage1_signal(score_band, deployer_tier, convergence_count, signal_coverage)
+    if signal and _paper_eligible(decision):
+        paper_ledger.open_paper(chain, token, "stage1", signal,
+                                triggers.stage1_position_usd_for_band(score_band), entry_mcap,
+                                band=score_band, liquidity_usd=liquidity_usd)
+    if decision.should_fire:
+        allowed, why = paper_ledger.signal_allowed(signal)
+        if not allowed:
+            return {"fired": False, "stage": "stage1", "reason": f"paper-record gate: {why}"}
     if not decision.should_fire:
         return {"fired": False, "stage": "stage1", "reason": decision.reason}
 
@@ -113,13 +133,23 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
 def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[float],
                              fomo_convergence_count: int, graduated: bool,
                              deployer_tier: Optional[str] = None, insider_ratio: Optional[float] = None,
-                             has_news_catalyst: bool = False) -> dict:
+                             has_news_catalyst: bool = False,
+                             signal_name: str = "fomo_convergence") -> dict:
     """Evaluates the Stage 2 trigger and, if it fires, records the position
     and (re-)assesses conviction -- picking up double-confirmation if a
     Stage 1 entry already exists on this token. See moonbag.assess_conviction's
     docstring for why a second scoring call can only upgrade a position's
     ladder, never downgrade one Stage 1 already locked in."""
     decision = triggers.evaluate_stage2(chain, token, current_mcap_usd, fomo_convergence_count, graduated)
+    if _paper_eligible(decision):
+        from executor.config import EXECUTOR_CONFIG
+        paper_ledger.open_paper(chain, token, "stage2", signal_name,
+                                EXECUTOR_CONFIG.stage2_position_usd, current_mcap_usd,
+                                tags={"traders": fomo_convergence_count})
+    if decision.should_fire:
+        allowed, why = paper_ledger.signal_allowed(signal_name)
+        if not allowed:
+            return {"fired": False, "stage": "stage2", "reason": f"paper-record gate: {why}"}
     if not decision.should_fire:
         return {"fired": False, "stage": "stage2", "reason": decision.reason}
 

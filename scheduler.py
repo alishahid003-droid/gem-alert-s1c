@@ -132,6 +132,7 @@ import executor.position_state as position_state
 import executor.moonbag as moonbag
 import executor.defensive_sell as defensive_sell
 import executor.exit_rules as exit_rules
+import executor.paper_ledger as paper_ledger
 import executor.campaign_milestones as campaign_milestones
 from layers.layer0_scoring import RawSignals, fetch_dexscreener_snapshot
 from layers.layer3_backing_check import check_backing_spike
@@ -584,6 +585,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
                 chain, mint, score_band=sr.band, deployer_tier=effective_deployer_tier,
                 convergence_count=0, entry_mcap=mc,
                 signal_coverage=getattr(sr, "signal_coverage", None),
+                liquidity_usd=(scored.get("raw") or {}).get("liquidity_usd"),
             )
         # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
         # 2026, Ali: "would these trades have been executed?") -- the real
@@ -1226,7 +1228,8 @@ def poll_layer13_fomo_copytrade() -> dict:
                 snap = _safe(fetch_dexscreener_snapshot, ev["chain"], ev["mint"])
                 mcap = snap.get("mcap_usd") if isinstance(snap, dict) else None
                 stage2 = handle_stage2_candidate(ev["chain"], ev["mint"], current_mcap_usd=mcap,
-                                                 fomo_convergence_count=ev["count"], graduated=True)
+                                                 fomo_convergence_count=ev["count"], graduated=True,
+                                                 signal_name="fomoapi_roster_convergence")
                 state.record_autobuy_verdict(ev["mint"], ev["chain"], stage2)
                 print(f"[layer13] {ev['count']} roster traders ({', '.join(ev['traders'])}) bought "
                       f"{ev['mint'][:8]} [{ev['chain']}] -> stage2 fired={stage2['fired']} ({stage2['reason']})")
@@ -1839,6 +1842,13 @@ def run_poll_fast():
             _f.write(f"\n### Fast-cycle result\n- alerts_sent: {alerts_sent}\n"
                      f"- madeonsol_calls: {madeonsol_calls}\n"
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
+
+    # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
+    # position and apply the same exits real money uses -- the measured win
+    # rate per signal lives here. See executor/paper_ledger.py.
+    paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot)
+    if isinstance(paper, dict) and paper.get("open") is not None:
+        print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
 
     # Layer 13 (Fomo) also runs here since Sept 30 2026 -- it was PC-only,
     # so it silently never ran whenever the PC job wasn't scheduled. Shared

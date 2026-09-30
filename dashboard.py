@@ -98,6 +98,7 @@ import links
 from scheduler import readiness_report
 import executor.position_state as position_state
 import executor.compound_scalper as compound_scalper
+import executor.paper_ledger as paper_ledger
 from layers.layer0_scoring import fetch_dexscreener_snapshot
 
 PORT = 8787
@@ -421,6 +422,8 @@ def build_data() -> dict:
         "fomo_signals": fomo_signals,
         "fomo_candidates": fomo_candidates,
         "health": _health(),
+        "paper": paper_ledger.scoreboard(),
+        "win_rate_target": 0.8,
     }
     _lap(f"TOTAL")
     return out
@@ -546,6 +549,10 @@ PAGE_TEMPLATE = """<!doctype html>
 </div>
 
 <div class="tabpanel" data-panel="positions">
+  <section>
+    <h2>Win-Rate Scoreboard <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(paper trades -- every signal, same exits as real money, costs included)</span></h2>
+    <div id="paper"></div>
+  </section>
   <section>
     <h2>Open Positions</h2>
     <div id="positions"></div>
@@ -830,6 +837,24 @@ function render(data) {
       <td>${Object.entries(a.links || {}).map(([label,url]) => `<a class="linkbtn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" ")}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No alerts to show (try the toggle above if you want to see filtered noise too).</div>';
   document.getElementById("noise-toggle").onclick = () => { showNoise = !showNoise; render(window.__lastData); };
+
+  const pp = data.paper || {};
+  const ov = pp.overall || {};
+  const tgt = data.win_rate_target || 0.8;
+  const pctCell = (st) => st && st.n ? `<span class="${st.win_rate >= tgt ? 'pos-pnl' : 'neg-pnl'}">${(st.win_rate * 100).toFixed(0)}%</span>` : '<span class="na">-</span>';
+  const groupTable = (title, grp) => {
+    const rows = Object.entries(grp || {});
+    if (!rows.length) return '';
+    return `<h4 style="margin:12px 0 4px">${esc(title)}</h4><table><thead><tr><th></th><th>Trades</th><th>Win rate</th><th>Avg win</th><th>Avg loss</th><th>Expectancy</th><th>P&amp;L</th></tr></thead>
+      <tbody>${rows.map(([k, st]) => `<tr><td>${esc(k)}</td><td>${st.n}</td><td>${pctCell(st)}</td>
+        <td>${st.avg_win_pct != null ? '+' + st.avg_win_pct + '%' : '-'}</td><td>${st.avg_loss_pct != null ? st.avg_loss_pct + '%' : '-'}</td>
+        <td>${st.expectancy_pct != null ? st.expectancy_pct + '%' : '-'}</td><td>${fmtUsd(st.total_pnl_usd)}</td></tr>`).join("")}</tbody></table>`;
+  };
+  document.getElementById("paper").innerHTML = ov.n ? `
+    <p><strong>${ov.n}</strong> closed paper trades &middot; win rate ${pctCell(ov)} (target ${(tgt * 100).toFixed(0)}%)
+      &middot; expectancy ${ov.expectancy_pct}% per trade &middot; total ${fmtUsd(ov.total_pnl_usd)} &middot; ${pp.open_count || 0} open</p>
+    ${groupTable("By signal", pp.by_signal)}${groupTable("By chain", pp.by_chain)}${groupTable("By exit", pp.by_exit_type)}`
+    : `<div class="empty">No closed paper trades yet -- ${pp.open_count || 0} open. Every buy signal is paper-traded automatically; results appear here as they close.</div>`;
 
   const h = data.health || {};
   document.getElementById("health").innerHTML = `
