@@ -143,3 +143,19 @@ def test_resolver_returning_untracked_still_ignored():
         resolve_unknown=lambda addr: "untracked",
     )
     assert events == []
+
+
+def test_same_scored_alert_not_repeated_every_cycle(monkeypatch):
+    sent = []
+    monkeypatch.setattr(scheduler, "send_alert", lambda a: sent.append(a) or {"sent": True})
+
+    def fire(score, band):
+        a = scheduler.Alert("tok", "token-rep", "robinhood_chain", "Layer 0 structural score")
+        a.set_tag("Score", f"{score}/100 (band {band})")
+        return scheduler._alert(a, "layer0b_gt")
+    fire(50, "B")
+    fire(51, "B")                      # next cycle, same coin: suppressed
+    assert len(sent) == 1
+    fire(64, "B")                      # real score move: goes out
+    fire(72, "A")                      # band change: goes out
+    assert len(sent) == 3

@@ -30,10 +30,10 @@ def record_stage_entry(chain: str, token: str, stage: str, usd_amount: float,
                         entry_mcap: Optional[float], reason: str):
     """stage: 'stage1' or 'stage2'. Adds to the position, doesn't overwrite
     the other stage's entry if one already exists."""
-    pos = get_position(chain, token) or {
-        "chain": chain, "token": token, "stages": {}, "total_usd": 0.0,
-        "opened_ts": time.time(), "status": "open",
-    }
+    pos = get_position(chain, token)
+    if not pos or pos.get("never_bought"):
+        pos = {"chain": chain, "token": token, "stages": {}, "total_usd": 0.0,
+               "opened_ts": time.time(), "status": "open"}
     pos["stages"][stage] = {
         "usd_amount": usd_amount, "entry_mcap": entry_mcap,
         "reason": reason, "ts": time.time(),
@@ -46,6 +46,8 @@ def record_stage_entry(chain: str, token: str, stage: str, usd_amount: float,
 
 def has_stage(chain: str, token: str, stage: str) -> bool:
     pos = get_position(chain, token)
+    if pos and pos.get("never_bought"):
+        return False   # a cleared never-bought record doesn't block a real buy later
     return bool(pos and stage in pos.get("stages", {}))
 
 
@@ -198,7 +200,8 @@ def list_closed_positions(limit: int = 100) -> list:
     list_open_positions() above."""
     index = state.get_value("exec_position_index") or []
     records = state.get_values(index)
-    closed = [pos for pos in records.values() if pos and pos.get("status") == "closed"]
+    closed = [pos for pos in records.values()
+              if pos and pos.get("status") == "closed" and not pos.get("never_bought")]
     closed.sort(key=lambda p: p.get("closed_ts", 0), reverse=True)
     return closed[:limit]
 
@@ -429,3 +432,31 @@ def sanity_rebase_entry(chain: str, token: str, current_mcap: Optional[float],
     pos["entry_rebased"] = rebased
     state.set_value(_key(chain, token), pos)
     return rebased
+
+
+NEVER_BOUGHT_CLOSE_AFTER_SECONDS = 60 * 60
+
+
+def close_never_bought(now: Optional[float] = None) -> int:
+    """Closes open records whose every buy failed or was refused (e.g.
+    EXECUTION_ENABLED off) once they're an hour old. Before this they stayed
+    'open' forever: the dashboard showed them as positions (one at a fake
+    -93%), and has_stage() kept answering "stage1 already fired", so the coin
+    could never be bought again -- even after going live. Sept 30 2026."""
+    now = now if now is not None else time.time()
+    n = 0
+    for pos in list_open_positions():
+        stages = pos.get("stages") or {}
+        if pos.get("amount_tokens") or not stages:
+            continue
+        if any(st.get("buy_status") != "failed" for st in stages.values()):
+            continue
+        if now - (pos.get("opened_ts") or now) < NEVER_BOUGHT_CLOSE_AFTER_SECONDS:
+            continue
+        pos["status"] = "closed"
+        pos["closed_ts"] = now
+        pos["close_reason"] = "never bought (every buy failed or was refused) -- record cleared"
+        pos["never_bought"] = True
+        state.set_value(_key(pos["chain"], pos["token"]), pos)
+        n += 1
+    return n

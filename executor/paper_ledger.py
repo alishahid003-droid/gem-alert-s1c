@@ -72,9 +72,21 @@ def _open() -> dict:
     return v if isinstance(v, dict) else {}
 
 
-def _closed() -> list:
+def _closed_raw() -> list:
     v = state.get_value(CLOSED_KEY)
     return v if isinstance(v, list) else []
+
+
+# Paper trades opened before the entry-price fix (PR #13, Sept 30 2026 ~15:35
+# UTC) were priced against an entry mcap from a different source/unit: the
+# dashboard showed 8 closed at 0% wins / -49.5%, with -93..-96% "stops" on
+# coins whose real candles were only -5%. They are kept (for history) but
+# excluded from every win-rate number and the auto-disable gate.
+STATS_SINCE_TS = float(os.environ.get("PAPER_STATS_SINCE_TS", "1790782800"))
+
+
+def _closed() -> list:
+    return [r for r in _closed_raw() if (r.get("opened_ts") or 0) >= STATS_SINCE_TS]
 
 
 def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
@@ -272,7 +284,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
 
     state.set_value(OPEN_KEY, book)
     if closed_now:
-        state.set_value(CLOSED_KEY, (_closed() + closed_now)[-MAX_CLOSED_KEPT:])
+        state.set_value(CLOSED_KEY, (_closed_raw() + closed_now)[-MAX_CLOSED_KEPT:])
     return {"open": len(book), "closed_now": len(closed_now)}
 
 
