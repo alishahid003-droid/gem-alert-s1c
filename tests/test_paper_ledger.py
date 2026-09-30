@@ -33,7 +33,8 @@ def test_classify_signal():
 def test_open_dedupe_and_chain_filter():
     assert pl.open_paper("solana", "M", "stage1", "score_band_A", 30, 100_000, now=T0)
     assert pl.open_paper("solana", "M", "stage1", "score_band_A", 30, 100_000, now=T0) is None
-    assert pl.open_paper("base", "X", "stage1", "score_band_A", 30, 100_000, now=T0) is None
+    assert pl.open_paper("base", "X", "stage1", "score_band_A", 30, 100_000, now=T0)   # Base: paper-tracked
+    assert pl.open_paper("ethereum", "Y", "stage1", "score_band_A", 30, 100_000, now=T0) is None
 
 
 def test_stop_loss_trade_is_a_loss():
@@ -70,6 +71,15 @@ def test_moonbag_rung_and_trailing():
     pl.manage(snap(190_000), now=T0 + 180)      # trailing: >35% off 3.2x peak
     r = pl.scoreboard()["recent"][0]
     assert r["exit_type"] == "trailing_stop" and r["pnl_usd"] > 0
+    sb = pl.scoreboard()
+    assert sb["runners"]["riding"] == 1 and sb["overall"]["n"] == 1   # runner rides on, trade scored
+    pl.manage(snap(700_000), now=T0 + 240)      # runner survives the dip and runs to 7x
+    pl.manage(snap(300_000), now=T0 + 300)      # -57% from 7x: still riding (deep trail = 75%)
+    assert pl.scoreboard()["runners"]["riding"] == 1
+    pl.manage(snap(150_000), now=T0 + 360)      # -79% from peak: runner trail exits
+    sb = pl.scoreboard()
+    assert sb["runners"]["riding"] == 0 and sb["runners"]["n"] == 1 and sb["runners"]["best_multiple"] == 7.0
+    assert sb["overall"]["n"] == 1              # runner not double-counted in the win rate
 
 
 def test_signal_gate_blocks_losing_signal(monkeypatch):

@@ -158,7 +158,8 @@ from layers.layer0d_point_in_time import fetch_birdeye_ohlcv, summarize_launch_w
 from layers.layer9_sell_mirror import poll_layer9, update_balance_after_sell
 from layers.roster import SELL_WATCH_ROSTER
 from layers.wallet_balance import fetch_wallets_portfolio, extract_balances_for_pairs
-from telegram_alert import Alert, send_alert
+from telegram_alert import Alert, send_alert, send_telegram_message
+from links import render_links_line
 from utils.http import ApiUnreachable, describe_fetch_failure
 import state
 
@@ -1505,6 +1506,7 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
     for r in ok_sources:
         fetched_items.extend(flatten_geckoterminal_pools(r.get("json")))
     items = select_gt_candidates(fetched_items)
+    _safe(_run_moonshot_screen, chain, fetched_items)
     print(f"[layer0b/8:{chain}] {len(fetched_items)} pool(s) fetched, {len(items)} tradeable candidate(s) "
           f"(>= ${GT_MIN_LIQUIDITY_USD:,.0f} liquidity, >= {GT_MIN_AGE_MINUTES:.0f} min old)")
     for scored in score_geckoterminal_pools(chain, items):
@@ -1517,6 +1519,60 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
     print(f"[layer0b/8:{chain}] GeckoTerminal fallback: {len(items)} new pool(s) fetched, "
           f"{min(len(items), GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE)} scored via GoPlus enrichment")
     return alerts_sent
+
+
+MOONSHOT_ALERT_COOLDOWN_SECONDS = 6 * 3600
+
+
+def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
+    """Layer 15 (see layers/layer15_moonshot.py): screen the trending/new
+    pools already fetched this cycle for coins at escape velocity. Cost: ONE
+    DexScreener batch call per chain, plus one GoPlus safety score per
+    qualifier (rare). Every qualifier is paper-traded and sent to Telegram;
+    a real buy only with MOONSHOT_ENABLED=true (entrypoint)."""
+    from layers import layer15_moonshot as l15
+    from executor.entrypoint import handle_moonshot_candidate
+    pre = {}
+    for it in fetched_items or []:
+        mc = it.get("market_cap_usd") or it.get("fdv_usd") or 0
+        if it.get("address") and 100_000 <= mc <= 6_000_000 and (it.get("liquidity_usd") or 0) >= 30_000:
+            pre.setdefault(it["address"], it)
+    if not pre:
+        return {"screened": 0, "qualified": 0}
+    pairs = layer14.fetch_dexscreener_batch(chain, list(pre)[:30])
+    qualified = 0
+    for addr, pair in pairs.items():
+        m = l15.metrics(pair)
+        ok, score, _fails = l15.evaluate(m)
+        if not ok:
+            continue
+        qualified += 1
+        if state.cache_get(f"moonshot_seen:{chain}:{addr}", MOONSHOT_ALERT_COOLDOWN_SECONDS):
+            continue
+        state.cache_set(f"moonshot_seen:{chain}:{addr}", True)
+        band = None
+        scored_list = _safe(score_geckoterminal_pools, chain, [pre[addr]]) or []
+        for sc in scored_list if isinstance(scored_list, list) else []:
+            if sc.get("score") is not None and "error" not in sc:
+                band = sc["score"].band
+        ctx = {"liquidity_usd": m.get("liquidity_usd"), "change_m5": m.get("change_m5"),
+               "change_h1": m.get("change_h1"), "signals": 1}
+        res = _safe(handle_moonshot_candidate, chain, addr, band, m.get("mcap_usd"), m.get("liquidity_usd"),
+                    score, ctx) or {}
+        symbol = (pair.get("baseToken") or {}).get("symbol") or addr[:8]
+        text = (f"🌙 *MOONSHOT candidate* [{chain}] {symbol} (score {score}/100, band {band or '?'})\n"
+                f"`{addr}`\n"
+                f"mcap ${m.get('mcap_usd') or 0:,.0f} · liq ${m.get('liquidity_usd') or 0:,.0f} · "
+                f"1h {m.get('change_h1') or 0:+.0f}% · 6h {m.get('change_h6') or 0:+.0f}% · "
+                f"{m.get('buys_h1')} buys / {m.get('sells_h1')} sells · 1h vol ${m.get('volume_h1') or 0:,.0f}\n"
+                f"Action: {'BUY sent' if res.get('fired') else res.get('reason', 'paper only')}")
+        links = render_links_line(chain, addr)
+        if links:
+            text += "\n" + links
+        _safe(send_telegram_message, text)
+        print(f"[layer15:{chain}] MOONSHOT {symbol} {addr[:10]} score {score} band {band} -> "
+              f"fired={res.get('fired')} ({res.get('reason')})")
+    return {"screened": len(pairs), "qualified": qualified}
 
 
 def run_poll_fast_loop():

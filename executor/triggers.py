@@ -69,6 +69,11 @@ EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
 STAGE1_MIN_SIGNAL_COVERAGE = 0.5
 
 
+def _runner_pct() -> float:
+    from executor.exit_rules import moonshot_runner_pct
+    return moonshot_runner_pct()
+
+
 def open_position_count() -> int:
     """Open positions that actually hold (or are trying to hold) money --
     positions whose every stage buy failed don't count, same rule
@@ -77,6 +82,11 @@ def open_position_count() -> int:
     for pos in position_state.list_open_positions():
         stages = pos.get("stages", {}) or {}
         if any(st.get("buy_status") != "failed" for st in stages.values()):
+            # A free-ride moonshot runner (stake already recovered, only the
+            # runner slice left) doesn't hold a trading slot.
+            if pos.get("breakeven_locked") and position_state.remaining_pct(
+                    pos.get("chain"), pos.get("token")) <= _runner_pct() + 1e-6:
+                continue
             n += 1
     return n
 
