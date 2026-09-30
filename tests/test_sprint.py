@@ -77,3 +77,16 @@ def test_status_line(monkeypatch):
     assert "armed" in sprint.status_line()
     monkeypatch.setenv("SPRINT_MODE", "false")
     assert sprint.status_line() is None
+
+
+def test_sprint_reserves_wallet(monkeypatch):
+    import executor.entrypoint as ep
+    monkeypatch.setenv("SPRINT_MODE", "true")
+    monkeypatch.setenv("MOONSHOT_ENABLED", "true")
+    monkeypatch.setattr(ep.triggers, "_concurrency_block", lambda: None)
+    r = ep.handle_moonshot_candidate("solana", "MS", "B", 800_000, 400_000, 70, {"signals": 1})
+    assert not r["fired"] and "reserved for the sprint" in r["reason"]
+    monkeypatch.setenv("SPRINT_ONLY", "false")
+    bought = []
+    monkeypatch.setattr(ep, "_attempt_buy_and_record_fill", lambda *a, **k: bought.append(a) or {"ok": True})
+    assert ep.handle_moonshot_candidate("solana", "MS2", "B", 800_000, 400_000, 70, {"signals": 1})["fired"]
