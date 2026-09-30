@@ -222,6 +222,37 @@ SOLANA_LABELED = [
     ("RICH OFF GTA 6", "solana", "Ddd4Qy8N5nNtteaHfESfmjsynz5qEGFQZMLQuLj49EzL", "pump_dump", False),
     ("StonkBlend", "solana", "2Ngvnnkwrwq5u4RYV5WYKJ2wiQoEkKaVCc4LuuhYSTNK", "pump_dump", False),
     ("ROBUX", "solana", "Hdky1Lz84WL7cPWVk7StFWrXVXvdXwPrAcfjJoUrpump", "pump_dump", False),
+    #
+    # 3 more real pump_dump examples -- added Sept 30 2026, sourced from
+    # DexScreener's Solana pairs sorted by 24h price change ascending
+    # with liquidity/volume floors ($10K liq / $50K vol), same method as
+    # above. Each verified via DexScreener's own public API
+    # (api.dexscreener.com/latest/dex/search), re-checked a few minutes
+    # apart to confirm the numbers were stable (not a stale snapshot --
+    # the SPCX lesson from the module docstring above). All three: real
+    # trading volume, differentiated (non-identical) 5m/1h/6h/24h
+    # timeframes showing a genuine crash-then-stabilize shape, and
+    # liquidity clearly still present (not drained to dust) -- the
+    # signature that separates a pump_dump from a rug:
+    ("VISE", "solana", "BcgpyBwFuVDgNivYmBUJAGpjfL3yWVqCmmSSUfDVpump", "pump_dump", False),
+    # VISE/SOL, PumpSwap pair 9CZcuz78USxBKL88TpncKyJP5dKY7DV8H2RDj7bJYofk:
+    # $50.9K liquidity, $329K mcap, 5d old, 24h -92.17% (6h -94.76%, 1h
+    # -0.17% -- crash already happened, now flat), 9,125 buys/4,874
+    # sells in 24h -- real, active trading.
+    ("opcode.so", "solana", "5PiBn5JdjJDnRGziiSfsu2affgBR3DyTTCR3CHpcode", "pump_dump", False),
+    # OP/SOL, Meteora DYN2 pair BdXnvsALvqUJKh9QcFj6aUUDhr3WNY15b5dHuo6F7hQ6
+    # (highest-liquidity of several OP pairs -- used that one): $48.7K
+    # liquidity, $261K mcap, 8d old, 24h -79.57%, real $297K 24h volume,
+    # 1,105 buys/852 sells.
+    ("goon", "solana", "6RHXfQP5GwWoJLQ75Zyxf5u43AWcaBGpdtE4exMEpump", "pump_dump", False),
+    # goon/SOL, PumpSwap pair 4zyR24wA4ahtWMWNnf1JknbCEupVG4DzvK4jiBv1uAE3:
+    # thinner than the two above -- $14.6K liquidity roughly equal to its
+    # $14.6K mcap (near-total collapse, borderline rug/pump_dump), but
+    # kept as pump_dump not rug because liquidity is still nonzero and
+    # real ($85.9K 24h volume, 227 buys/164 sells) rather than drained to
+    # near-$0 like AROS/JEANCOIN/etc above. Worth re-checking in a future
+    # session -- if liquidity keeps falling toward $0 it should move to
+    # the rug bucket instead.
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
