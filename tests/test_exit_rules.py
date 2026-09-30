@@ -168,3 +168,17 @@ def test_management_skips_positions_with_nothing_held(monkeypatch):
     monkeypatch.setattr(swap_executor, "execute_sell", lambda **kw: sells.append(kw))
     out = scheduler._run_position_management_cycle()
     assert sells == []
+
+
+def test_never_bought_records_cleared_and_rebuyable():
+    import time
+    from executor import triggers
+    position_state.record_stage_entry("bsc", "NB", "stage1", 22.5, 100_000, "x")
+    position_state.mark_stage_buy_failed("bsc", "NB", "stage1", reason="EXECUTION_ENABLED is not 'true'")
+    assert position_state.close_never_bought(now=time.time() + 30) == 0          # too young
+    assert position_state.close_never_bought(now=time.time() + 3700) == 1
+    assert position_state.get_position("bsc", "NB")["status"] == "closed"
+    assert position_state.has_stage("bsc", "NB", "stage1") is False              # no longer blocks
+    assert all(p["token"] != "NB" for p in position_state.list_closed_positions())
+    pos = position_state.record_stage_entry("bsc", "NB", "stage1", 22.5, 90_000, "real buy later")
+    assert pos["status"] == "open" and "never_bought" not in pos

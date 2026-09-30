@@ -470,6 +470,10 @@ def run_self_test():
     return rc
 
 
+ALERT_REPEAT_COOLDOWN_SECONDS = 60 * 60
+ALERT_REPEAT_MIN_SCORE_CHANGE = 10
+
+
 def _alert(alert: Alert, layer: str) -> dict:
     """Sends an alert and logs it for Layer 7's cross-layer correlation
     (Ali, Sept 23 2026: built Sept 22 but never called until tonight).
@@ -480,10 +484,30 @@ def _alert(alert: Alert, layer: str) -> dict:
     within the correlation window, sends one extra MEGA-ALERT, deduplicated
     per distinct layer-set so it doesn't re-fire every cycle for the same
     convergence."""
+    token = alert.token_address
+    # Repeat suppression (Sept 30 2026, Ali's dashboard): the same coin was
+    # re-alerted every 10-min cycle with the same band -- Telegram spam, and
+    # it filled the 300-item feed in ~2 h. Same token + layer + band within
+    # ALERT_REPEAT_COOLDOWN_SECONDS is skipped (still counted for Layer 7
+    # correlation below); a band change or a score move of 10+ always goes out.
+    repeat_key = f"alerted:{layer}:{token}"
+    score_tag = str(alert.tags.get("Score", ""))
+    band_now = score_tag.split("band ")[-1][:1] if "band " in score_tag else ""
+    try:
+        score_now = int(score_tag.split("/")[0])
+    except ValueError:
+        score_now = None
+    if band_now and score_now is not None and token and token != "n/a":
+        last = state.cache_get(repeat_key, ALERT_REPEAT_COOLDOWN_SECONDS)
+        if (isinstance(last, dict) and last.get("band") == band_now
+                and abs(score_now - (last.get("score") or 0)) < ALERT_REPEAT_MIN_SCORE_CHANGE):
+            state.log_alert_event(token, layer)
+            return {"sent": False, "reason": f"repeat alert suppressed (same band within "
+                                             f"{ALERT_REPEAT_COOLDOWN_SECONDS // 60} min)"}
+        state.cache_set(repeat_key, {"band": band_now, "score": score_now})
     send_res = send_alert(alert)
     state.log_full_alert(layer, alert.chain, alert.token_symbol, alert.token_address,
                           alert.headline, dict(alert.tags))
-    token = alert.token_address
     if token and token != "n/a":
         state.log_alert_event(token, layer)
         events = [AlertEvent(token, lyr, datetime.fromtimestamp(ts, tz=timezone.utc))
@@ -783,7 +807,9 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             elif sr.band in ("A", "B"):
                 state.watch_remove(mint)
         alert = Alert((mint or "?")[:8], mint, chain, f"Layer 0{'b' if source == 'mobula' else ''} structural score")
-        alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band {sr.band})")
+        _cov = getattr(sr, "signal_coverage", None)
+        _low = f", low data {_cov:.0%}" if _cov is not None and _cov < 0.5 else ""
+        alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band {sr.band}{_low})")
     if backing_tag:
         alert.set_tag("Backing", backing_tag)
     if buzz_tag:
@@ -1081,6 +1107,9 @@ def _run_position_management_cycle() -> dict:
     per chain:token, same pattern worker_stonkfun_snipe.py already uses,
     so this is correct across cycles/restarts too)."""
     managed, trims_fired, milestones_fired, defends_fired, exits_fired = [], [], [], [], []
+    cleared = _safe(position_state.close_never_bought)
+    if cleared:
+        print(f"[position-mgmt] cleared {cleared} never-bought record(s)")
     for pos in position_state.list_open_positions():
         chain, token = pos.get("chain"), pos.get("token")
         if not chain or not token:

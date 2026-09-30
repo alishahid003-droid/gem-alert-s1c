@@ -126,3 +126,12 @@ def test_paper_entry_sanity_rebase():
     pos = pl._open()["stage1:solana:B"]
     assert pos["entry_mcap"] == 20_000_000 and pos["entry_mcap_original"] == 6_300
     assert pl.scoreboard()["overall"]["n"] == 0       # no fake win booked
+
+
+def test_pre_fix_trades_excluded_from_stats(monkeypatch):
+    pl.open_paper("solana", "OLD", "stage1", "score_band_B", 30, 100_000, now=T0)
+    pl.manage(snap(40_000), now=T0 + 60)                    # a loss, opened "before the fix"
+    assert pl.scoreboard()["overall"]["n"] == 1
+    monkeypatch.setattr(pl, "STATS_SINCE_TS", T0 + 1)
+    assert pl.scoreboard()["overall"]["n"] == 0             # excluded from win rate
+    assert len(pl._closed_raw()) == 1                        # but kept for history

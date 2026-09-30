@@ -45,3 +45,12 @@ def _clean_shared_singletons(monkeypatch):
     monkeypatch.setattr(EXECUTOR_CONFIG, "stage1_position_usd", _SAFE_STAGE1_POSITION_USD)
     monkeypatch.setattr(EXECUTOR_CONFIG, "stage2_position_usd", _SAFE_STAGE2_POSITION_USD)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _paper_stats_include_all(monkeypatch):
+    """Fixture timestamps predate the live paper-stats cutoff
+    (paper_ledger.STATS_SINCE_TS); count every test trade."""
+    import executor.paper_ledger as _pl
+    monkeypatch.setattr(_pl, "STATS_SINCE_TS", 0.0)
+    yield
