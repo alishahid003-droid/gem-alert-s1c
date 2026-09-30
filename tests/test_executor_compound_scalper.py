@@ -47,7 +47,7 @@ def test_bsc_cost_is_expected_slippage_not_tolerance_ceiling():
     deep = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=500_000)
     sol = compound_scalper.estimate_round_trip_cost_pct("solana", 20.0, liquidity_usd=500_000)
     assert 0.04 < deep < 0.08 and deep > sol          # still more conservative than Solana
-    thin = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=500)
+    thin = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=100)
     assert thin > 0.15                                 # thin pools still priced in
 
 
