@@ -955,3 +955,54 @@ client, resolve the 38 roster names to wallets, (b) trade-feed +
 thesis-feed polling into existing scoring pipeline, (c) leaderboard poll
 for >=$5k new-trader candidates, (d) new dashboard.py card types for all
 three, read-only exactly like the rest of the dashboard.
+
+## Update -- Sept 30 2026, ~2:05 PM PKT (fomoapi.io key verified live, corrected: auto-execution IS possible via a separate paid product)
+
+CORRECTION to two earlier updates today: Ali had already created a
+FOMOAPI_API_KEY GitHub secret last week -- I should have checked existing
+Secrets before telling him a new signup was needed (I hadn't). Key was
+tested live via browser fetch (not guessed): `GET /v1` -> 200, `GET
+/v2/leaderboard/24h` -> 200 with real data (top trader today: pointfarmcap,
++$1.7M 24h PnL, $19.7M volume). Key confirmed working.
+
+CORRECTION #2, bigger: earlier today I told Ali Fomo auto-execution wasn't
+possible (fomoapi.io read-only, Fomo not Phantom-connectable). That's true
+for the DATA endpoints, but fomoapi.io separately sells a real trading
+product I missed on first pass (only read fomo.family's marketing blog,
+not fomoapi.io's own full docs): a premium FOMO trading account that
+places real orders via `POST /v2/trading/buy` / `/sell`, provisioned
+through FOMO's own order routing. Confirmed via live call against Ali's
+key: `GET /v2/trading/account` -> 404 `no_trading_account`, i.e. this is
+a SEPARATE purchase from the data API key, not bundled.
+  - Cost: $1,000 to start (setup + first month), $50/30 days after
+  - Provisions a NEW dedicated trading handle/account -- NOT Ali's
+    existing personal Fomo account/wallet from his screenshots
+  - Non-custodial: funds sit in a Privy embedded wallet tied to that new
+    account; private key requestable anytime
+  - This is a real purchase decision for Ali (his email + payment on
+    fomoapi.io/trading), not something built or paid for from this side
+
+DATA ENDPOINTS -- verified real and richer than first scoped (full docs
+read at fomoapi.io/docs):
+  - GET /v2/leaderboard/{window} (24h/7d/30d/all) -- pnlUsd, volumeUsd,
+    trades, followers, holdings, wallets, per trader. Matches Ali's
+    "followers with PnL over 24h/7d/30d" ask directly. VERIFIED LIVE.
+  - GET /v2/thesis/token/{mint} and /v2/thesis/user/{id} -- the exact
+    thesis feed Ali screenshotted (loganlim_x on PI, +898.72%, with a
+    Dexscreener link) is this endpoint's own documented shape.
+  - GET /v2/token/{address}/devs -- dev/insider wallet holdings + PnL on
+    a token -- directly useful for Ali's "insider traders who did massive
+    profits" idea AND may replace the deferred Solana Tracker deployer-
+    rug-history API entirely (same signal, already-owned data source).
+  - GET /v2/users/{handle}/following -- discovery: walk outward from a
+    roster trader to find who THEY follow, annotated with pnl24h/volume
+    -- better new-trader discovery than leaderboard-only scanning.
+  - WSS /ws/alerts (realtime feed, free key = 7 days realtime then 15s
+    delayed) and /ws/trades (on-chain, ~3.5s ahead of the app, Growth
+    plan $599/mo+ only -- not needed for the alert-only build).
+
+REVISED PLAN: dashboard-only detection/scoring/thesis build (Sept 30
+~11:40 AM update's spec) proceeds as-is using the FREE data key already
+in GitHub Secrets -- no blocker, no further cost, starting now. The
+$1,000 trading-account purchase is a SEPARATE decision Ali makes on his
+own timeline; not required for the alert/scoring build to ship.
