@@ -1043,3 +1043,44 @@ Built, tested, committed (5510f5c). Ready to run the moment Ali pushes.
   confirm a real run_poll_madeonsol() cycle on Ali's PC actually detects
   a live roster buy/thesis and it shows up correctly on the dashboard.
   First real Task Scheduler cycle after Ali's push is the real test.
+
+## Update -- Sept 30 2026, ~2:00 PM PKT (real dashboard-breaking bug found and fixed -- confirmed via Ali's own browser)
+
+Ali reported every dashboard section empty ("loading..." stuck, nothing
+rendering -- not just the new Fomo sections, everything). Verified this
+myself by navigating his real Chrome to his own localhost:8787 and
+reading the actual browser console (not guessing): real JS
+`SyntaxError: Unexpected identifier 't'`.
+
+ROOT CAUSE, pre-existing, NOT introduced this session: line 432's
+Compound Scalper "not started" text used a Python-escaped apostrophe
+(\') inside PAGE_TEMPLATE's triple-quoted string. Python's OWN string
+parser consumes that backslash before the JS ever sees it, so the
+actual served page had a raw, unescaped apostrophe sitting inside a
+single-quoted JS string literal -- a hard syntax error that breaks the
+ENTIRE <script> tag, not just that one line. This explains why
+literally every section (positions, trade log, alerts, modules, and
+the new Fomo sections) was empty -- the whole render() function never
+ran.
+
+Fixed by rewording to avoid the apostrophe (safer against the same bug
+recurring than re-escaping). Verified the fix for real, not just via
+Python's ast.parse (which can't see this class of bug by definition,
+since it's valid Python) -- extracted the actual <script> content and
+ran it through Node's `new Function(...)` for a real JS parse check.
+Committed 04bbe4f.
+
+CLARIFIED to Ali: pump.fun/StonkFun/rug/moonshot detection are not
+separate named dashboard panels -- they all feed into the ONE unified
+"Alerts" section (filterable by category/band -- cat-gem, cat-developer,
+cat-copy-trading, cat-sell/rug-watch, etc, see dashboard.py's CSS) and
+the "Modules" readiness panel, which already lists layer0c_stonkfun,
+layer1_deployer_alerts, layer2_convergence, layer13_fomo_copytrade,
+etc individually. Alerts feed was ALSO empty independent of the JS
+bug -- no live poll cycle has run yet to populate it, expected until
+Ali's next scheduled MadeOnSol/poll-fast run.
+
+ACTION NEEDED FROM ALI: restart the local `python dashboard.py`
+process (it loaded PAGE_TEMPLATE into memory before this fix landed --
+editing the file on disk does not change an already-running process)
+and hard-refresh the browser tab.
