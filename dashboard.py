@@ -440,64 +440,188 @@ PAGE_TEMPLATE = """<!doctype html>
   .mcard .note { color:#8a8f98; }
   .mdot { display:inline-block; width:8px; height:8px; border-radius:50%; }
   .mdot.ready { background:#2ecc71; } .mdot.blocked { background:#e74c3c; }
+
+  /* --- Sept 30 2026: tabbed, colorful, "what do I actually look at" redesign.
+     Ali's own words: "not these square boxes... should be a good user
+     interface giving me an exact picture... i really don't know what is
+     happening or what to see in that list." Nothing about build_data() or
+     the JSON shape changes below -- this only changes how the same data
+     is laid out and colored: a top attention banner that says in plain
+     English what needs eyes right now, and 5 tabs instead of one long
+     scroll of every section stacked on top of each other. */
+  .attn { border-radius:10px; padding:14px 16px; margin-bottom:20px; font-size:13px; }
+  .attn-ok { background:#0f2417; border:1px solid #1f5c37; color:#6fe3a3; }
+  .attn-warn { background:#2b230f; border:1px solid #6b5518; color:#ffcf5c; }
+  .attn-bad { background:#2b1414; border:1px solid #6b1f1f; color:#ff8080; }
+  .attn h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.03em; }
+  .attn ul { margin:0; padding-left:18px; }
+  .attn li { margin:3px 0; }
+  .tabs { display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid #2a2f37; flex-wrap:wrap; }
+  .tabbtn { background:none; border:none; color:#8a8f98; font-size:13px; font-weight:600; padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; }
+  .tabbtn:hover { color:#e6e6e6; }
+  .tabbtn.active { color:#e6e6e6; border-bottom:2px solid #3498db; }
+  .tabbtn .badge { display:inline-block; background:#e74c3c; color:#fff; border-radius:9px; font-size:10px; font-weight:700; padding:1px 6px; margin-left:5px; }
+  .tabpanel { display:none; }
+  .tabpanel.active { display:block; }
+  .highlight-list { display:flex; flex-direction:column; gap:6px; }
+  .highlight-item { background:#161a1f; border:1px solid #2a2f37; border-radius:7px; padding:8px 12px; font-size:12px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+  .highlight-item .hl-left { display:flex; gap:8px; align-items:center; }
+  .stat.stat-good .value { color:#2ecc71; } .stat.stat-bad .value { color:#e74c3c; }
 </style></head>
 <body>
 <h1>S1c &mdash; Fomo Gem-Alert System</h1>
 <div class="sub" id="meta">loading...</div>
 
 <div class="statbar" id="statbar"></div>
+<div id="attention"></div>
 
-<section>
-  <h2>Compound Scalper <span class="tag" id="scalper-tag"></span></h2>
-  <div id="scalper_detail"></div>
-</section>
+<nav class="tabs" id="tabs">
+  <button class="tabbtn active" data-tab="overview">Overview</button>
+  <button class="tabbtn" data-tab="positions">Positions <span class="badge" id="badge-positions" style="display:none"></span></button>
+  <button class="tabbtn" data-tab="alerts">Alerts <span class="badge" id="badge-alerts" style="display:none"></span></button>
+  <button class="tabbtn" data-tab="fomo">Fomo</button>
+  <button class="tabbtn" data-tab="system">System</button>
+</nav>
 
-<section>
-  <h2>Open Positions</h2>
-  <div id="positions"></div>
-</section>
+<div class="tabpanel active" data-panel="overview">
+  <section>
+    <h2>What needs your eyes <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(most recent, non-noise alerts)</span></h2>
+    <div id="recent_highlights"></div>
+  </section>
+  <section>
+    <h2>Compound Scalper <span class="tag" id="scalper-tag"></span></h2>
+    <div id="scalper_detail"></div>
+  </section>
+</div>
 
-<section>
-  <h2>Closed Positions</h2>
-  <div id="closed_positions"></div>
-</section>
+<div class="tabpanel" data-panel="positions">
+  <section>
+    <h2>Open Positions</h2>
+    <div id="positions"></div>
+  </section>
 
-<section>
-  <h2>Trade History</h2>
-  <div id="trade_log"></div>
-</section>
+  <section>
+    <h2>Closed Positions</h2>
+    <div id="closed_positions"></div>
+  </section>
 
-<section>
-  <h2>Fomo Copy-Trading &amp; Theses <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(tracked traders only -- never sent to Telegram)</span></h2>
-  <div id="fomo_signals"></div>
-</section>
+  <section>
+    <h2>Trade History</h2>
+    <div id="trade_log"></div>
+  </section>
+</div>
 
-<section>
-  <h2>Fomo New-Trader Candidates <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(&gt;= $5k balance, not yet on your roster -- approve manually in roster.py)</span></h2>
-  <div id="fomo_candidates"></div>
-</section>
+<div class="tabpanel" data-panel="alerts">
+  <section>
+    <h2>
+      Alerts
+      <button class="toggle" id="noise-toggle">Show all (incl. band C/D noise)</button>
+    </h2>
+    <div id="feed"></div>
+  </section>
+</div>
 
-<section>
-  <h2>
-    Alerts
-    <button class="toggle" id="noise-toggle">Show all (incl. band C/D noise)</button>
-  </h2>
-  <div id="feed"></div>
-</section>
+<div class="tabpanel" data-panel="fomo">
+  <section>
+    <h2>Fomo Copy-Trading &amp; Theses <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(tracked traders only -- never sent to Telegram)</span></h2>
+    <div id="fomo_signals"></div>
+  </section>
 
-<section>
-  <h2>Modules</h2>
-  <div class="modules-summary" id="modules-summary"></div>
-  <div class="modules-detail" id="modules-detail"></div>
-</section>
+  <section>
+    <h2>Fomo New-Trader Candidates <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(&gt;= $5k balance, not yet on your roster -- approve manually in roster.py)</span></h2>
+    <div id="fomo_candidates"></div>
+  </section>
+</div>
+
+<div class="tabpanel" data-panel="system">
+  <section>
+    <h2>Modules</h2>
+    <div class="modules-summary" id="modules-summary"></div>
+    <div class="modules-detail" id="modules-detail"></div>
+  </section>
+</div>
 
 <script>
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".tabbtn");
+  if (!btn) return;
+  document.querySelectorAll(".tabbtn").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".tabpanel").forEach(p => p.classList.toggle("active", p.dataset.panel === btn.dataset.tab));
+});
+
 function esc(s) { return (s === undefined || s === null) ? "" : String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 function fmtUsd(v) { return v == null ? '<span class="na">unpriced</span>' : (v >= 0 ? '<span class="pos-pnl">$' : '<span class="neg-pnl">-$') + Math.abs(v).toFixed(2) + '</span>'; }
 function fmtPct(v) { return v == null ? '<span class="na">-</span>' : (v >= 0 ? '<span class="pos-pnl">+' : '<span class="neg-pnl">') + v.toFixed(1) + '%</span>'; }
 
 let showNoise = false;
 let modulesOpen = false;
+
+/* Turns the same data render() already has into a single plain-English
+   banner ("what needs your eyes right now") plus a short highlight list on
+   the Overview tab, so Ali doesn't have to read every table to know
+   whether anything actually needs him. Pure read of existing fields --
+   compound_scalper.tripped, open_positions[].pnl_pct, trade_log[].ok,
+   alert_feed[].noise/band -- nothing new from the backend. */
+function renderAttentionAndHighlights(data) {
+  const items = []; // {level: 'bad'|'warn'|'ok', text}
+  const s = data.compound_scalper || {};
+  if (s.started && s.tripped) {
+    items.push({ level: "bad", text: `Scalper pool circuit tripped -- ${esc(s.tripped_reason || "no reason given")}.` });
+  }
+
+  const recentTrades = (data.trade_log || []).slice(0, 5);
+  const failedTrades = recentTrades.filter(t => !t.ok);
+  if (failedTrades.length) {
+    items.push({ level: "bad", text: `${failedTrades.length} of your last ${recentTrades.length} trade attempt(s) failed to execute -- check Positions &rarr; Trade History.` });
+  }
+
+  const pos = data.open_positions || [];
+  const bigLosers = pos.filter(p => p.pnl_pct != null && p.pnl_pct <= -20);
+  const bigWinners = pos.filter(p => p.pnl_pct != null && p.pnl_pct >= 50);
+  if (bigLosers.length) {
+    items.push({ level: "warn", text: `${bigLosers.length} open position(s) down 20%+: ${bigLosers.map(p => esc(p.token) + " (" + p.pnl_pct.toFixed(0) + "%)").join(", ")}.` });
+  }
+  if (bigWinners.length) {
+    items.push({ level: "ok", text: `${bigWinners.length} open position(s) up 50%+: ${bigWinners.map(p => esc(p.token) + " (+" + p.pnl_pct.toFixed(0) + "%)").join(", ")}.` });
+  }
+
+  const allFeed = data.alert_feed || [];
+  const actionable = allFeed.filter(a => !a.noise && (a.band === "A" || a.band === "B"));
+  const newActionableCount = actionable.length;
+  if (newActionableCount) {
+    items.push({ level: "ok", text: `${newActionableCount} band A/B alert(s) in the current feed -- worth a look on the Alerts tab.` });
+  }
+
+  let overallLevel = "ok";
+  if (items.some(i => i.level === "bad")) overallLevel = "bad";
+  else if (items.some(i => i.level === "warn")) overallLevel = "warn";
+
+  const attnEl = document.getElementById("attention");
+  if (!items.length) {
+    attnEl.innerHTML = `<div class="attn attn-ok"><h3>All clear</h3>Nothing urgent right now -- no tripped circuits, no failed trades, no big moves on open positions.</div>`;
+  } else {
+    attnEl.innerHTML = `<div class="attn attn-${overallLevel}"><h3>${overallLevel === "bad" ? "Needs attention" : overallLevel === "warn" ? "Worth a look" : "Heads up"}</h3><ul>${items.map(i => `<li>${i.text}</li>`).join("")}</ul></div>`;
+  }
+
+  // Overview tab: last 5 non-noise alerts as a compact list instead of a full table.
+  const highlights = allFeed.filter(a => !a.noise).slice(0, 5);
+  document.getElementById("recent_highlights").innerHTML = highlights.length ? `
+    <div class="highlight-list">${highlights.map(a => `
+      <div class="highlight-item">
+        <div class="hl-left"><span class="${a.band ? 'band-' + esc(a.band) : ''}">${esc(a.band || '-')}</span>
+          <span class="cat-${esc(a.category)}">${esc(a.category)}</span>
+          <strong>${esc(a.token_symbol)}</strong> ${esc(a.headline)}</div>
+        <span style="color:#8a8f98; font-size:11px;" title="${esc(a.ts_fmt)}">${esc(a.ago)}</span>
+      </div>`).join("")}</div>` : '<div class="empty">No actionable alerts yet -- check the Alerts tab to see filtered noise if you want the full picture.</div>';
+
+  // Tab badges: how many open positions need a decision, how many new-ish alerts.
+  const badgePos = document.getElementById("badge-positions");
+  if (bigLosers.length) { badgePos.style.display = "inline-block"; badgePos.textContent = bigLosers.length; }
+  else { badgePos.style.display = "none"; }
+  const badgeAlerts = document.getElementById("badge-alerts");
+  if (newActionableCount) { badgeAlerts.style.display = "inline-block"; badgeAlerts.textContent = newActionableCount; }
+  else { badgeAlerts.style.display = "none"; }
+}
 
 function render(data) {
   document.getElementById("meta").textContent =
@@ -518,6 +642,8 @@ function render(data) {
     <div class="stat"><div class="label">Win / Loss (closed)</div><div class="value"><span class="pos-pnl">${pnl.wins || 0}W</span> / <span class="neg-pnl">${pnl.losses || 0}L</span></div></div>
     <div class="stat"><div class="label">Scalper pool</div><div class="value">${scalperTile}</div></div>
     <div class="stat"><div class="label">Modules ready</div><div class="value">${data.modules_ready_count}/${data.modules_total_count}</div></div>`;
+
+  renderAttentionAndHighlights(data);
 
   const s = data.compound_scalper || {};
   document.getElementById("scalper-tag").textContent =
