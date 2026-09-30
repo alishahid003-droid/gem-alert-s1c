@@ -34,8 +34,8 @@ target is a number we measure against every week — not something assumed.
 
 ## Phase 1 — Make today's fixes live
 
-- [ ] **1.1 ALI** — Approve merging `claude/kind-mayer-1ydst8` into `main` (say "open the PR"). DONE-WHEN: merged; cron-job.org runs include the fixes.
-- [ ] **1.2 CLAUDE** — Open the PR, keep CI green, merge on your OK. DONE-WHEN: PR merged.
+- [x] **1.1 ALI** — Approve merging `claude/kind-mayer-1ydst8` into `main` (say "open the PR"). DONE-WHEN: merged; cron-job.org runs include the fixes. — approved Sept 30
+- [x] **1.2 CLAUDE** — Open the PR, keep CI green, merge on your OK. DONE-WHEN: PR merged. — PR #1 merged as `9053bd2`
 - [ ] **1.3 ALI** — On the PC: `git pull`, then double-click `install_windows_task.bat`. DONE-WHEN: System tab shows `poll-madeonsol … (local-pc)` under 30 min old.
 - [ ] **1.4 ALI** — Delete the `STAGE1_POSITION_USD=3`, `STAGE2_POSITION_USD=3`, `TOTAL_WALLET_USD=7` test lines from the PC `.env`. DONE-WHEN: lines gone.
 - [ ] **1.5 ALI** — Add GitHub Secret `TOTAL_WALLET_USD` = real trading-wallet size in USD. DONE-WHEN: diagnostic shows it SET.
@@ -109,3 +109,4 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 
 ### Change log
 - Sept 30 2026 — checklist created; Phase 0 filled from today's commits.
+- Sept 30 2026 — 1.1/1.2 done: PR #1 merged into main (`9053bd2`).
