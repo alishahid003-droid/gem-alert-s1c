@@ -165,6 +165,34 @@ def fetch_trader_balance_usd(handle: str) -> Optional[float]:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def fetch_trader_pnl(handle: str) -> dict:
+    """GET /v2/users/{handle} -- Ali's ask (Sept 30 2026): show 24h/7d/30d
+    profit-or-loss for every trader on both dashboard tables (roster
+    signals and new-trader candidates), not just a single-window number.
+    fomoapi.io's user-profile endpoint carries pnl.24h/7d/30d/all in one
+    call (see this module's own docstring for where that shape was
+    confirmed). Fails closed per-field, same convention as
+    fetch_trader_balance_usd: a missing/unparseable field is None
+    ("unknown"), never 0 -- a real $0 pnl and a failed lookup must never
+    look the same on the dashboard."""
+    empty = {"pnl_24h": None, "pnl_7d": None, "pnl_30d": None}
+    if not CONFIG.fomoapi_ready():
+        return empty
+    result = get_json(f"{CONFIG.fomoapi_base_url}/v2/users/{handle}", headers=_headers(),
+                       timeout=CONFIG.http_timeout_seconds)
+    if not result.get("ok"):
+        return empty
+    body = result.get("json") or {}
+    pnl = body.get("pnl") or {}
+    if not isinstance(pnl, dict):
+        return empty
+    out = {}
+    for key, field in (("pnl_24h", "24h"), ("pnl_7d", "7d"), ("pnl_30d", "30d")):
+        v = pnl.get(field)
+        out[key] = float(v) if isinstance(v, (int, float)) else None
+    return out
+
+
 def _score_if_solana(chain: str, mint: str) -> dict:
     """Runs the coin through the SAME Layer 0 structural scoring every
     other alert in this system uses -- never a Fomo-specific score. See
@@ -202,12 +230,14 @@ def detect_roster_buys_and_theses(alerts: List[dict]) -> dict:
         symbol = a.get("token") or (mint[:8] if mint else "?")
         scored = _score_if_solana(chain, mint) if mint else {"score": None, "band": None,
                                                                "reason": "no tokenAddress on this alert"}
+        trader_pnl = fetch_trader_pnl(handle) if handle else {"pnl_24h": None, "pnl_7d": None, "pnl_30d": None}
         if alert_type == "buy":
             state.record_fomo_signal(
                 kind="buy", trader=roster_name, tier=tier_of(roster_name),
                 token_symbol=symbol, token_address=mint or "", chain=chain,
                 detail=a.get("text") or f"{roster_name} bought {symbol}",
                 score=scored["score"], band=scored["band"],
+                pnl_24h=trader_pnl["pnl_24h"], pnl_7d=trader_pnl["pnl_7d"], pnl_30d=trader_pnl["pnl_30d"],
             )
             buys_recorded += 1
         else:  # thesis
@@ -218,6 +248,7 @@ def detect_roster_buys_and_theses(alerts: List[dict]) -> dict:
                 score=scored["score"], band=scored["band"],
                 thesis_text=a.get("text"),
                 thesis_link=(a.get("links") or [{}])[0].get("link") if a.get("links") else None,
+                pnl_24h=trader_pnl["pnl_24h"], pnl_7d=trader_pnl["pnl_7d"], pnl_30d=trader_pnl["pnl_30d"],
             )
             theses_recorded += 1
     return {"buys_recorded": buys_recorded, "theses_recorded": theses_recorded}
@@ -243,9 +274,11 @@ def find_new_trader_candidates(leaderboard_traders: List[dict], min_balance_usd:
         checked += 1
         balance = fetch_trader_balance_usd(handle)
         if balance is not None and balance >= min_balance_usd:
+            trader_pnl = fetch_trader_pnl(handle)
             state.record_fomo_candidate(
                 handle=handle, display_name=row.get("displayName") or handle,
                 balance_usd=balance, pnl_usd=row.get("pnlUsd"), volume_usd=row.get("volumeUsd"),
+                pnl_24h=trader_pnl["pnl_24h"], pnl_7d=trader_pnl["pnl_7d"], pnl_30d=trader_pnl["pnl_30d"],
             )
             candidates_found += 1
     return {"checked": checked, "candidates_found": candidates_found}

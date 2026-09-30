@@ -188,6 +188,40 @@ def _entry_mcap(pos: dict):
     return None
 
 
+def _execution_status(pos: dict) -> tuple:
+    """Sept 30 2026 (Ali: "i have not placed my keys neither have i placed
+    funds in the wallet then how come those 2 came" -- a fair, important
+    question): position_state.record_stage_entry() logs a position the
+    MOMENT a trigger decides to buy, BEFORE the real swap is even
+    attempted (see executor/entrypoint.py's own docstring) -- so a
+    position with a real dollar amount staked can still mean the real buy
+    never went through (no wallet key configured, EXECUTION_ENABLED off,
+    insufficient funds, a failed swap). The dashboard was showing
+    "$X staked" identically whether real money moved or not. This computes
+    which actually happened, from the same buy_status/fill_status fields
+    executor/position_state.py already records but dashboard.py never
+    read. Returns (status, human_detail):
+      "real"    -- fill_status == "confirmed", tokens actually received
+      "failed"  -- a stage's buy_status == "failed" -- NO real money spent,
+                    despite the $ shown in "Staked $"
+      "unconfirmed" -- a tx was sent but the filled amount couldn't be
+                    parsed -- needs manual on-chain reconciliation
+      "pending" -- no stage has resolved buy/fill yet (rare; usually means
+                    a stage was just recorded this cycle and the buy
+                    attempt hasn't been logged back yet)"""
+    if pos.get("fill_status") == "confirmed" and (pos.get("amount_tokens") or 0) > 0:
+        return "real", f"{pos['amount_tokens']:.4g} tokens received"
+    failed_stages = [s for s, v in (pos.get("stages") or {}).items() if v.get("buy_status") == "failed"]
+    if failed_stages:
+        reasons = "; ".join(
+            f"{s}: {(pos['stages'][s].get('fail_reason') or 'buy failed')}" for s in failed_stages
+        )
+        return "failed", f"NO real money moved -- {reasons}"
+    if pos.get("fill_status") == "unconfirmed_amount":
+        return "unconfirmed", "tx sent but fill amount unclear -- check on-chain manually"
+    return "pending", "buy attempt not yet resolved"
+
+
 def _with_live_pnl(pos: dict) -> dict:
     """Adds current_mcap_usd / value_usd / pnl_usd / pnl_pct / remaining_pct
     onto an open position dict for display. Any missing input (no
@@ -274,6 +308,7 @@ def build_data() -> dict:
         positions = []
     for p in positions:
         p["opened_fmt"] = _fmt_ts(p.get("opened_ts")) if p.get("opened_ts") else "?"
+        p["execution_status"], p["execution_detail"] = _execution_status(p)
     _lap("open_positions live-pnl enrichment")
 
     closed_positions = position_state.list_closed_positions(limit=100)
@@ -379,6 +414,11 @@ PAGE_TEMPLATE = """<!doctype html>
   .cat-sell\\/rug-watch { color:#e74c3c; } .cat-news { color:#9b59b6; } .cat-correlation { color:#e67e22; }
   .cat-backing { color:#1abc9c; } .cat-buzz { color:#ff6ec7; } .cat-insider-watch { color:#ff4757; font-weight:600; }
   .cat-buy { color:#3498db; } .cat-thesis { color:#ff6ec7; font-style:italic; }
+.exec-real { color:#2ecc71; font-weight:600; font-size:11px; padding:2px 6px; border:1px solid #2ecc71; border-radius:3px; }
+.exec-failed { color:#ff4757; font-weight:600; font-size:11px; padding:2px 6px; border:1px solid #ff4757; border-radius:3px; }
+.exec-unconfirmed { color:#f39c12; font-weight:600; font-size:11px; padding:2px 6px; border:1px solid #f39c12; border-radius:3px; }
+.exec-pending { color:#8a8f98; font-weight:600; font-size:11px; padding:2px 6px; border:1px solid #8a8f98; border-radius:3px; }
+.exec-detail { color:#8a8f98; font-size:10px; margin-top:2px; max-width:220px; }
   .empty { color:#555; font-style:italic; padding:10px 4px; }
   .toggle { background:#161a1f; border:1px solid #2a2f37; color:#8a8f98; border-radius:5px; padding:4px 10px; font-size:11px; cursor:pointer; }
   .toggle.active { background:#2a2f37; color:#e6e6e6; }
@@ -504,12 +544,18 @@ function render(data) {
   }
 
   const pos = data.open_positions;
+  const execBadge = (status) => {
+    const cls = { real: "exec-real", failed: "exec-failed", unconfirmed: "exec-unconfirmed", pending: "exec-pending" }[status] || "exec-pending";
+    const label = { real: "REAL BUY", failed: "NOT BOUGHT", unconfirmed: "UNCONFIRMED", pending: "PENDING" }[status] || status.toUpperCase();
+    return `<span class="${cls}">${label}</span>`;
+  };
   document.getElementById("positions").innerHTML = pos.length ? `
-    <table><thead><tr><th>Token</th><th>Chain</th><th>Stages</th><th>Staked $</th><th>Current value</th><th>P&amp;L $</th><th>P&amp;L %</th><th>Remaining</th><th>Opened</th></tr></thead>
+    <table><thead><tr><th>Token</th><th>Chain</th><th>Stages</th><th>Staked $</th><th>Execution</th><th>Current value</th><th>P&amp;L $</th><th>P&amp;L %</th><th>Remaining</th><th>Opened</th></tr></thead>
     <tbody>${pos.map(p => `<tr>
       <td class="mono">${esc(p.token)}</td><td>${esc(p.chain)}</td>
       <td>${esc(Object.keys(p.stages || {}).join(", "))}${p.double_confirmed ? ' <span class="tag">2x confirmed</span>' : ""}</td>
       <td>$${(p.total_usd || 0).toFixed(2)}</td>
+      <td>${execBadge(p.execution_status)}<div class="exec-detail">${esc(p.execution_detail || "")}</div></td>
       <td>${p.price_unavailable ? '<span class="na">price unavailable</span>' : '$' + (p.value_usd || 0).toFixed(2)}</td>
       <td>${fmtUsd(p.pnl_usd)}</td>
       <td>${fmtPct(p.pnl_pct)}</td>
@@ -543,7 +589,7 @@ function render(data) {
 
   const fomoSignals = data.fomo_signals || [];
   document.getElementById("fomo_signals").innerHTML = fomoSignals.length ? `
-    <table><thead><tr><th>When</th><th>Type</th><th>Trader</th><th>Tier</th><th>Token</th><th>Our Score</th><th>Thesis / Detail</th><th>Links</th></tr></thead>
+    <table><thead><tr><th>When</th><th>Type</th><th>Trader</th><th>Tier</th><th>Token</th><th>Our Score</th><th>24h PnL</th><th>7d PnL</th><th>30d PnL</th><th>Thesis / Detail</th><th>Links</th></tr></thead>
     <tbody>${fomoSignals.map(f => `<tr>
       <td title="${esc(f.ts_fmt)}">${esc(f.ago)}</td>
       <td class="${f.kind === 'thesis' ? 'cat-thesis' : 'cat-buy'}">${esc((f.kind || '').toUpperCase())}</td>
@@ -551,19 +597,24 @@ function render(data) {
       <td>${esc(f.tier)}</td>
       <td class="mono">${esc(f.token_symbol)}</td>
       <td class="${f.band ? 'band-' + esc(f.band) : ''}">${f.score != null ? f.score + ' (' + esc(f.band) + ')' : '<span class="na">not scored</span>'}</td>
+      <td>${fmtUsd(f.pnl_24h)}</td>
+      <td>${fmtUsd(f.pnl_7d)}</td>
+      <td>${fmtUsd(f.pnl_30d)}</td>
       <td>${esc(f.thesis_text || f.detail)}${f.thesis_link ? ` <a class="linkbtn" href="${esc(f.thesis_link)}" target="_blank" rel="noopener">link</a>` : ''}</td>
       <td>${Object.entries(f.links || {}).map(([label,url]) => `<a class="linkbtn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" ")}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No Fomo roster buys or theses detected yet this cycle.</div>';
 
   const fomoCandidates = data.fomo_candidates || [];
   document.getElementById("fomo_candidates").innerHTML = fomoCandidates.length ? `
-    <table><thead><tr><th>Seen</th><th>Handle</th><th>Display name</th><th>Balance</th><th>24h PnL</th><th>Volume</th></tr></thead>
+    <table><thead><tr><th>Seen</th><th>Handle</th><th>Display name</th><th>Balance</th><th>24h PnL</th><th>7d PnL</th><th>30d PnL</th><th>Volume</th></tr></thead>
     <tbody>${fomoCandidates.map(c => `<tr>
       <td>${esc(c.ago)}</td>
       <td class="mono">${esc(c.handle)}</td>
       <td>${esc(c.display_name)}</td>
       <td>$${Number(c.balance_usd || 0).toLocaleString()}</td>
-      <td>${fmtUsd(c.pnl_usd)}</td>
+      <td>${fmtUsd(c.pnl_24h != null ? c.pnl_24h : c.pnl_usd)}</td>
+      <td>${fmtUsd(c.pnl_7d)}</td>
+      <td>${fmtUsd(c.pnl_30d)}</td>
       <td>${c.volume_usd != null ? '$' + Number(c.volume_usd).toLocaleString() : '-'}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No new-trader candidates above $5k found yet.</div>';
 

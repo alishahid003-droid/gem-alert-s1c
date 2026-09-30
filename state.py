@@ -918,20 +918,25 @@ def record_fomo_signal(kind: str, trader: str, tier: str, token_symbol: str,
                         token_address: str, chain: str, detail: str,
                         score: Optional[int] = None, band: Optional[str] = None,
                         thesis_text: Optional[str] = None, thesis_link: Optional[str] = None,
-                        ts: Optional[float] = None):
+                        pnl_24h: Optional[float] = None, pnl_7d: Optional[float] = None,
+                        pnl_30d: Optional[float] = None, ts: Optional[float] = None):
     """One dashboard-only Fomo signal: kind is "buy" or "thesis". Never
     sent to Telegram -- Ali's explicit call (Sept 30 2026). score/band are
     this coin's own Layer 0 structural score, run independently of the
     Fomo signal itself (see layers/layer13_fomo_copytrade.py) -- None
     means scoring hasn't completed or failed this cycle, not that the coin
     scored zero; dashboard.py must render that distinction, not collapse
-    it to a number."""
+    it to a number. pnl_24h/7d/30d (Ali, Sept 30 2026 ask) are the
+    triggering TRADER's own track record at the moment this signal fired,
+    from fomoapi.io's /v2/users/{handle} -- None means the lookup failed,
+    never $0."""
     ts = ts if ts is not None else time.time()
     signals = get_value(FOMO_SIGNALS_KEY) or []
     signals.append({
         "kind": kind, "trader": trader, "tier": tier, "token_symbol": token_symbol,
         "token_address": token_address, "chain": chain, "detail": detail,
         "score": score, "band": band, "thesis_text": thesis_text, "thesis_link": thesis_link,
+        "pnl_24h": pnl_24h, "pnl_7d": pnl_7d, "pnl_30d": pnl_30d,
         "ts": ts,
     })
     cutoff = ts - FOMO_SIGNAL_MAX_AGE_SECONDS
@@ -948,19 +953,23 @@ def get_fomo_signal_feed(limit: int = 100) -> list:
 
 def record_fomo_candidate(handle: str, display_name: str, balance_usd: float,
                            pnl_usd: Optional[float] = None, volume_usd: Optional[float] = None,
-                           ts: Optional[float] = None):
+                           pnl_24h: Optional[float] = None, pnl_7d: Optional[float] = None,
+                           pnl_30d: Optional[float] = None, ts: Optional[float] = None):
     """A trader NOT on Ali's roster who cleared the $5k balance threshold
     (Ali's locked number, Sept 30 2026) -- surfaced for Ali to approve
     adding to the roster, never auto-added (roster.py's own docstring:
     curation is Ali's judgment call, this codebase doesn't guess trust).
     Deduped by handle -- a repeat sighting refreshes the existing entry's
-    numbers/ts rather than piling up duplicates."""
+    numbers/ts rather than piling up duplicates. pnl_24h/7d/30d (Ali,
+    Sept 30 2026 ask) supplement the leaderboard's single-window pnl_usd
+    with the trader's full track record from fomoapi.io's /v2/users/{handle}."""
     ts = ts if ts is not None else time.time()
     candidates = get_value(FOMO_CANDIDATES_KEY) or []
     candidates = [c for c in candidates if c.get("handle") != handle]
     candidates.append({
         "handle": handle, "display_name": display_name, "balance_usd": balance_usd,
-        "pnl_usd": pnl_usd, "volume_usd": volume_usd, "ts": ts,
+        "pnl_usd": pnl_usd, "volume_usd": volume_usd,
+        "pnl_24h": pnl_24h, "pnl_7d": pnl_7d, "pnl_30d": pnl_30d, "ts": ts,
     })
     cutoff = ts - FOMO_CANDIDATE_MAX_AGE_SECONDS
     candidates = [c for c in candidates if c.get("ts", 0) >= cutoff][-FOMO_CANDIDATE_MAX_ITEMS:]
