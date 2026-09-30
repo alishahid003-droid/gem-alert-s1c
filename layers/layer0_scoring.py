@@ -60,6 +60,12 @@ class RawSignals:
     # same convention as price_drawdown_from_peak_pct's launch-window
     # collapse override.
     txn_activity_decay_ratio: Optional[float] = None
+    # Market-structure quality 0-1 (Oct 1 2026) -- built for Robinhood Chain,
+    # where GoPlus returns nothing and every security slot stays unknown.
+    # See robinhood_market_structure(). None = not computed (slot skipped,
+    # so other chains' scores are unchanged).
+    market_structure_score: Optional[float] = None
+    market_structure_detail: Optional[str] = None
 
 
 @dataclass
@@ -92,10 +98,14 @@ def score_token(sig: RawSignals) -> ScoreResult:
     max_points = 0
     known_weight = 0
 
+    slots = []   # (weight, points, known) -- for the Robinhood Chain re-basing below
+
     def add(weight, condition_points, reason=None):
         nonlocal points, max_points, known_weight
         max_points += weight
         points += condition_points
+        known = bool(reason) and "unknown" not in reason
+        slots.append((weight, condition_points, known))
         if reason:
             reasons.append(reason)
             if "unknown" not in reason:
@@ -232,7 +242,28 @@ def score_token(sig: RawSignals) -> ScoreResult:
     else:
         add(20, 8, "bundler/sniper % unknown -- scored low-neutral")
 
+    # Market structure (weight 25, only when computed -- Robinhood Chain):
+    # real unique-buyer crowd, buy pressure, pool depth, trend, socials.
+    if sig.market_structure_score is not None:
+        add(25, 25 * max(0.0, min(1.0, sig.market_structure_score)),
+            f"market structure {sig.market_structure_score:.2f} ({sig.market_structure_detail or ''})")
+
     raw_score = (points / max_points) * 100 if max_points else 0
+    if sig.market_structure_score is not None:
+        # Robinhood Chain (Oct 1 2026): no free source can fill the security
+        # slots (GoPlus doesn't cover RHC), so they'd sit at neutral defaults
+        # forever -- every RHC coin scored ~50 with 15% real data and could
+        # never pass the 50% real-data buy gate. Score and coverage are
+        # computed over the slots with REAL data only; the honeypot risk those
+        # slots would have caught is checked at buy time instead by an
+        # on-chain sell-leg quote (swap_executor.rhc_round_trip_refusal).
+        kw = sum(w for w, _, k in slots if k)
+        kp = sum(p for w, p, k in slots if k)
+        if kw >= 25:
+            raw_score = kp / kw * 100
+            reasons.append("Robinhood Chain: scored on real market data only "
+                           "(no security data source; sell-leg checked on-chain at buy)")
+            points, max_points, known_weight = kp, kw, kw
     score = int(round(raw_score))
 
     bands = PREGRAD_SOL_BANDS if sig.is_pregraduation_solana else GRADUATED_OR_OTHER_BANDS
@@ -1528,8 +1559,69 @@ def flatten_geckoterminal_pools(gt_json) -> list:
             # entry guards (checklist 3.4): already in the same response
             "change_m5": _gt_float((attrs.get("price_change_percentage") or {}).get("m5")),
             "change_h1": _gt_float((attrs.get("price_change_percentage") or {}).get("h1")),
+            "change_h6": _gt_float((attrs.get("price_change_percentage") or {}).get("h6")),
+            "change_h24": _gt_float((attrs.get("price_change_percentage") or {}).get("h24")),
+            # unique wallets (GeckoTerminal's transactions.{h1,h24}.buyers/sellers)
+            "buys_h1": _gt_txn_field(attrs, "h1", "buys"), "sells_h1": _gt_txn_field(attrs, "h1", "sells"),
+            "buyers_h24": _gt_txn_field(attrs, "h24", "buyers"), "sellers_h24": _gt_txn_field(attrs, "h24", "sellers"),
         })
     return out
+
+
+def _gt_txn_field(attrs: dict, period: str, key: str) -> Optional[int]:
+    try:
+        v = ((attrs.get("transactions") or {}).get(period) or {}).get(key)
+        return int(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def robinhood_market_structure(item: dict, dex_pair: Optional[dict] = None) -> tuple:
+    """(score 0-1 or None, detail) for chains with no security data
+    (Robinhood Chain). Ali, Oct 1 2026: "people are moving to this chain --
+    find other factors to identify a good Robinhood coin". Every factor is
+    real, free, and already in the GeckoTerminal pool response (plus
+    socials from one DexScreener batch call):
+      crowd      unique buyers in 24h (400+ = full credit)            25%
+      demand     unique buyers vs unique sellers in 24h (1.3x+)       20%
+      pressure   buys vs sells in the last hour (1.2x+)               15%
+      depth      liquidity vs FDV (10%+; thin pools get pushed)       15%
+      trend      1h / 6h / 24h all up, not dumping in the last 5 min  15%
+      team       website + social links listed (DexScreener)          10%
+    Missing parts are left out and the rest re-weighted; None if fewer than
+    3 parts are known."""
+    parts = []   # (weight, score, label)
+    b24, s24 = item.get("buyers_h24"), item.get("sellers_h24")
+    if b24 is not None:
+        parts.append((25, min(1.0, b24 / 400.0), f"{b24} buyers/24h"))
+    if b24 is not None and s24:
+        r = b24 / s24
+        parts.append((20, max(0.0, min(1.0, (r - 0.8) / 0.5)), f"buyers/sellers {r:.2f}"))
+    bh, sh = item.get("buys_h1"), item.get("sells_h1")
+    if bh is not None and sh is not None and (bh + sh) > 0:
+        r = bh / max(1, sh)
+        parts.append((15, max(0.0, min(1.0, (r - 0.7) / 0.5)), f"buy pressure {r:.2f}"))
+    liq, fdv = item.get("liquidity_usd"), item.get("fdv_usd") or item.get("market_cap_usd")
+    if liq and fdv:
+        d = liq / fdv
+        parts.append((15, max(0.0, min(1.0, (d - 0.02) / 0.08)), f"depth {d * 100:.0f}% of FDV"))
+    changes = [item.get(k) for k in ("change_h1", "change_h6", "change_h24")]
+    known = [c for c in changes if c is not None]
+    if known:
+        t = sum(1 for c in known if c > 0) / len(known)
+        m5 = item.get("change_m5")
+        if m5 is not None and m5 < -15:
+            t = 0.0
+        parts.append((15, t, f"trend {sum(1 for c in known if c > 0)}/{len(known)} up"))
+    if dex_pair is not None:
+        info = dex_pair.get("info") or {}
+        n = int(bool(info.get("websites"))) + int(bool(info.get("socials")))
+        parts.append((10, n / 2.0, f"team links {n}/2"))
+    if len(parts) < 3:
+        return None, "not enough market data"
+    total_w = sum(w for w, _, _ in parts)
+    score = sum(w * v for w, v, _ in parts) / total_w
+    return round(score, 3), ", ".join(lbl for _, _, lbl in parts)
 
 
 def goplus_top10_pct(data: dict) -> Optional[float]:
@@ -1729,6 +1821,15 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
         daily-capped budget, then the token is re-scored with it."""
     results = []
     started = time.time()
+    rhc_pairs = None
+    if chain == "robinhood_chain":
+        # one free DexScreener batch call for team links (websites/socials)
+        try:
+            from layers.layer14_revival import fetch_dexscreener_batch
+            rhc_pairs = fetch_dexscreener_batch(chain, [i["address"] for i in items[:GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE]
+                                                        if i.get("address")])
+        except Exception:  # noqa: BLE001 -- socials are optional
+            rhc_pairs = None
     for item in items[:GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE]:
         if time.time() - started > GECKOTERMINAL_SCORING_TIME_BUDGET_SECONDS:
             break  # slow free RPC/GoPlus must never push poll-fast past its timeout
@@ -1745,6 +1846,9 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
             growth = compute_holder_growth_rate_per_hr(state.get_holder_history(address))
         sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
                                               goplus_data=gp_data)
+        if chain == "robinhood_chain":
+            ms, detail = robinhood_market_structure(item, (rhc_pairs or {}).get(address))
+            sig.market_structure_score, sig.market_structure_detail = ms, detail
         sr = score_token(sig)
         if sr.band in ("A", "B") and chain in ("bsc", "base", "solana"):
             dd = _evm_launch_drawdown(chain, item)
