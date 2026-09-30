@@ -1,5 +1,7 @@
 # Final Checklist — one straight run-through, in order (Sept 27, 2026)
 
+> **Superseded Sept 30 2026 by `GO_LIVE_CHECKLIST.md`** -- that file is the single live checklist now; this one is kept as history.
+
 Supersedes TASKS_LEFT_2026-09-27-evening.md (kept for history). This is a
 single ordered list — do these top to bottom, don't skip ahead. Nothing
 below is a maybe; everything here is either already real progress or a
