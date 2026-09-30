@@ -1006,3 +1006,40 @@ REVISED PLAN: dashboard-only detection/scoring/thesis build (Sept 30
 in GitHub Secrets -- no blocker, no further cost, starting now. The
 $1,000 trading-account purchase is a SEPARATE decision Ali makes on his
 own timeline; not required for the alert/scoring build to ship.
+
+## Update -- Sept 30 2026, ~2:35 PM PKT (Fomo copy-trading/thesis build -- DONE, wired and tested)
+
+Built, tested, committed (5510f5c). Ready to run the moment Ali pushes.
+
+- [x] DONE: layers/layer13_fomo_copytrade.py -- fomoapi.io client
+  (leaderboard, /v2/alerts, theses, trader balances), roster matching
+  against roster.py's real 38-name SELL_WATCH_ROSTER (verified live: a
+  fomoapi.io leaderboard entry's displayName matched a roster.py name
+  byte-for-byte), coin scoring via the SAME layers.layer0_scoring
+  .score_solana_mint every other alert uses (never a separate/blind
+  Fomo-only score).
+- [x] DONE: config.py CONFIG.fomoapi_ready(); state.py new dashboard-only
+  storage (record_fomo_signal/get_fomo_signal_feed,
+  record_fomo_candidate/get_fomo_candidates, alerts-since cursor).
+- [x] DONE: scheduler.poll_layer13_fomo_copytrade(), wired into
+  run_poll_madeonsol() (Ali's own PC -- real hits spend MadeOnSol budget
+  via score_solana_mint, same reason Layer 1/8/2+9 live there not GH
+  Actions). Added to readiness_report() for the standard module list.
+- [x] DONE: dashboard.py -- two new sections ("Fomo Copy-Trading &
+  Theses", "Fomo New-Trader Candidates"), NEVER sent to Telegram per
+  Ali's explicit Sept 30 instruction.
+- [x] DONE: 27 new tests (tests/test_layer13_fomo_copytrade.py,
+  tests/test_state_fomo_signals.py) -- roster matching, buy/thesis
+  detection, chain-gating (unscored stays None, never guessed), $5k
+  candidate threshold, budget-bounded candidate checking. Caught and
+  fixed a real bug while writing them: get_fomo_signal_feed/
+  get_fomo_candidates were filtering age against the recorded item's OWN
+  timestamp instead of the current clock at read time, so an old entry
+  never actually expired -- fixed to match get_caller_signal's correct
+  pattern. Full suite: 564 passed, 1 pre-existing unrelated failure
+  unchanged (wallet-bankroll env test).
+- [ ] NOT YET DONE (needs Ali, real-world, can't be tested from this
+  bridge -- same limitation as every other MadeOnSol-dependent piece):
+  confirm a real run_poll_madeonsol() cycle on Ali's PC actually detects
+  a live roster buy/thesis and it shows up correctly on the dashboard.
+  First real Task Scheduler cycle after Ali's push is the real test.
