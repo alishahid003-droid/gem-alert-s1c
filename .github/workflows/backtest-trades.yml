@@ -1,0 +1,27 @@
+name: Trade backtest (win rate on labeled coins)
+
+# Simulates real trades on backtest_categorized's labeled coins with Birdeye
+# candles and the live exit logic (stage + compound scalper). Read-only,
+# no MadeOnSol calls. Runs on demand, or when backtest_trades.py changes on
+# a claude/ working branch.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["claude/**"]
+    paths: ["backtest_trades.py", ".github/workflows/backtest-trades.yml"]
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run trade backtest
+        env:
+          PYTHONUNBUFFERED: "1"
+          BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
+        run: timeout 780 python -u backtest_trades.py --delays 15,30,60
