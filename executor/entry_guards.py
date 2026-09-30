@@ -39,7 +39,11 @@ def check(score_band: Optional[str], position_usd: float, ctx: Optional[dict] = 
     ctx = ctx or {}
     min_band = os.environ.get("REAL_MONEY_MIN_BAND", "B").strip().upper() or "B"
     if momentum:
-        min_band = os.environ.get("COMPOUND_MOMENTUM_MIN_BAND", "C").strip().upper() or "C"
+        # Replay of 24 h of live alerts (Sept 30): band C lost on 12 of 13
+        # decided trades (mostly -64..-66% rug candles) while band B won 4 of 5.
+        # So real money needs B even for momentum entries; band-C momentum
+        # keeps paper-trading (compound_scalper.signal_qualifies) to earn it back.
+        min_band = os.environ.get("REAL_MONEY_MOMENTUM_MIN_BAND", "B").strip().upper() or "B"
     # The band floor applies to score-driven buys only: a trusted-deployer or
     # wallet-convergence fire is an independent signal that is allowed below
     # band B by design (executor.triggers.evaluate_stage1).

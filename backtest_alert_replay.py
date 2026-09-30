@@ -35,7 +35,7 @@ from backtest_trades import sim_stage, sim_scalper, POSITION_USD
 from executor.compound_scalper import estimate_round_trip_cost_pct
 
 GT_NET = {"solana": "solana", "bsc": "bsc", "base": "base", "robinhood_chain": "robinhood"}
-GT_PAUSE_SECONDS = 2.2          # GeckoTerminal free tier: 30 calls/min
+GT_PAUSE_SECONDS = 5.0          # run 2 hit 429 on ~every other call at 2.2 s
 ENTRY_DELAY_MIN = 2
 
 
@@ -164,7 +164,8 @@ def main():
             continue
         seen.add(tok)
         alerts.append(it)
-    alerts = alerts[-args.max_coins:]
+    # Band B first (the real-money band), newest first, then band C.
+    alerts = sorted(alerts, key=lambda a: (_band(a) != "B", -a.get("ts", 0)))[:args.max_coins]
     verdicts = state.get_autobuy_verdicts([a["token_address"] for a in alerts])
     band_counts = {b: sum(1 for a in alerts if _band(a) == b) for b in "ABCD"}
     print(f"Alert replay: {len(alerts)} unique alerted coins from the live feed (bands {band_counts})\n")
