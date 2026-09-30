@@ -911,3 +911,47 @@ missing build.
   layers/layer2_convergence.py) with real Fomo wallet-resolution + trade
   feed + thesis detection, verified against the actual trader list Ali
   supplied Sept 24.
+
+## Update -- Sept 30 2026, ~11:40 AM PKT (Fomo copy-trading + thesis + new-trader-discovery -- full spec locked)
+
+Ali locked the spec for the Fomo feature (still blocked on his fomoapi.io
+key, see prior update). Design mirrors the existing "corroborating color,
+never a blind trigger" rule already used by Layer 2/2b/12 for pump.fun --
+extended to Fomo, not a new pattern.
+
+SPEC (locked, ready to build once key is in hand):
+1. Surface: dashboard.py, NOT Telegram. New alert-card types on the
+   existing live local dashboard (Upstash-backed, same page as
+   positions/P&L/band alerts) -- Ali explicit: "alert should show in my
+   dashboard not on telegram."
+2. Roster-trader buy alert: when a trader from Ali's 38-person Fomo roster
+   (layers/roster.py) buys a coin (via fomoapi.io's trade feed), that coin
+   is run through the SAME Layer 0 structural scoring already used for
+   pump.fun/StonkFun (liquidity, holders, mint/freeze authority, volume
+   pattern) and the resulting reliability/band score is shown alongside
+   the trader's buy -- never a "they bought, so buy" trigger by itself.
+3. Thesis alert: when a roster trader posts a thesis/comment on a coin
+   (fomoapi.io's theses endpoint), same treatment -- show the actual
+   thesis text + X link if attached, alongside our own score on that coin.
+4. New-trader discovery: watch fomoapi.io's leaderboard endpoint for
+   traders NOT currently on the 38-person roster who show >= $5,000
+   balance (Ali's locked threshold, Sept 30 2026). Surfaced as a
+   "candidate trader" card for Ali to approve adding -- NOT auto-added,
+   roster curation stays Ali's judgment call.
+5. Auto-EXECUTION on Fomo is explicitly OUT of scope for this build --
+   alert-only, matches Ali's own choice of "Option 2" (manual execution
+   in the Fomo app, same as README's original alert-only intent for Fomo).
+   Reasoning already discussed with Ali: fomoapi.io is read-only (no
+   execution endpoint), Fomo is not dApp-connectable (confirmed via
+   fomo.family's own architecture docs -- Phantom cannot execute Fomo
+   trades, Fomo requires its own deposited embedded-wallet balance,
+   separate pool of funds from the pump.fun/StonkFun Jupiter wallet), and
+   the only execution path would be fragile/ToS-risk browser-app
+   automation against Fomo's own UI -- deferred, not ruled out forever.
+
+STILL BLOCKED ON: Ali's fomoapi.io free-tier API key (fomoapi.io/dashboard,
+email signup, no card). Build order once key lands: (a) wire fomoapi.io
+client, resolve the 38 roster names to wallets, (b) trade-feed +
+thesis-feed polling into existing scoring pipeline, (c) leaderboard poll
+for >=$5k new-trader candidates, (d) new dashboard.py card types for all
+three, read-only exactly like the rest of the dashboard.
