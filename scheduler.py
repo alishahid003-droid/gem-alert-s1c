@@ -168,6 +168,12 @@ import state
 IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
+def _runner_where() -> str:
+    """Where this cycle ran -- shown next to each runner heartbeat so the
+    dashboard/diag can tell a GitHub Actions run from Ali's own PC."""
+    return "github-actions" if IS_GITHUB_ACTIONS else "local-pc"
+
+
 # --- Cycle summary (Ali, Sept 28 2026) -----------------------------------
 # Ali's ask: the verbose per-line [layerX] prints below are real and stay
 # (still needed to actually debug a broken layer), but he shouldn't have to
@@ -1772,6 +1778,7 @@ def run_poll_fast():
                      f"- madeonsol_calls: {madeonsol_calls}\n"
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
 
+    _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(), f"alerts={alerts_sent}")
     if _stats():
         _print_cycle_summary(_stats())
 
@@ -2106,6 +2113,7 @@ def run_poll_slow():
             _f.write(f"\n### Slow-cycle result\n- alerts_sent: {alerts_sent}\n"
                      f"- madeonsol_calls: {madeonsol_calls}\n")
 
+    _safe(state.record_runner_heartbeat, "poll-slow", _runner_where(), f"alerts={alerts_sent}")
     if _stats():
         _print_cycle_summary(_stats())
 
@@ -2236,6 +2244,8 @@ def run_poll_madeonsol():
     print(f"\nMadeOnSol-only cycle done. {total_alerts} alert(s) delivered. "
           f"~{total_calls} MadeOnSol call(s) used.")
 
+    _safe(state.record_runner_heartbeat, "poll-madeonsol", _runner_where(),
+          f"alerts={total_alerts} madeonsol_calls={total_calls}")
     if _stats():
         _print_cycle_summary(_stats())
 

@@ -1183,3 +1183,21 @@ def set_fomo_last_run(info: dict):
 
 def get_fomo_last_run() -> Optional[dict]:
     return get_value(FOMO_LAST_RUN_KEY)
+
+
+# --- Runner heartbeats (Sept 30 2026) ---
+# Every poll cycle (poll-fast / poll-slow on GitHub Actions, --poll-madeonsol
+# on Ali's PC) stamps its completion here, so "is the PC Task Scheduler job
+# actually running?" is a fact on the dashboard, not a question.
+RUNNER_HEARTBEATS_KEY = "runner_heartbeats"
+
+
+def record_runner_heartbeat(name: str, where: str = "", note: str = "", ts: Optional[float] = None):
+    beats = get_value(RUNNER_HEARTBEATS_KEY) or {}
+    beats[name] = {"ts": ts if ts is not None else time.time(), "where": where, "note": note}
+    set_value(RUNNER_HEARTBEATS_KEY, beats)
+
+
+def get_runner_heartbeats() -> dict:
+    v = get_value(RUNNER_HEARTBEATS_KEY)
+    return v if isinstance(v, dict) else {}
