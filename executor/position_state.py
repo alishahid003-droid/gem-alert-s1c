@@ -137,26 +137,27 @@ def list_open_positions() -> list:
     """NOTE: state.py has no native "list keys by prefix" op (Upstash's REST
     API doesn't cheaply support SCAN over a single GET/SET pattern) -- so
     this relies on a separate index list maintained alongside individual
-    position records, updated by record_stage_entry/close_position below."""
+    position records, updated by record_stage_entry/close_position below.
+
+    Fetches every indexed position in ONE pipelined state.get_values() call
+    rather than one state.get_value() per key (Ali, Sept 30 2026 -- this
+    was the root cause of the dashboard's /api/data hanging for minutes:
+    with dozens of positions accumulated from weeks of testing, the old
+    per-key loop meant dozens of sequential HTTP round trips, each subject
+    to utils/http.py's own retry/backoff stack)."""
     index = state.get_value("exec_position_index") or []
-    open_positions = []
-    for key in index:
-        pos = state.get_value(key)
-        if pos and pos.get("status") == "open":
-            open_positions.append(pos)
-    return open_positions
+    records = state.get_values(index)
+    return [pos for pos in records.values() if pos and pos.get("status") == "open"]
 
 
 def list_closed_positions(limit: int = 100) -> list:
     """Mirrors list_open_positions() but for status == 'closed' -- feeds
     the dashboard's Closed Positions table (Tasks Left #3/#5, Sept 25
-    2026). Newest-closed first."""
+    2026). Newest-closed first. Same pipelined-batch-fetch fix as
+    list_open_positions() above."""
     index = state.get_value("exec_position_index") or []
-    closed = []
-    for key in index:
-        pos = state.get_value(key)
-        if pos and pos.get("status") == "closed":
-            closed.append(pos)
+    records = state.get_values(index)
+    closed = [pos for pos in records.values() if pos and pos.get("status") == "closed"]
     closed.sort(key=lambda p: p.get("closed_ts", 0), reverse=True)
     return closed[:limit]
 

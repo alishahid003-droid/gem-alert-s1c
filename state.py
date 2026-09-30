@@ -63,6 +63,37 @@ def _upstash_set_raw(key: str, value_str: str) -> bool:
     return result["ok"]
 
 
+def _upstash_get_many_raw(keys: List[str]) -> dict:
+    """Batch GET via Upstash's /pipeline endpoint -- ONE HTTP round trip
+    for however many keys, instead of one round trip per key (Ali, Sept 30
+    2026: the dashboard's /api/data was hanging for minutes because
+    position_state.list_open_positions()/list_closed_positions() did a
+    sequential state.get_value() per position in the index -- with dozens
+    of positions accumulated from weeks of testing, that's dozens of
+    sequential HTTP calls, each subject to utils/http.py's own retry/
+    backoff stack, easily compounding into minutes on any single slow or
+    dropped call. This collapses all of them into one pipelined request.
+    Falls back to per-key calls if Upstash is unreachable or the pipeline
+    call itself fails, so behavior degrades rather than breaks."""
+    if not keys:
+        return {}
+    try:
+        result = post_json(f"{CONFIG.upstash_redis_rest_url}/pipeline",
+                            headers=_upstash_headers(),
+                            json=[["GET", k] for k in keys])
+    except ApiUnreachable:
+        return {k: _upstash_get_raw(k) for k in keys}
+    if not result["ok"]:
+        return {k: _upstash_get_raw(k) for k in keys}
+    body = result.get("json")
+    if not isinstance(body, list) or len(body) != len(keys):
+        return {k: _upstash_get_raw(k) for k in keys}
+    out = {}
+    for k, item in zip(keys, body):
+        out[k] = (item or {}).get("result") if isinstance(item, dict) else None
+    return out
+
+
 def _local_load_all() -> dict:
     if not os.path.exists(LOCAL_STATE_FILE):
         return {}
@@ -88,6 +119,28 @@ def get_value(key: str):
         except ValueError:
             return None
     return _local_load_all().get(key)
+
+
+def get_values(keys: List[str]) -> dict:
+    """Batch version of get_value() -- returns {key: decoded_value_or_None}.
+    Uses one pipelined Upstash call instead of len(keys) separate ones (see
+    _upstash_get_many_raw's docstring). Local-file backend already has
+    everything in memory, so it just does the equivalent dict lookups."""
+    if backend() == "upstash":
+        raw_map = _upstash_get_many_raw(keys)
+        out = {}
+        for k in keys:
+            raw = raw_map.get(k)
+            if raw is None:
+                out[k] = None
+                continue
+            try:
+                out[k] = json.loads(raw)
+            except ValueError:
+                out[k] = None
+        return out
+    data = _local_load_all()
+    return {k: data.get(k) for k in keys}
 
 
 def set_value(key: str, value) -> bool:

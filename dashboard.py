@@ -71,6 +71,7 @@ send alerts, open/close positions, or change any config.
 """
 import json
 import time
+import concurrent.futures
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -218,7 +219,26 @@ def _with_live_pnl(pos: dict) -> dict:
 
 
 def build_data() -> dict:
+    """Sept 30 2026 (Ali, "same pathetic interface and bullshit stuff" --
+    /api/data was hanging indefinitely): every section below is timed and
+    printed to this process's own console, so a future slowdown shows up
+    immediately in the terminal running `python dashboard.py` instead of
+    silently stalling the page. The open-position live-PnL enrichment
+    (one DexScreener call per position) is also now run CONCURRENTLY with
+    a hard per-call timeout, instead of sequentially with no ceiling --
+    that, plus state.py's new pipelined batch-fetch (see
+    position_state.list_open_positions/list_closed_positions), were the
+    two real causes of the multi-minute hang: dozens of positions x
+    sequential Upstash calls x sequential DexScreener calls, each subject
+    to utils/http.py's own retry/backoff stack."""
+    t0 = time.time()
+
+    def _lap(label):
+        print(f"[dashboard] build_data: {label} done at +{time.time() - t0:.2f}s")
+
     report = readiness_report()
+    _lap("readiness_report")
+
     feed = state.get_alert_feed(limit=150)
     for item in feed:
         item["ago"] = _ago(item["ts"])
@@ -227,17 +247,43 @@ def build_data() -> dict:
         item["band"] = _extract_band(item.get("tags"))
         item["noise"] = item["category"] in BAND_FILTERABLE_CATEGORIES and item["band"] in ("C", "D")
         item["links"] = links.build_links(item.get("chain"), item.get("token_address"))
+    _lap("alert_feed")
 
-    positions = [_with_live_pnl(p) for p in position_state.list_open_positions()]
+    open_raw = position_state.list_open_positions()
+    _lap(f"list_open_positions ({len(open_raw)} open)")
+    if open_raw:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(open_raw))) as pool:
+            futures = {pool.submit(_with_live_pnl, p): p for p in open_raw}
+            positions = []
+            for fut in futures:
+                try:
+                    positions.append(fut.result(timeout=10))
+                except Exception:
+                    # a single stuck/slow DexScreener call must never take
+                    # the whole dashboard down with it -- show the position
+                    # with price_unavailable=True instead.
+                    p = futures[fut]
+                    p["current_mcap_usd"] = None
+                    p["value_usd"] = None
+                    p["pnl_usd"] = None
+                    p["pnl_pct"] = None
+                    p["remaining_pct"] = 1.0
+                    p["price_unavailable"] = True
+                    positions.append(p)
+    else:
+        positions = []
     for p in positions:
         p["opened_fmt"] = _fmt_ts(p.get("opened_ts")) if p.get("opened_ts") else "?"
+    _lap("open_positions live-pnl enrichment")
 
     closed_positions = position_state.list_closed_positions(limit=100)
     for p in closed_positions:
         p["opened_fmt"] = _fmt_ts(p.get("opened_ts")) if p.get("opened_ts") else "?"
         p["closed_fmt"] = _fmt_ts(p.get("closed_ts")) if p.get("closed_ts") else "?"
+    _lap(f"closed_positions ({len(closed_positions)})")
 
     trade_log = state.get_trade_log(limit=200)
+    _lap("trade_log")
     for t in trade_log:
         t["ago"] = _ago(t["ts"])
         t["ts_fmt"] = _fmt_ts(t["ts"])
@@ -253,6 +299,7 @@ def build_data() -> dict:
     fomo_candidates = state.get_fomo_candidates(limit=50)
     for c in fomo_candidates:
         c["ago"] = _ago(c["ts"])
+    _lap("fomo_signals + fomo_candidates")
 
     modules = _flatten_readiness(report)
     unrealized_total = sum(p["pnl_usd"] for p in positions if p.get("pnl_usd") is not None)
@@ -266,8 +313,12 @@ def build_data() -> dict:
             _fmt_ts(scalper_status["open_position"].get("opened_ts"))
             if scalper_status["open_position"].get("opened_ts") else "?"
         )
+    _lap("compound_scalper.status")
 
-    return {
+    realized = position_state.realized_pnl_summary()
+    _lap("realized_pnl_summary")
+
+    out = {
         "generated_at": _fmt_ts(time.time()),
         "readiness": report,
         "modules_ready_count": sum(1 for m in modules if m["ready"]),
@@ -277,13 +328,15 @@ def build_data() -> dict:
         "open_positions": positions,
         "closed_positions": closed_positions,
         "trade_log": trade_log,
-        "realized_pnl": position_state.realized_pnl_summary(),
+        "realized_pnl": realized,
         "unrealized_pnl_usd": unrealized_total,
         "state_backend": state.backend() if hasattr(state, "backend") else "?",
         "compound_scalper": scalper_status,
         "fomo_signals": fomo_signals,
         "fomo_candidates": fomo_candidates,
     }
+    _lap(f"TOTAL")
+    return out
 
 
 def _flatten_readiness(r) -> list:
