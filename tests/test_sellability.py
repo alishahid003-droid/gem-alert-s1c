@@ -103,3 +103,13 @@ def test_price_impact_refusal():
     assert price_impact_refusal("0.01") is None
     assert price_impact_refusal(None) is None
     assert price_impact_refusal("junk") is None
+
+
+def test_priority_fee_scales_with_small_trades(monkeypatch):
+    from executor.swap_executor import solana_swap_speed_params
+    monkeypatch.delenv("SOLANA_PRIORITY_MAX_LAMPORTS", raising=False)
+    cap = lambda p: p["prioritizationFeeLamports"]["priorityLevelWithMaxLamports"]["maxLamports"]
+    assert cap(solana_swap_speed_params()) == 1_000_000
+    assert cap(solana_swap_speed_params(30_000_000)) == 150_000       # ~$5 trade -> 0.5%
+    assert cap(solana_swap_speed_params(1_000_000)) == 20_000         # floor
+    assert cap(solana_swap_speed_params(10**12)) == 1_000_000         # big trade: env cap

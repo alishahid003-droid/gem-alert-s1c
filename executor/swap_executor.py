@@ -189,7 +189,14 @@ def _refuse_unless_ready(chain: str) -> Optional[ExecutionResult]:
     return None
 
 
-def solana_swap_speed_params() -> dict:
+def _int_or_none(v) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def solana_swap_speed_params(trade_lamports: Optional[int] = None) -> dict:
     """Checklist 5.2 (Sept 30 2026): no priority fee was ever set, so during
     congestion buys/sells could land late or be dropped -- the exact moments a
     memecoin trade needs to land. Jupiter picks a competitive fee, capped at
@@ -200,6 +207,15 @@ def solana_swap_speed_params() -> dict:
         cap = int(os.environ.get("SOLANA_PRIORITY_MAX_LAMPORTS", "1000000"))
     except ValueError:
         cap = 1_000_000
+    # Oct 1 2026: on a $5 trade the flat 0.001 SOL cap could cost ~4% per
+    # side. The fee cap now also scales with the trade: at most
+    # SOLANA_PRIORITY_MAX_TRADE_PCT (default 0.5%) of it, floor 20,000 lamports.
+    if trade_lamports:
+        try:
+            pct = float(os.environ.get("SOLANA_PRIORITY_MAX_TRADE_PCT", "0.005"))
+        except ValueError:
+            pct = 0.005
+        cap = min(cap, max(20_000, int(trade_lamports * pct)))
     level = os.environ.get("SOLANA_PRIORITY_LEVEL", "veryHigh")
     return {"dynamicComputeUnitLimit": True,
             "prioritizationFeeLamports": {"priorityLevelWithMaxLamports": {"maxLamports": cap, "priorityLevel": level}}}
@@ -264,7 +280,7 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
         "quoteResponse": quote.get("json"),
         "userPublicKey": _solana_pubkey_from_private_key(),
         "wrapAndUnwrapSol": True,
-        **solana_swap_speed_params(),
+        **solana_swap_speed_params(lamports),
     })
     if not swap_resp.get("ok"):
         return ExecutionResult(False, f"jupiter swap-tx build failed: status {swap_resp.get('status_code')}")
@@ -666,6 +682,18 @@ def _rhc_native_price_usd(token_address: str) -> Optional[float]:
     return price_usd / price_native
 
 
+def rhc_round_trip_refusal(amount_in_wei: int, sell_back_wei: Optional[int],
+                           max_loss: float = 0.25) -> Optional[str]:
+    """None when the coin can be sold back for >= (1 - max_loss) of what we'd
+    pay; otherwise the refusal reason."""
+    if sell_back_wei is None:
+        return "no on-chain sell quote for this token (possible honeypot)"
+    if amount_in_wei and sell_back_wei < amount_in_wei * (1 - max_loss):
+        return (f"round trip would lose {(1 - sell_back_wei / amount_in_wei) * 100:.0f}% "
+                f"(max {max_loss * 100:.0f}%) -- hidden tax or no real liquidity")
+    return None
+
+
 def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> ExecutionResult:
     """Real Uniswap v4 buy via Robinhood Chain's Universal Router, built
     Sept 25 2026 on top of rhc_pool_discovery.find_v4_pool (real on-chain
@@ -730,6 +758,14 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
     if quoted_out is None:
         return ExecutionResult(False, "could not get a real on-chain quote for slippage protection -- "
                                        "refusing to buy with no amount_out_minimum floor")
+    # Checklist 3.2 for Robinhood Chain (Oct 1 2026): GoPlus doesn't cover
+    # RHC, so quote the SELL leg on-chain too -- the tokens we'd receive, sold
+    # straight back -- and refuse a coin that can't be sold or loses >25% on
+    # the round trip (honeypot / hidden tax).
+    why = rhc_round_trip_refusal(amount_in_wei,
+                                 _rhc_quote_exact_input_single(pool_key, zero_for_one=False, exact_amount=quoted_out))
+    if why:
+        return ExecutionResult(False, f"refused before buying: {why}")
     amount_out_minimum = int(quoted_out * (1 - RHC_BUY_SLIPPAGE_TOLERANCE))
 
     account = Account.from_key(EXECUTOR_CONFIG.rhc_private_key)
@@ -847,7 +883,7 @@ def _sell_solana(token_mint: str, amount_tokens: float) -> ExecutionResult:
         "quoteResponse": quote.get("json"),
         "userPublicKey": pubkey,
         "wrapAndUnwrapSol": True,
-        **solana_swap_speed_params(),
+        **solana_swap_speed_params(_int_or_none((quote.get("json") or {}).get("outAmount"))),
     })
     if not swap_resp.get("ok"):
         return ExecutionResult(False, f"jupiter sell swap-tx build failed: status {swap_resp.get('status_code')}")
