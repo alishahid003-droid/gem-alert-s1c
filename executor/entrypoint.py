@@ -45,6 +45,13 @@ import executor.entry_guards as entry_guards
 _MONEY_LIMIT_MARKERS = ("budget exhausted", "max concurrent", "circuit breaker")
 
 
+def _sprint_only() -> bool:
+    """In sprint mode the sprint pool gets the whole wallet: Stage 1, Stage 2
+    and moonshot real buys stay paper-only (set SPRINT_ONLY=false to allow)."""
+    import os
+    return compound_scalper.sprint_mode() and os.environ.get("SPRINT_ONLY", "true").strip().lower() != "false"
+
+
 def _paper_eligible(decision) -> bool:
     return decision.should_fire or any(m in (decision.reason or "") for m in _MONEY_LIMIT_MARKERS)
 
@@ -124,6 +131,8 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
             return {"fired": False, "stage": "stage1", "reason": f"entry guard: {guard_why}"}
     if not decision.should_fire:
         return {"fired": False, "stage": "stage1", "reason": decision.reason}
+    if _sprint_only():
+        return {"fired": False, "stage": "stage1", "reason": "sprint mode: wallet reserved for the sprint (paper only)"}
 
     position_state.record_stage_entry(chain, token, "stage1", decision.position_usd, entry_mcap, decision.reason)
     conviction = moonbag.assess_conviction(
@@ -161,6 +170,8 @@ def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[f
             return {"fired": False, "stage": "stage2", "reason": f"paper-record gate: {why}"}
     if not decision.should_fire:
         return {"fired": False, "stage": "stage2", "reason": decision.reason}
+    if _sprint_only():
+        return {"fired": False, "stage": "stage2", "reason": "sprint mode: wallet reserved for the sprint (paper only)"}
 
     position_state.record_stage_entry(chain, token, "stage2", decision.position_usd, current_mcap_usd, decision.reason)
     double_confirmed = triggers.is_double_confirmed(chain, token)
@@ -303,6 +314,8 @@ def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
                             guard="pass" if guard_ok else "blocked", exit_profile="moonshot")
     if not moonshot_enabled():
         return {"fired": False, "stage": "moonshot", "reason": "MOONSHOT_ENABLED is off (paper + alert only)"}
+    if _sprint_only():
+        return {"fired": False, "stage": "moonshot", "reason": "sprint mode: wallet reserved for the sprint (paper only)"}
     if chain not in _BUY_FUNCTIONS:
         return {"fired": False, "stage": "moonshot", "reason": f"no buy path on {chain} yet (paper only)"}
     if not guard_ok:
