@@ -77,7 +77,8 @@ def _closed() -> list:
 def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
                entry_mcap: Optional[float], band: Optional[str] = None,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
-               now: Optional[float] = None, strategy: str = "stage") -> Optional[dict]:
+               now: Optional[float] = None, strategy: str = "stage",
+               guard: Optional[str] = None) -> Optional[dict]:
     """Opens one paper position; no-op if the same (chain, token, source) is
     already open, the chain has no buy path, or the price is unknown."""
     if chain not in EXECUTABLE_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
@@ -92,7 +93,8 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
-           "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False}
+           "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False,
+           "guard": guard or "n/a"}
     book[pid] = pos
     state.set_value(OPEN_KEY, book)
     return pos
@@ -250,7 +252,7 @@ def _stats(rows: list) -> dict:
 def scoreboard(since_ts: Optional[float] = None) -> dict:
     rows = [r for r in _closed() if since_ts is None or r.get("closed_ts", 0) >= since_ts]
     out = {"overall": _stats(rows), "open_count": len(_open())}
-    for field in ("signal", "chain", "band", "source", "exit_type"):
+    for field in ("signal", "chain", "band", "source", "exit_type", "guard"):
         groups = {}
         for r in rows:
             groups.setdefault(str(r.get(field) or "-"), []).append(r)

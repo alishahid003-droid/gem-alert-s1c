@@ -128,4 +128,5 @@ def pair_to_gt_item(address: str, pair: dict) -> dict:
         "volume_24h_usd": m["volume_h24"], "liquidity_usd": m["liquidity_usd"],
         "pool_created_at": created_iso, "txns_h1_total": m["txns_h1"], "txns_h24_total": m["txns_h24"],
         "dex_id": pair.get("dexId"),
+        "change_m5": m["change_m5"], "change_h1": m["change_h1"],
     }

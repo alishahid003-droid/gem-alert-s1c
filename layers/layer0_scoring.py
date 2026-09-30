@@ -1525,6 +1525,9 @@ def flatten_geckoterminal_pools(gt_json) -> list:
             # e.g. "pump-fun" for a pump.fun bonding-curve pool (Sept 30 2026:
             # decides the stricter pre-graduation bands on the Solana path)
             "dex_id": (((pool.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id"),
+            # entry guards (checklist 3.4): already in the same response
+            "change_m5": _gt_float((attrs.get("price_change_percentage") or {}).get("m5")),
+            "change_h1": _gt_float((attrs.get("price_change_percentage") or {}).get("h1")),
         })
     return out
 

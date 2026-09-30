@@ -37,6 +37,7 @@ import executor.moonbag as moonbag
 import executor.swap_executor as swap_executor
 import executor.compound_scalper as compound_scalper
 import executor.paper_ledger as paper_ledger
+import executor.entry_guards as entry_guards
 
 # Refusals that are about MONEY (budget, position cap, loss breaker) rather
 # than signal quality -- the paper ledger still records those candidates so
@@ -96,7 +97,8 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
                              entry_mcap: Optional[float], insider_ratio: Optional[float] = None,
                              has_news_catalyst: bool = False,
                              signal_coverage: Optional[float] = None,
-                             liquidity_usd: Optional[float] = None) -> dict:
+                             liquidity_usd: Optional[float] = None,
+                             entry_ctx: Optional[dict] = None) -> dict:
     """Evaluates the Stage 1 trigger and, if it fires, records the position
     and locks in its moonbag ladder in the same step. entry_mcap is the
     launchpad-level mcap at the moment of firing -- the caller (a future
@@ -105,14 +107,21 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
     decision = triggers.evaluate_stage1(chain, token, score_band, deployer_tier, convergence_count,
                                         signal_coverage=signal_coverage)
     signal = paper_ledger.classify_stage1_signal(score_band, deployer_tier, convergence_count, signal_coverage)
+    ctx = dict(entry_ctx or {})
+    ctx.setdefault("liquidity_usd", liquidity_usd)
+    ctx.setdefault("signals", 1 + int(deployer_tier in ("elite", "good")) + int(convergence_count >= 2))
+    guard_ok, guard_why = entry_guards.check(score_band, triggers.stage1_position_usd_for_band(score_band), ctx)
     if signal and _paper_eligible(decision):
         paper_ledger.open_paper(chain, token, "stage1", signal,
                                 triggers.stage1_position_usd_for_band(score_band), entry_mcap,
-                                band=score_band, liquidity_usd=liquidity_usd)
+                                band=score_band, liquidity_usd=liquidity_usd,
+                                guard="pass" if guard_ok else "blocked")
     if decision.should_fire:
         allowed, why = paper_ledger.signal_allowed(signal)
         if not allowed:
             return {"fired": False, "stage": "stage1", "reason": f"paper-record gate: {why}"}
+        if not guard_ok:
+            return {"fired": False, "stage": "stage1", "reason": f"entry guard: {guard_why}"}
     if not decision.should_fire:
         return {"fired": False, "stage": "stage1", "reason": decision.reason}
 
@@ -170,7 +179,8 @@ def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[f
 def handle_compound_scalper_candidate(chain: str, token: str, score_band: Optional[str],
                                        entry_mcap: Optional[float],
                                        liquidity_usd: Optional[float] = None,
-                                       momentum: bool = False) -> dict:
+                                       momentum: bool = False,
+                                       entry_ctx: Optional[dict] = None) -> dict:
     """Evaluates executor.compound_scalper's own entry gate and, if it
     fires, opens the scalp position through that module. Independent of
     Stage 1/Stage 2 -- a token can fire this AND a stage entry in the same
@@ -181,13 +191,19 @@ def handle_compound_scalper_candidate(chain: str, token: str, score_band: Option
     step rather than automatic."""
     # Paper-trade every scalper-quality signal even while the pool is off, so
     # the scalper's own win rate is measured before any money goes in.
+    ctx = dict(entry_ctx or {})
+    ctx.setdefault("liquidity_usd", liquidity_usd)
+    guard_ok, guard_why = entry_guards.check(score_band, paper_ledger.PAPER_SCALP_USD, ctx, momentum=momentum)
     if compound_scalper.signal_qualifies(score_band, momentum):
         paper_ledger.open_paper(chain, token, "scalper",
                                 "scalper_momentum" if momentum else f"scalper_band_{score_band}",
                                 paper_ledger.PAPER_SCALP_USD, entry_mcap, band=score_band,
-                                liquidity_usd=liquidity_usd, strategy="scalper")
+                                liquidity_usd=liquidity_usd, strategy="scalper",
+                                guard="pass" if guard_ok else "blocked")
     decision = compound_scalper.entry_gate(chain, token, score_band, liquidity_usd=liquidity_usd,
                                            momentum=momentum)
+    if decision.should_fire and not guard_ok:
+        return {"fired": False, "mode": "compound_scalper", "reason": f"entry guard: {guard_why}"}
     if not decision.should_fire:
         return {"fired": False, "mode": "compound_scalper", "reason": decision.reason}
 

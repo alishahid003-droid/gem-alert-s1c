@@ -507,6 +507,14 @@ def _alert(alert: Alert, layer: str) -> dict:
     return send_res
 
 
+def _entry_ctx(scored: dict) -> dict:
+    """What the entry guards (executor/entry_guards.py) need, from data the
+    scorer already fetched -- no extra calls."""
+    raw = scored.get("raw") or {}
+    return {"liquidity_usd": raw.get("liquidity_usd"), "change_m5": raw.get("change_m5"),
+            "change_h1": raw.get("change_h1")}
+
+
 def _hard_fail(sr) -> bool:
     """Structural red flags no later momentum can fix (mint/freeze authority
     still live, honeypot/blacklist) -- never watched for a revival."""
@@ -596,6 +604,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
                 convergence_count=0, entry_mcap=mc,
                 signal_coverage=getattr(sr, "signal_coverage", None),
                 liquidity_usd=(scored.get("raw") or {}).get("liquidity_usd"),
+                entry_ctx=_entry_ctx(scored),
             )
         # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
         # 2026, Ali: "would these trades have been executed?") -- the real
@@ -616,6 +625,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         liq_usd = (scored.get("raw") or {}).get("liquidity_usd")
         scalp = handle_compound_scalper_candidate(
             chain, mint, score_band=sr.band, entry_mcap=mc, liquidity_usd=liq_usd,
+            entry_ctx=_entry_ctx(scored),
         )
         if scalp["fired"]:
             print(f"[compound-scalper:{chain}] SCALP OPENED {mint[:8]} -- "
@@ -974,7 +984,7 @@ def _run_revival_watch_cycle(board) -> dict:
             if momentum and not _hard_fail(sr):
                 scalp = handle_compound_scalper_candidate(chain, w["token"], score_band=sr.band,
                                                           entry_mcap=mc, liquidity_usd=m.get("liquidity_usd"),
-                                                          momentum=True)
+                                                          momentum=True, entry_ctx=_entry_ctx(scored))
                 if scalp.get("fired"):
                     print(f"[compound-scalper:{chain}] MOMENTUM SCALP {w['token'][:8]} ${scalp['position_usd']:.2f}")
     if checked:
