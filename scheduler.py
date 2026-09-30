@@ -136,6 +136,10 @@ from layers.layer0_scoring import RawSignals, fetch_dexscreener_snapshot
 from layers.layer3_backing_check import check_backing_spike
 from layers.layer11_social_buzz import fetch_boost_board, check_buzz
 from layers.layer12_caller_channels import fetch_caller_channel_posts, extract_token_addresses
+from layers.layer13_fomo_copytrade import (
+    fetch_fomo_alerts, fetch_leaderboard, detect_roster_buys_and_theses,
+    find_new_trader_candidates,
+)
 from layers.pumpfun_trades import fetch_recent_signatures, fetch_transaction, decode_trade
 from layers.layer2b_pumpfun_smart_money import process_trade as pumpfun_process_trade, \
     detect_pumpfun_convergence, get_smart_money_roster, single_wallet_buy_events
@@ -403,6 +407,19 @@ def readiness_report() -> dict:
                     "actual track record (see layers/layer12_caller_channels.py's docstring). "
                     "Rides as a [Caller: channel (Nm ago)] tag on a real alert, same convention as "
                     "Backing/Buzz -- never folds into the structural score itself.",
+        },
+        "layer13_fomo_copytrade": {
+            "ready": CONFIG.fomoapi_ready(),
+            "note": "built Sept 30, 2026 -- fomoapi.io (independent, unofficial third-party API "
+                    "over the Fomo dataset), keyed on Ali's 38-person roster (roster.py). "
+                    "Dashboard-only, no Telegram alert (Ali's explicit call). Every roster buy/"
+                    "thesis still runs the coin through this system's own Layer 0 structural "
+                    "score before showing anything -- corroborating signal, never a blind "
+                    "trigger, same rule as Layer 12's Caller tag. Also watches for new traders "
+                    "(not on roster) with >= $5k balance, surfaced for Ali's approval, never "
+                    "auto-added. Read-only: real Fomo auto-execution needs a SEPARATE $1,000 "
+                    "paid trading-account product this codebase deliberately does not wire in "
+                    "-- see layers/layer13_fomo_copytrade.py's module docstring.",
         },
         "stage2": {
             "layer2_convergence": CONFIG.layer1_ready(),  # same MadeOnSol key powers the KOL feed
@@ -1062,6 +1079,54 @@ def poll_layer12_caller_channels() -> dict:
     if posts:
         print(f"[layer12] {len(posts)} caller-channel post(s) this cycle, {recorded} address mention(s) recorded")
     return {"ok": True, "posts_checked": len(posts), "addresses_recorded": recorded}
+
+
+def poll_layer13_fomo_copytrade() -> dict:
+    """Fomo copy-trading + thesis detection (Ali, Sept 30 2026 -- see
+    layers/layer13_fomo_copytrade.py's module docstring for the full
+    design). No-ops cleanly if CONFIG.fomoapi_ready() is False. Two parts
+    per cycle:
+      1. Pull recent /v2/alerts since the last cursor, match against the
+         roster, score every hit's coin, record to the dashboard feed.
+      2. Every FOMO_CANDIDATE_CHECK_EVERY_N_CYCLES-th call, also pull the
+         24h leaderboard and check for new >=$5k-balance candidates NOT on
+         the roster -- gated to not every cycle since it spends
+         fomoapi.io balance-check credits per candidate (see
+         find_new_trader_candidates's docstring) and Ali only needs to see
+         new candidates periodically, not every 15 minutes."""
+    if not CONFIG.fomoapi_ready():
+        return {"ok": False, "reason": "Layer 13 not configured (FOMOAPI_API_KEY)"}
+
+    since = state.get_fomo_alerts_since()
+    alerts_result = _safe(fetch_fomo_alerts, since_iso=since, limit=100)
+    if not (isinstance(alerts_result, dict) and alerts_result.get("ok")):
+        reason = alerts_result.get("reason") if isinstance(alerts_result, dict) else str(alerts_result)
+        print(f"[layer13] fomoapi.io /v2/alerts fetch failed this cycle: {reason}")
+        return {"ok": False, "reason": reason}
+    alerts = alerts_result.get("alerts") or []
+    detected = detect_roster_buys_and_theses(alerts)
+    if alerts:
+        newest_ts = alerts[0].get("ts")
+        if isinstance(newest_ts, (int, float)):
+            import datetime
+            iso = datetime.datetime.fromtimestamp(newest_ts / 1000, tz=datetime.timezone.utc).isoformat()
+            state.set_fomo_alerts_since(iso)
+    if detected["buys_recorded"] or detected["theses_recorded"]:
+        print(f"[layer13] {detected['buys_recorded']} roster buy(s), "
+              f"{detected['theses_recorded']} thesis/theses recorded this cycle")
+
+    candidates_result = {"checked": 0, "candidates_found": 0}
+    lb = _safe(fetch_leaderboard, window="24h", limit=100)
+    if isinstance(lb, dict) and lb.get("ok"):
+        candidates_result = find_new_trader_candidates(lb.get("traders") or [], min_balance_usd=5000.0)
+        if candidates_result["candidates_found"]:
+            print(f"[layer13] {candidates_result['candidates_found']} new-trader candidate(s) "
+                  f">= $5k balance found this cycle (checked {candidates_result['checked']})")
+    else:
+        reason = lb.get("reason") if isinstance(lb, dict) else str(lb)
+        print(f"[layer13] leaderboard fetch failed this cycle (candidate discovery skipped): {reason}")
+
+    return {"ok": True, **detected, **{f"candidate_{k}": v for k, v in candidates_result.items()}}
 
 
 LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
@@ -2085,6 +2150,16 @@ def run_poll_madeonsol():
     a29, c29 = _run_fomo_cycle(report)
     total_alerts += a29
     total_calls += c29
+
+    # Layer 13 (Fomo copy-trading/thesis, Sept 30 2026) -- dashboard-only,
+    # never sends a Telegram alert, so it does not add to total_alerts.
+    # Runs here (not GitHub Actions) because a real hit spends MadeOnSol
+    # budget via score_solana_mint, same reason Layer 1/8/2+9 live here.
+    l13 = _safe(poll_layer13_fomo_copytrade)
+    if isinstance(l13, dict) and l13.get("ok"):
+        print(f"[layer13] cycle done: {l13}")
+    elif isinstance(l13, dict):
+        print(f"[layer13] skipped: {l13.get('reason')}")
 
     print(f"\nMadeOnSol-only cycle done. {total_alerts} alert(s) delivered. "
           f"~{total_calls} MadeOnSol call(s) used.")

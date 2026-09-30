@@ -841,3 +841,93 @@ def get_caller_update_offset() -> Optional[int]:
 def set_caller_update_offset(offset: Optional[int]):
     if offset is not None:
         set_value(CALLER_UPDATE_OFFSET_KEY, offset)
+
+
+# --- Layer 13: Fomo copy-trading/thesis dashboard feed (Ali, Sept 30 2026
+# -- "alert should show in my dashboard not on telegram"). Same
+# append-only, age+count-capped, newest-first pattern as CALLER_SIGNALS_KEY
+# above, kept in its own key so a Layer 12 (Telegram caller) reader never
+# picks these up and vice versa. dashboard.py reads this directly --
+# nothing here sends a Telegram alert; see layers/layer13_fomo_copytrade.py's
+# module docstring for the full "corroborating signal, not a trigger" design.
+FOMO_SIGNALS_KEY = "fomo_signals"
+FOMO_SIGNAL_MAX_AGE_SECONDS = 48 * 3600
+FOMO_SIGNAL_MAX_ITEMS = 300
+
+FOMO_CANDIDATES_KEY = "fomo_new_trader_candidates"
+FOMO_CANDIDATE_MAX_AGE_SECONDS = 7 * 24 * 3600
+FOMO_CANDIDATE_MAX_ITEMS = 100
+
+FOMO_ALERTS_SINCE_KEY = "fomo_alerts_since_ts"
+
+
+def record_fomo_signal(kind: str, trader: str, tier: str, token_symbol: str,
+                        token_address: str, chain: str, detail: str,
+                        score: Optional[int] = None, band: Optional[str] = None,
+                        thesis_text: Optional[str] = None, thesis_link: Optional[str] = None,
+                        ts: Optional[float] = None):
+    """One dashboard-only Fomo signal: kind is "buy" or "thesis". Never
+    sent to Telegram -- Ali's explicit call (Sept 30 2026). score/band are
+    this coin's own Layer 0 structural score, run independently of the
+    Fomo signal itself (see layers/layer13_fomo_copytrade.py) -- None
+    means scoring hasn't completed or failed this cycle, not that the coin
+    scored zero; dashboard.py must render that distinction, not collapse
+    it to a number."""
+    ts = ts if ts is not None else time.time()
+    signals = get_value(FOMO_SIGNALS_KEY) or []
+    signals.append({
+        "kind": kind, "trader": trader, "tier": tier, "token_symbol": token_symbol,
+        "token_address": token_address, "chain": chain, "detail": detail,
+        "score": score, "band": band, "thesis_text": thesis_text, "thesis_link": thesis_link,
+        "ts": ts,
+    })
+    cutoff = ts - FOMO_SIGNAL_MAX_AGE_SECONDS
+    signals = [s for s in signals if s.get("ts", 0) >= cutoff][-FOMO_SIGNAL_MAX_ITEMS:]
+    set_value(FOMO_SIGNALS_KEY, signals)
+
+
+def get_fomo_signal_feed(limit: int = 100) -> list:
+    signals = get_value(FOMO_SIGNALS_KEY) or []
+    cutoff = time.time() - FOMO_SIGNAL_MAX_AGE_SECONDS
+    signals = [s for s in signals if s.get("ts", 0) >= cutoff]  # real-time re-filter, not just
+    return list(reversed(signals))[:limit]  # write-time trim -- see get_caller_signal's own pattern
+
+
+def record_fomo_candidate(handle: str, display_name: str, balance_usd: float,
+                           pnl_usd: Optional[float] = None, volume_usd: Optional[float] = None,
+                           ts: Optional[float] = None):
+    """A trader NOT on Ali's roster who cleared the $5k balance threshold
+    (Ali's locked number, Sept 30 2026) -- surfaced for Ali to approve
+    adding to the roster, never auto-added (roster.py's own docstring:
+    curation is Ali's judgment call, this codebase doesn't guess trust).
+    Deduped by handle -- a repeat sighting refreshes the existing entry's
+    numbers/ts rather than piling up duplicates."""
+    ts = ts if ts is not None else time.time()
+    candidates = get_value(FOMO_CANDIDATES_KEY) or []
+    candidates = [c for c in candidates if c.get("handle") != handle]
+    candidates.append({
+        "handle": handle, "display_name": display_name, "balance_usd": balance_usd,
+        "pnl_usd": pnl_usd, "volume_usd": volume_usd, "ts": ts,
+    })
+    cutoff = ts - FOMO_CANDIDATE_MAX_AGE_SECONDS
+    candidates = [c for c in candidates if c.get("ts", 0) >= cutoff][-FOMO_CANDIDATE_MAX_ITEMS:]
+    set_value(FOMO_CANDIDATES_KEY, candidates)
+
+
+def get_fomo_candidates(limit: int = 50) -> list:
+    candidates = get_value(FOMO_CANDIDATES_KEY) or []
+    cutoff = time.time() - FOMO_CANDIDATE_MAX_AGE_SECONDS
+    candidates = [c for c in candidates if c.get("ts", 0) >= cutoff]  # real-time re-filter
+    return list(reversed(candidates))[:limit]  # newest first
+
+
+def get_fomo_alerts_since() -> Optional[str]:
+    """ISO timestamp cursor for GET /v2/alerts?since= -- so a poll cycle
+    only asks fomoapi.io for events newer than the last one already
+    processed, same purpose as get_caller_update_offset above."""
+    return get_value(FOMO_ALERTS_SINCE_KEY)
+
+
+def set_fomo_alerts_since(iso_ts: Optional[str]):
+    if iso_ts:
+        set_value(FOMO_ALERTS_SINCE_KEY, iso_ts)

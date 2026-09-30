@@ -201,5 +201,15 @@ class Config:
     def layer12_ready(self) -> bool:
         return bool(self.telegram_caller_bot_token and self.telegram_caller_channel_ids())
 
+    def fomoapi_ready(self) -> bool:
+        """Layer 13 (Fomo copy-trading/thesis detection, Sept 30 2026) --
+        only needs the one key, unlike Layer 12's bot-token+channel-ids
+        pair, since fomoapi.io is a third-party REST API over the whole
+        Fomo dataset rather than a per-channel Telegram admin invite. See
+        layers/layer13_fomo_copytrade.py's module docstring for the full
+        picture (what this is, what it is not, and why auto-execution is
+        deliberately out of scope for this layer)."""
+        return bool(self.fomoapi_api_key)
+
 
 CONFIG = Config()
