@@ -710,6 +710,16 @@ this percentage to be statistically meaningful -- treat it as a directional
 smoke test, not a real credibility measurement, until the labeled list grows."
 
 ### A. Network-hiccup alternate/fallback solution -- TEST FIRST, before wiring in
+[UPDATE Sept 30 2026, later same day]: DONE. Fixed in e0a2dbd -- rpc_call()
+now catches ApiUnreachable per-endpoint inside the loop (same cooldown
+treatment as any other failure) instead of letting it bubble out and skip
+the other pool endpoints. No fresh live-Actions test needed first -- Ali
+already independently verified all 3 Solana RPC endpoints healthy Sept 23
+2026 (3 rounds), so this was purely a code gap in USING that
+already-verified pool, not an unverified endpoint question. 3 new
+regression tests added, full suite 521/522 (same pre-existing unrelated
+failure). Superseded the "TEST FIRST" plan below -- no live diagnostic
+step needed.
 - Root cause: `solana-rpc.publicnode.com` timing out (read timeout=15s) under
   GitHub Actions' shared runner IPs specifically -- same class of problem as
   MadeOnSol's IP-based rate limiting, not a bad endpoint in general.
