@@ -54,11 +54,12 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - [ ] **2.6 CLAUDE** — Grow the labeled backtest set from ~17 to 100+ real rugs / pump-dumps / moonshots and re-run weekly (current accuracy 54.5% on 11 tokens is too small to trust). DONE-WHEN: ≥100 labeled, result logged.
 
 - [x] **2.7 CLAUDE** — **Fast trade backtest** on the labeled coins (Ali: no time to wait for paper results): real Birdeye candles, entry at +15/30/60 min, stage + scalper exits, costs, pessimistic candle order; point-in-time entry filter and exit-parameter grid. `backtest_trades.py`, workflow "Trade backtest" — `a4aeb14`, `2bb20fc`. First result (no entry filter, 24 coins): 33–42% win rate.
-- [ ] **2.8 CLAUDE** — Backtest grid result: stop -55% / lock 1.5x / trail 50% = 75% wins (79% with entry filter, 15/19) vs 42% for the first settings. APPLIED as defaults (execution is off; paper ledger now runs them live). DONE-WHEN: 30+ closed paper trades confirm >= the backtest win rate; if not, re-tune.
+- [ ] **2.8 CLAUDE** — Backtest grid result: stop -55% / lock 1.5x / trail 50% = 75% wins (79% with entry filter, 15/19) vs 42% for the first settings. APPLIED as defaults (execution is off; paper ledger now runs them live). DONE-WHEN: 30+ closed paper trades confirm >= the backtest win rate; if not, re-tune. Scalper: stop 55% / TP 1.5x / 3 h / trail 35% = 71% wins over 72 simulated trades (was 32%) — applied `e653cd2`.
 
 ## Phase 3 — Entry quality (fewer, better buys)
 
 - [x] **3.0 CLAUDE** — **Solana + Robinhood Chain discovery** (Ali: "why are only BSC/Base coins on the Alerts tab?"): free GeckoTerminal trending + new pools (>=10 min, >=$5k liquidity), GoPlus Solana security, free-RPC holder concentration, pump.fun pre-graduation bands, Robinhood via GeckoTerminal id `robinhood` — zero MadeOnSol calls — `78d6c42`, `e33cd92`. Live once PR #2 merges.
+- [x] **3.0b CLAUDE** — **Layer 14 revival watch + momentum scalper** (Ali: "a coin can look like a rug at launch, then liquidity/traction comes -- track it and ride it like a scalper/sniper"): band C/D coins on every chain are re-checked every minute (fast watcher) or 10 min (GitHub) with one free DexScreener batch call per chain; liquidity added or momentum (1h +30%, buyers > sellers, volume) triggers a free re-score, alert, Stage 1 check and a compound-scalper MOMENTUM entry (band C allowed, hard red flags never) — `e2291f3`. Scalper retuned from the backtest: 71% wins vs 32% — `e653cd2`.
 - [ ] **3.1 CLAUDE** — **Confluence rule**: a real buy needs ≥2 independent layers agreeing (e.g. band A/B + tracked trader, or trusted deployer + momentum), not one signal alone. Tunable per signal from Phase 2 data. DONE-WHEN: enforced + tested.
 - [ ] **3.2 CLAUDE** — **Sell-ability check before every buy**: quote the SELL leg too (Jupiter/router) and refuse if it can't route, tax > 10%, or honeypot/freeze/Token-2022 transfer-hook risk (GoPlus + on-chain). DONE-WHEN: buys refuse unsellable tokens in tests.
 - [ ] **3.3 CLAUDE** — **Liquidity & slippage floor**: refuse if our size is > 2% of pool liquidity or quoted price impact > 3%. DONE-WHEN: enforced + tested.
@@ -81,7 +82,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 
 ## Phase 5 — Speed & reliability (don't lose trades to plumbing)
 
-- [ ] **5.1 CLAUDE** — **Fast position watcher on the PC**: checks open positions every 5–10 s for stop/target/rug exits (today: every 10 min on GitHub — far too slow for memecoins). DONE-WHEN: runs under Task Scheduler, heartbeat on dashboard.
+- [ ] **5.1 CLAUDE** — **Fast position watcher on the PC**: checks open positions every 5–10 s for stop/target/rug exits (today: every 10 min on GitHub — far too slow for memecoins). DONE-WHEN: runs under Task Scheduler, heartbeat on dashboard. — BUILT `f3b36f9` (worker_fast_watch.py, 20 s; registered by setup_pc.bat). Tick when the dashboard shows `fast-watch … local-pc`.
 - [ ] **5.2 CLAUDE** — **Solana priority fee** (and Jito tip option) on buys/sells so they land during congestion — currently none is set. DONE-WHEN: in swap path + tested.
 - [ ] **5.3 CLAUDE** — **Buy/sell retry with fresh quote** (1 retry, re-checked slippage) on transient failures. DONE-WHEN: tested.
 - [ ] **5.4 CLAUDE** — **Upstash usage check**: measure commands/day vs free-tier limit; batch/cache further if near it. DONE-WHEN: number logged, headroom ≥ 2x.
