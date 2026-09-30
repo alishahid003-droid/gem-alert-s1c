@@ -772,6 +772,11 @@ independently verified tokens, never guessed:
   present" shape, not just a collapse) -- next session should focus
   there specifically if more labeled data is wanted before a wide-scope
   validation run.
+  [UPDATE 2, Sept 30 2026]: closed the pump_dump gap too -- added
+  OMNINU and Muse (both verified, both distinct from an even larger
+  templated-clone cluster found in the same 6h-sort). SOLANA_LABELED
+  is now 9 moonshot / 9 rug / 9 pump_dump / 1 flat -- the 8-10/category
+  target is DONE for the first time this project. Task #31 complete.
 
 ### C. Closing the pump-dump gap specifically (0/2 this run, 0/4 last run)
 Pump-dumps are structurally different from rugs -- liquidity isn't drained
