@@ -74,7 +74,7 @@ bolted on afterward chain by chain.
 import time
 from typing import Optional
 
-from utils.http import post_json
+from utils.http import post_json, ApiUnreachable
 import state
 
 RPC_ENDPOINT_POOLS = {
@@ -128,10 +128,21 @@ def rpc_call(chain: str, method: str, params: list, timeout: int = 15) -> dict:
     or {"ok": False, "reason": ..., "tried": [...]} if the pool for this
     chain is exhausted, empty, or every endpoint returned a real
     (non-rate-limit) RPC error. Callers MUST treat a False result as "skip
-    this attempt, try again next cycle" -- this function deliberately never
-    raises for a reachable-but-failing endpoint, only lets genuine network
-    exceptions from utils.http bubble up the same way every other layer in
-    this repo already handles them.
+    this attempt, try again next cycle" -- this function never raises for a
+    reachable-but-failing endpoint.
+
+    UPDATED Sept 30 2026: a genuine network-level failure (utils.http's
+    ApiUnreachable -- DNS/timeout/connection-refused) on ONE endpoint is
+    now caught here and treated as a failover trigger too, same as an
+    ordinary bad response -- it no longer escapes this function. Previously
+    it did, and that's exactly what let a single flaky endpoint
+    (solana-rpc.publicnode.com timing out) crash a whole backtest run
+    instead of quietly failing over to one of the other confirmed-healthy
+    endpoints already sitting in this same pool. If EVERY endpoint in the
+    pool raises ApiUnreachable, this still returns the normal
+    {"ok": False, "reason": ...} shape, not an exception -- the "tried"
+    list's per-entry "error" field shows which ones were network failures
+    vs. ordinary bad responses.
     """
     pool = RPC_ENDPOINT_POOLS.get(chain, [])
     if not pool:
@@ -145,7 +156,25 @@ def rpc_call(chain: str, method: str, params: list, timeout: int = 15) -> dict:
         # up outright, since a cooldown is a guess, not a guarantee
         endpoints = list(pool)
     for url in endpoints:
-        resp = post_json(url, json=payload, timeout=timeout)
+        try:
+            resp = post_json(url, json=payload, timeout=timeout)
+        except ApiUnreachable as e:
+            # Real bug found Sept 30 2026: a genuine network-level failure
+            # (DNS/timeout/connection-refused) on ONE endpoint used to
+            # propagate straight out of rpc_call(), skipping the other two
+            # endpoints in this same pool entirely -- even though ALL THREE
+            # Solana endpoints were independently live-tested healthy by
+            # Ali himself (Sept 23 2026, see this module's own docstring).
+            # This is exactly what crashed backtest_point_in_time.py's
+            # whole run that day (solana-rpc.publicnode.com timing out) --
+            # the fallback pool existed the whole time but was never
+            # actually being used for this failure mode. Now: one
+            # endpoint's network failure just costs that one hop, same
+            # cooldown treatment as any other failure, and the loop moves
+            # on to the next confirmed-healthy endpoint.
+            _mark_failed(chain, url)
+            tried.append({"url": url, "status_code": None, "error": f"ApiUnreachable: {e}"})
+            continue
         tried.append({"url": url, "status_code": resp.get("status_code")})
         if not resp.get("ok"):
             _mark_failed(chain, url)

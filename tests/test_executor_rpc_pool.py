@@ -10,6 +10,7 @@ import pytest
 
 import state
 import executor.rpc_pool as rpc_pool
+from utils.http import ApiUnreachable
 
 
 @pytest.fixture(autouse=True)
@@ -124,3 +125,58 @@ def test_cooldown_is_independent_per_chain(monkeypatch):
     result = rpc_pool.rpc_call("bsc", "eth_blockNumber", [])  # bsc's endpoint 0 must be unaffected
     assert result["ok"] is True
     assert result["endpoint_used"] == bsc_pool[0]
+
+
+def test_apiunreachable_on_one_endpoint_fails_over_to_the_next_one(monkeypatch):
+    # Real bug found Sept 30 2026: a genuine network-level failure used to
+    # propagate straight out of rpc_call() instead of trying the rest of
+    # the pool. This is the regression test for that fix.
+    sol_pool = rpc_pool.RPC_ENDPOINT_POOLS["solana"]
+    good = {"ok": True, "status_code": 200, "json": {"result": "healthy"}}
+    calls = []
+
+    def _post_json(url, json=None, timeout=None):
+        calls.append(url)
+        if url == sol_pool[0]:
+            raise ApiUnreachable(f"POST {url} failed at network level: Read timed out.")
+        return good
+
+    monkeypatch.setattr(rpc_pool, "post_json", _post_json)
+    result = rpc_pool.rpc_call("solana", "getSlot", [])
+    assert result["ok"] is True
+    assert result["endpoint_used"] == sol_pool[1]
+    assert calls == [sol_pool[0], sol_pool[1]]
+
+
+def test_apiunreachable_on_every_endpoint_returns_ok_false_not_an_exception(monkeypatch):
+    sol_pool = rpc_pool.RPC_ENDPOINT_POOLS["solana"]
+
+    def _post_json(url, json=None, timeout=None):
+        raise ApiUnreachable(f"POST {url} failed at network level: Read timed out.")
+
+    monkeypatch.setattr(rpc_pool, "post_json", _post_json)
+    result = rpc_pool.rpc_call("solana", "getSlot", [])
+    assert result["ok"] is False
+    assert "reason" in result
+    assert len(result["tried"]) == len(sol_pool)
+    assert all("ApiUnreachable" in entry["error"] for entry in result["tried"])
+
+
+def test_apiunreachable_endpoint_is_put_on_cooldown_like_any_other_failure(monkeypatch):
+    sol_pool = rpc_pool.RPC_ENDPOINT_POOLS["solana"]
+    good = {"ok": True, "status_code": 200, "json": {"result": "healthy"}}
+    calls = []
+
+    def _post_json(url, json=None, timeout=None):
+        calls.append(url)
+        if url == sol_pool[0]:
+            raise ApiUnreachable(f"POST {url} failed at network level: Read timed out.")
+        return good
+
+    monkeypatch.setattr(rpc_pool, "post_json", _post_json)
+    rpc_pool.rpc_call("solana", "getSlot", [])  # trips endpoint 0 into cooldown
+    calls.clear()
+
+    result = rpc_pool.rpc_call("solana", "getSlot", [])
+    assert result["ok"] is True
+    assert sol_pool[0] not in calls
