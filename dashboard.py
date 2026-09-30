@@ -429,7 +429,7 @@ function render(data) {
   document.getElementById("scalper-tag").textContent =
     !s.started ? "not started" : (!s.enabled ? "disabled" : (s.tripped ? "tripped" : (s.session_expired ? "session expired" : "running")));
   if (!s.started) {
-    document.getElementById("scalper_detail").innerHTML = '<div class="empty">Pool not started -- executor.compound_scalper.init_pool() hasn\'t been called yet (deliberate manual step, see that module\'s docstring).</div>';
+    document.getElementById("scalper_detail").innerHTML = '<div class="empty">Pool not started -- executor.compound_scalper.init_pool() has not been called yet (deliberate manual step, see the docstring for that module).</div>';
   } else {
     const mult = s.multiple_of_seed != null ? s.multiple_of_seed.toFixed(2) + "x" : "-";
     const op = s.open_position;
