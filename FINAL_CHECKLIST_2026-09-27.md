@@ -630,3 +630,87 @@ no bugs eating budget silently, every API confirmed working. Real findings:
   both fixes are committed locally only as of this entry. MUST be pushed
   before tomorrow's run for either fix to actually take effect (GitHub
   Actions only reads the default branch's pushed HEAD).
+
+## Update -- Sept 30 2026, ~9:16 AM PKT (post Run #7 real result: network-hiccup fallback, wider token sample, pump-dump precision)
+
+Run #7 (commit bb9c743) completed clean, no crash. Real numbers: point-in-time
+settled-token hit rate jumped 30.8% -> 100% (8/8) and launch-window shape 100%
+(7/7) -- the BIRDEYE_API_KEY fix + band-A 2-signal gate working as intended.
+Categorized OVERALL moved 43.8% -> 54.5% (6/11), but 6 of the original 17
+labeled tokens were skipped this run on the same flaky RPC timeout the crash
+fix now catches-and-skips instead of dying on -- so this run's "n=11" is a
+smaller, different sample than last run's "n=16", not a clean comparison.
+Script's own printed caveat: "n=11 labeled tokens is too small a sample for
+this percentage to be statistically meaningful -- treat it as a directional
+smoke test, not a real credibility measurement, until the labeled list grows."
+
+### A. Network-hiccup alternate/fallback solution -- TEST FIRST, before wiring in
+- Root cause: `solana-rpc.publicnode.com` timing out (read timeout=15s) under
+  GitHub Actions' shared runner IPs specifically -- same class of problem as
+  MadeOnSol's IP-based rate limiting, not a bad endpoint in general.
+- Real fix already half-built and unused: `executor/rpc_pool.py`'s
+  `RPC_ENDPOINT_POOLS` already lists 2 more Solana fallback endpoints
+  (`api.mainnet-beta.solana.com`, `solana.leorpc.com`), but `rpc_call()`
+  lets `ApiUnreachable` bubble up immediately instead of trying the next
+  pool endpoint on a network-level failure -- so the fallback pool has
+  never actually been exercised, only ordinary API-error fallback has.
+- [ ] TEST FIRST: add a one-off diagnostic step (or a tiny standalone
+  workflow) that calls `getHealth`/`getSlot` against all 3 Solana pool
+  endpoints from INSIDE a real GitHub Actions run and logs status+latency
+  for each. Cannot be tested meaningfully from this session's own
+  container -- confirmed its network policy blocks all 3 Solana RPC hosts
+  outright (403 at the proxy level), and even if it didn't, the real
+  failure is tied to GitHub's runner IPs, not this container's.
+- [ ] ONLY if 1+ alternate endpoint tests clean from Actions: fix
+  `rpc_call()` to actually loop through `RPC_ENDPOINT_POOLS` on
+  `ApiUnreachable` too (not just ordinary API failures) -- turns "token
+  skipped" into "token still scored," growing effective sample size for
+  free, no new dependency.
+- [ ] If ALL 3 free endpoints prove flaky from Actions specifically, that's
+  the real signal to look at a free-tier paid RPC (Helius/Triton free tier
+  first) before any paid spend -- already flagged under Advanced Upgrades,
+  not moving there yet on a single run's evidence.
+
+### B. Widening the labeled token sample -- where the data comes from
+Same sourcing method already used and documented in backtest_categorized.py's
+own docstring (how SHROOM/USELESS COIN/MCAT/AROS were actually found) -- real,
+independently verified tokens, never guessed:
+- [ ] DexScreener (free, no auth): sort Solana pairs by 24h price-change to
+  surface rug/pump-dump candidates, with a liquidity floor to filter out
+  pairs that never had real trading. Every candidate gets re-checked minutes
+  to hours apart before being added, to rule out a stale/broken pool
+  snapshot (exactly how the SPCX false-positive was caught and discarded,
+  and how AROS/MCAT were confirmed real).
+- [ ] RugCheck.xyz's public, no-auth API as a faster second rug-sourcing
+  channel -- it already flags LP-lock/authority-retained status directly,
+  a better pre-filter than manually scanning price drops.
+- [ ] Birdeye (already integrated, free tier) to verify real launch-window
+  shape (pump held vs. collapse) for each pump-dump candidate specifically.
+- [ ] pump.fun's own public "graduated" coin list as a moonshot-candidate
+  source -- still needs the same independent real-outcome verification per
+  candidate, not taken at face value.
+- Target: at least 8-10 real, verified examples per category (moonshot /
+  rug / pump_dump) before treating the resulting % as a real credibility
+  number instead of a directional smoke test -- current n=5/4/2 is exactly
+  the gap the script itself is already flagging.
+
+### C. Closing the pump-dump gap specifically (0/2 this run, 0/4 last run)
+Pump-dumps are structurally different from rugs -- liquidity isn't drained
+(a rug's core tell), the token just gets bought up, peaks, and gets sold
+into by early wallets while still looking "healthy" on paper. Likely why
+they're slipping into band B alongside real moonshots:
+- [ ] Add a dedicated "post-peak decay without LP drain" signal, reusing
+  the drawdown-from-peak logic already built for the live post-alert
+  monitor (60%+ drop threshold) as a BACKTEST-time scoring input too, not
+  only a live post-alert check.
+- [ ] Weight bundler/sniper-wallet concentration (already fetched for the
+  band-A gate) specifically into pump-dump detection -- a pump-dump
+  commonly shows the same wallets buying early and selling into the peak,
+  a different fingerprint than a rug's single LP-drain event.
+- [ ] Consider an activity-decay signal: transaction rate falling off a
+  cliff after the peak (same category as the arXiv research already cited
+  -- legit tokens sustain ~299 tx/hr, rugs sit at ~0.08 tx/hr from the
+  start; a pump-dump likely shows a sharp rate COLLAPSE post-peak instead).
+- [ ] Once the sample is wider (item B above), re-run the categorized
+  backtest and look specifically at the per-token pump-dump breakdown for
+  a common pattern -- n=2 today is too small to see one.
