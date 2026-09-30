@@ -52,6 +52,7 @@ target is a number we measure against every week — not something assumed.
 | T7 | Alert replay run 1 (`36725405507`) | 14:03 UTC | INVALID: GeckoTerminal 429 read as "no pool" → fixed | alert-replay |
 | T8 | Alert replay run 2 (`36726979727`) | 14:32 UTC | **band B 4/5 wins (+58..+149%, all Base); band C 1/13** (−60..−66% rugs) → band C blocked from real money (incl. momentum) | alert-replay |
 | T9 | Alert replay run 4 (`36730347993`) | 14:50 UTC | not conclusive: the feed held only ~2 h, so 71/82 trades were still open → 7-day archive + ≥4 h filter + daily schedule added | alert-replay |
+| T11 | Live diagnostic (`36736431827`) after the PC restart | 15:24 UTC | all 4 runners fresh (fast-watch 2 min, new code); MadeOnSol 191/190 (resets 05:00 PKT); Fomo 0 credits. **Found 3 bugs, fixed:** (1) management tried to sell coins never bought (buy failed/execution off); (2) a 3,173x fake "gain" from an entry mcap in a different unit → entry sanity re-base (real + paper); (3) moonshot positions had no entry baseline, so their exits would never fire | diag-live |
 | T10 | Moonshot detector + runner exits | Sept 30 | 17 unit tests (gates, exit profile, handler, screen/alert/cooldown) | `tests/test_layer15_moonshot.py` |
 
 **Pending evidence (automatic, don't trigger by hand):**
@@ -179,3 +180,4 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - Sept 30 2026 12:37 UTC — 1.3 done (first PC heartbeat). Found: MadeOnSol 160/190 used by mid-day -> added 5.7.
 - Sept 30 2026 14:05–15:15 UTC — PR #7 (entry guards 3.1/3.3–3.6, retry 5.3, Telegram 5.5/5.6, copy-exit 4.5, Upstash 5.4), PR #8 (band B floor for momentum, from replay T8), PR #9 (moonshot Layer 15 + free runner; fixed: the 50% trail used to sell the moonbag), PR #10 (7-day replay archive + daily replay), PR #11 (`restart_fast_watch.bat`: a second copy had locked the log). All merged.
 - Sept 30 2026 20:15 PKT — PC pulled `bd86c0c`. Next: `git pull` + `restart_fast_watch.bat`; then 6.1 wallet, 6.2 key, 6.4 $2 test.
+- Sept 30 2026 20:30 PKT — PC pulled `882dd10`, `restart_fast_watch.bat` OK (one watcher). T11 diagnostic → 3 pre-live bugs fixed (see T11).

@@ -195,6 +195,17 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             continue
         pos["unpriced_cycles"] = 0
         pos.pop("unpriced_since", None)
+        # Same entry sanity check as real positions (position_state.
+        # sanity_rebase_entry): an entry >5x away from the first live read
+        # within 20 min is a data-source mismatch, not a trade -- otherwise it
+        # books fake 1000x wins (or fake -99% losses) into the win rate.
+        if not pos.get("entry_checked"):
+            pos["entry_checked"] = True
+            r = mcap / pos["entry_mcap"]
+            if now - pos["opened_ts"] <= 20 * 60 and (r > 5.0 or r < 0.2):
+                pos["entry_mcap_original"] = pos["entry_mcap"]
+                pos["entry_mcap"] = mcap
+                pos["peak_mcap"] = mcap
         pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
         if liq is not None and liq < DEAD_LIQUIDITY_USD:
             _sell(pos, pos["remaining"], mcap, "liquidity collapsed", now)
@@ -241,7 +252,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 book["runner:" + pid] = {
                     **{k: pos[k] for k in ("chain", "token", "signal", "band", "tags", "entry_mcap",
                                            "peak_mcap", "cost_pct", "guard")},
-                    "exit_profile": pos.get("exit_profile"),
+                    "exit_profile": pos.get("exit_profile"), "entry_checked": True,
                     "id": "runner:" + pid, "source": "runner", "strategy": "runner",
                     "usd": pos["usd"] * runner_frac, "opened_ts": now, "remaining": 1.0,
                     "breakeven_locked": True, "ladder_scale": 1.0, "rungs_fired": [], "proceeds_usd": 0.0,

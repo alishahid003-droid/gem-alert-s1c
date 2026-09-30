@@ -245,6 +245,11 @@ def _entry_mcap(pos: dict) -> Optional[float]:
         return stages["stage1"]["entry_mcap"]
     if "stage2" in stages and stages["stage2"].get("entry_mcap"):
         return stages["stage2"]["entry_mcap"]
+    # Any other entry path (e.g. Layer 15 "moonshot") -- without this its
+    # exits never fired (no baseline -> no multiple). Fixed Sept 30 2026.
+    for st in stages.values():
+        if st.get("entry_mcap"):
+            return st["entry_mcap"]
     return None
 
 
