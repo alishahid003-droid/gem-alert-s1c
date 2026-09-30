@@ -1084,3 +1084,49 @@ ACTION NEEDED FROM ALI: restart the local `python dashboard.py`
 process (it loaded PAGE_TEMPLATE into memory before this fix landed --
 editing the file on disk does not change an already-running process)
 and hard-refresh the browser tab.
+
+## Update -- Sept 30 2026, dashboard /api/data hang fixed (real root cause)
+
+Ali reported the dashboard still showing every section stuck on "loading..."
+after the earlier JS-syntax-error fix (04bbe4f) -- that fix was real and
+necessary but NOT the whole problem. Found and fixed a second, separate
+bug: `/api/data` itself was hanging server-side.
+
+**Root cause**: `position_state.list_open_positions()` and
+`list_closed_positions()` fetched every position record from Upstash with
+one `state.get_value()` call PER KEY, in a sequential loop. With dozens of
+positions accumulated from weeks of testing, one dashboard load meant
+dozens of sequential HTTP round trips to Upstash, each one subject to
+`utils/http.py`'s own retry/backoff stack (up to 3 attempts with
+exponential backoff, plus 429 retries capped at 30s wait) -- one slow or
+dropped call anywhere in that chain could stall the whole request, and
+dozens of them compounding easily reached the multi-minute hang Ali saw.
+
+**Fix** (commit `105ef63`):
+- `state.py`: new `get_values(keys)` using Upstash's `/pipeline` endpoint
+  -- fetches many keys in ONE HTTP call instead of one call per key.
+  Falls back to per-key calls if the pipeline call itself fails.
+- `executor/position_state.py`: both list functions now use the batched
+  fetch instead of the per-key loop.
+- `dashboard.py`: the per-open-position live-price lookup (one DexScreener
+  call each) now runs concurrently with a hard 10s per-call timeout
+  instead of sequentially with no ceiling. Also added timing `print()`s
+  around every section of `build_data()` -- if anything is ever slow
+  again, your own terminal (the one running `python dashboard.py`) will
+  show exactly which step and how long, instead of just silently hanging.
+
+**Verified live**: ran the actual fixed code against your real production
+Upstash state (not a mock) -- `/api/data` returned in 0.09 seconds with
+real data (readiness, modules, positions, Fomo signals). Terminal log:
+```
+[dashboard] build_data: readiness_report done at +0.03s
+... 
+[dashboard] build_data: TOTAL done at +0.09s
+```
+Full test suite: 571 passed (7 new tests added for this fix), 1
+pre-existing unrelated failure (a stale $50-wallet-size assertion vs your
+real current $7 balance -- not touched by this change).
+
+**What you need to do**: `git pull`, stop the currently-running dashboard
+(Ctrl+C in that terminal window), run `python dashboard.py` again, reload
+`http://localhost:8787`. It should now load instantly with real data.
