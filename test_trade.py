@@ -26,8 +26,42 @@ USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 WSOL = "So11111111111111111111111111111111111111112"
 
 
+try:                                  # on Ali's PC the key lives in .env
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+
+def sell_all(mint: str) -> int:
+    """Sells this wallet's ENTIRE balance of one SPL token back to SOL (e.g. a
+    leftover coin, to free SOL before the test). Prints Solscan links."""
+    import executor.swap_executor as sx
+    from executor.rpc_pool import rpc_call
+    pubkey = sx._solana_pubkey_from_private_key()
+    print(f"wallet {pubkey}")
+    r = rpc_call("solana", "getTokenAccountsByOwner", [pubkey, {"mint": mint}, {"encoding": "jsonParsed"}])
+    accts = ((r.get("result") or {}).get("value") or []) if r.get("ok") else []
+    amount = 0.0
+    for a in accts:
+        info = ((((a.get("account") or {}).get("data") or {}).get("parsed") or {}).get("info") or {})
+        amount += float(((info.get("tokenAmount") or {}).get("uiAmount")) or 0)
+    if amount <= 0:
+        print(f"FAIL: no balance of {mint} in this wallet ({r.get('reason') or 'nothing held'})")
+        return 1
+    print(f"selling {amount} tokens of {mint}")
+    res = sx.execute_sell("solana", mint, amount, reason="manual sell-all before test")
+    print(f"SELL: ok={res.ok} {res.reason}")
+    if res.tx_signature:
+        print(f"  https://solscan.io/tx/{res.tx_signature}")
+    if res.filled_usd is not None:
+        print(f"  received ~${res.filled_usd:.2f}")
+    return 0 if res.ok else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--sell-all", metavar="MINT", help="sell this wallet's whole balance of MINT, then stop")
     ap.add_argument("--token", default=USDC)
     ap.add_argument("--usd", type=float, default=2.0)
     ap.add_argument("--dry-run", action="store_true")
@@ -38,6 +72,11 @@ def main() -> int:
 
     if not args.dry_run:
         os.environ["EXECUTION_ENABLED"] = "true"   # this process only
+    if args.sell_all:
+        if not os.environ.get("EXECUTION_SOLANA_PRIVATE_KEY"):
+            print("FAIL: EXECUTION_SOLANA_PRIVATE_KEY is not set")
+            return 1
+        return sell_all(args.sell_all)
     from utils.http import get_json
     from config import CONFIG
     import executor.swap_executor as sx
