@@ -78,10 +78,44 @@ that reset, except step 0.
   before money was on the line, not after.
 
 ## 2. Live-verify the new signals (needs real poll cycles running)
-- [ ] Let the fixed poll-fast loop run for at least a few real 20-min
-  cycles and confirm `fetch_solana_top10_holder_pct` /
-  `fetch_solana_holder_count` are actually returning values (not silently
-  erroring) — check via logs or a direct state read, not assumption.
+- [x] PARTIALLY CONFIRMED Sept 30 2026, ~10:05 AM PKT: checked GitHub
+  Actions live, post-poll-fast-fix. Runs #153-173 (spanning ~6:40-9:20 AM
+  PKT) were ALL still hitting the OLD stuck-loop code and getting
+  cancelled by the concurrency queue -- a bigger backlog than the #146/
+  #174/#175 runs already logged above, confirming the bug's real impact
+  was worse than first estimated. Runs #176 and #177 (after the fix
+  fully landed and the backlog drained) completed SUCCESSFULLY in 1m39s
+  and 1m13s respectively -- matching the ~90-100s expected single-cycle
+  duration almost exactly, real live confirmation the fix works. #177's
+  job summary: `alerts_sent: 16`, `layer2b roster_size: 13`,
+  `madeonsol_calls: 0` (this particular cycle's alerts came from the
+  keyless paths -- stonkfun/Mobula-pulse/momentum-override -- not a
+  MadeOnSol-backed Solana deep-score, so it doesn't by itself confirm
+  fetch_solana_top10_holder_pct/fetch_solana_holder_count on THIS run).
+  REAL BLOCKER FOUND checking further: MadeOnSol-backed calls (the ONLY
+  path that actually runs score_solana_mint / fetch_solana_holder_count /
+  holder_growth_rate_per_hr) are DELIBERATELY never run on GitHub Actions
+  at all -- confirmed in both #177's (poll-fast) and #101's (poll-slow)
+  own job summaries: "[layer1] SKIPPED on GitHub Actions -- moved to
+  --poll-madeonsol" and "[layer2+9] SKIPPED on GitHub Actions -- moved to
+  --poll-madeonsol", `madeonsol_calls: 0` on both. This is intentional,
+  existing design (scheduler.py's run_poll_madeonsol(), meant to run via
+  Windows Task Scheduler on Ali's OWN PC, never GitHub's shared runner
+  IPs -- see scheduler.py line ~2036 and its own `/tr "cmd /c cd /d
+  C:\path\to\gem-alert-s1c_6 && python scheduler.py --poll-madeonsol"`
+  comment). So this signal literally CANNOT be live-verified from GitHub
+  Actions logs, ever, by design -- confirming it needs either (a) Ali's
+  own PC actually running that Task Scheduler job right now (tried
+  checking via this session's device_bash bridge -- `schtasks.exe` isn't
+  reachable from that sandboxed shell, command not found, so this
+  session genuinely cannot check whether it's set up or running), or (b)
+  a direct read of state.py's real Upstash holder_history data, which
+  needs Upstash credentials this session doesn't have. ASK ALI: is the
+  --poll-madeonsol Task Scheduler job actually running on your PC right
+  now? If not, the holder-growth/top10 signals are only real for
+  Mobula-pulse-scored tokens (Base/BSC/TON/ETH, keyless, DOES run on
+  GitHub Actions -- score_mobula_pulse_items) -- Solana/RHC's version of
+  these two signals needs that local job running to ever populate.
 - [ ] Confirm `holder_growth_rate_per_hr` starts producing a real non-None
   number after 2+ cycles on the same token (it needs history to compute a
   rate — first sighting of any token will show None, that's expected).
