@@ -119,6 +119,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 ---
 
 ### Change log
+- Sept 30 2026 — PR #2 merged (`62f3447`): win-rate engine, exit rules, MadeOnSol pacing, Solana/Robinhood discovery, trade backtest. PR #3 merged (`811fdfd`): Layer 14 revival + momentum scalper, 20 s fast watcher, backtested scalper settings, batched paper pricing. New loops verified to make zero MadeOnSol calls.
 - Sept 30 2026 — checklist created; Phase 0 filled from today's commits.
 - Sept 30 2026 — 1.1/1.2 done: PR #1 merged into main (`9053bd2`).
 - Sept 30 2026 12:24 UTC — live diagnostic on main: poll-fast + poll-slow running the new code (heartbeats 3-4 min old); the 2 Sept-24 orphan records auto-repaired (budget freed); first Auto-buy verdict recorded. NOT yet: no `poll-madeonsol` heartbeat (PC task is the old Sept 28 one, running pre-merge code -> 1.3/1.4 still open); `TOTAL_WALLET_USD` secret missing (1.5); fomoapi.io still 0 credits, governor backing off correctly (1.7).
