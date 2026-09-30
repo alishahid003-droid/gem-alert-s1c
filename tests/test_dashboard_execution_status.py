@@ -46,3 +46,14 @@ def test_confirmed_fill_takes_priority_over_a_different_stage_failing():
     }
     status, detail = dashboard._execution_status(pos)
     assert status == "real"
+
+
+def test_autobuy_text_variants():
+    import dashboard
+    assert dashboard._autobuy_text(None)["text"] == "-"
+    would = dashboard._autobuy_text({"fired": True, "position_usd": 11.25,
+                                     "buy_reason": "EXECUTION_ENABLED is not 'true' -- executor is inert by design"})
+    assert would["level"] == "ok" and "WOULD BUY $11.25" in would["text"]
+    assert dashboard._autobuy_text({"fired": True, "position_usd": 5, "buy_ok": True})["text"] == "BOUGHT $5.00"
+    no = dashboard._autobuy_text({"fired": False, "reason": "chain 'base' has no auto-buy path (alert only)"})
+    assert no["level"] == "no" and "base" in no["text"]

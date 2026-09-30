@@ -1130,3 +1130,54 @@ real current $7 balance -- not touched by this change).
 **What you need to do**: `git pull`, stop the currently-running dashboard
 (Ctrl+C in that terminal window), run `python dashboard.py` again, reload
 `http://localhost:8787`. It should now load instantly with real data.
+
+## Update -- Sept 30 2026, evening (live-diagnosed blockers fixed; branch claude/kind-mayer-1ydst8)
+
+New tool: `diag_live.py` + `.github/workflows/diag-live.yml` -- read-only
+check run by GitHub with the REAL Secrets (prints key presence only, never
+values). Run it any time from Actions -> "Live diagnostic (read-only)" ->
+Run workflow, or locally with `python diag_live.py`.
+
+REAL findings from it (not guesses):
+- [x] FIXED: two orphan BSC stage1 records from Sept 24 20:37 UTC
+  (0x31770e..., 0xd5860a...; no buy attempted, no fill, no tx) held the
+  ENTIRE $30 Stage 1 budget. Every band A/B alert since Sept 24 -- incl.
+  all 28 on the dashboard -- was rejected "budget exhausted". Nothing could
+  have executed even with keys and funds. `reconcile_orphan_stages` now
+  auto-repairs this every poll-fast cycle.
+- [x] FIXED: fomoapi.io `402 credits_exhausted` (0 of 250,000 left) -- the
+  first Layer 13 build drained the monthly bucket in hours. That is why
+  roster buys/theses showed zero. All fomoapi calls now go through a credit
+  governor (daily budget FOMOAPI_DAILY_CREDIT_BUDGET default 7,500; 6h
+  back-off on 402; profiles cached 6h, balances 24h; alerts every 30 min,
+  leaderboard daily). Stays paused until credits reset/top-up -- the
+  System tab shows remaining credits.
+- [x] FIXED: Stage 2 block sat in the wrong loop (never fired on real
+  convergence; large untracked buy crashed the cycle).
+- [x] FIXED: Base alerts created phantom positions (no Base buy path);
+  now refused as alert-only. Bankroll max_concurrent now enforced.
+  Score-only buys need >=50% real data behind the score.
+- [x] Layer 13 now also runs from GitHub poll-fast (was PC-only), with
+  shared gating so the two never double-spend; normalized name matching,
+  handles learned from the leaderboard, dedupe, paging to the cursor;
+  2+ roster traders on one coin feed Stage 2.
+- [x] New-trader candidates: free Solana-RPC insider check + auto-promote
+  (>= $5k, 7d AND 30d PnL positive, not insider). FOMO_AUTO_PROMOTE=false
+  turns it off.
+- [x] Base/BSC scoring: GoPlus holder_count -> holder growth, GeckoTerminal
+  txn counts -> activity-collapse override, daily-capped Birdeye launch
+  drawdown (BIRDEYE_EVM_DAILY_CAP, default 40) for would-be A/B tokens.
+- [x] Dashboard: Alerts tab "Auto-buy" column (WOULD BUY / NO + reason);
+  System tab Health panel (runner heartbeats, Fomo credits, promoted and
+  unmatched traders); banner warns on a stalled runner / no credits.
+- [x] PC scheduling: `install_windows_task.bat` registers "GemAlert
+  MadeOnSol" every 15 min (logs in logs\poll_madeonsol.log); the System
+  tab heartbeat proves whether it's actually running.
+
+STILL NEEDS ALI (can't be done from here):
+- [ ] Merge this branch into main (cron-job.org runs main).
+- [ ] Double-click install_windows_task.bat on the PC.
+- [ ] fomoapi.io credits: wait for the monthly reset or top up.
+- [ ] Go-live gate unchanged (section 4): add EXECUTION_SOLANA_PRIVATE_KEY,
+  do ONE small real Solana buy + sell, only then EXECUTION_ENABLED=true.
+  Remove the $3/$7 test overrides from the PC .env first.

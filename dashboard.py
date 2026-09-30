@@ -253,6 +253,49 @@ def _with_live_pnl(pos: dict) -> dict:
     return pos
 
 
+def _autobuy_text(v) -> dict:
+    """{"level": ok|no|na, "text": ...} for the Alerts tab's Auto-buy column."""
+    if not v:
+        return {"level": "na", "text": "-"}
+    if v.get("fired"):
+        amt = v.get("position_usd") or 0
+        if v.get("buy_ok"):
+            return {"level": "ok", "text": f"BOUGHT ${amt:.2f}"}
+        reason = v.get("buy_reason") or ""
+        if "EXECUTION_ENABLED" in reason or "wallet key configured" in reason:
+            return {"level": "ok", "text": f"WOULD BUY ${amt:.2f} (execution off / no key yet)"}
+        return {"level": "no", "text": f"fired ${amt:.2f}, buy failed: {reason[:80]}"}
+    return {"level": "no", "text": f"NO: {(v.get('reason') or '')[:90]}"}
+
+
+def _health() -> dict:
+    """System-tab health (Sept 30 2026): is each runner actually running,
+    and what's the real fomoapi.io credit situation."""
+    now = time.time()
+    beats = state.get_runner_heartbeats()
+    runners = []
+    for name, expect_min in (("poll-fast", 30), ("poll-slow", 60), ("poll-madeonsol", 45)):
+        b = beats.get(name) or {}
+        ts = b.get("ts")
+        age_min = (now - ts) / 60 if ts else None
+        runners.append({"name": name, "ago": _ago(ts) if ts else "never",
+                        "where": b.get("where") or "-", "note": b.get("note") or "",
+                        "stale": age_min is None or age_min > expect_min})
+    credits = state.get_fomo_credit_state()
+    backoff = credits.get("backoff_until", 0) > now
+    unmatched = state.get_fomo_unmatched_handles()
+    top_unmatched = sorted(unmatched.items(), key=lambda kv: -kv[1].get("count", 0))[:10]
+    return {
+        "runners": runners,
+        "fomo_credits_remaining": credits.get("remaining"),
+        "fomo_spent_today": credits.get("spent_today") if credits.get("day") == time.strftime("%Y-%m-%d", time.gmtime()) else 0,
+        "fomo_backoff": backoff,
+        "fomo_last_run": state.get_fomo_last_run(),
+        "fomo_unmatched": [{"handle": h, "count": v.get("count")} for h, v in top_unmatched],
+        "fomo_promoted": list(state.get_fomo_promoted().values()),
+    }
+
+
 def build_data() -> dict:
     """Sept 30 2026 (Ali, "same pathetic interface and bullshit stuff" --
     /api/data was hanging indefinitely): every section below is timed and
@@ -282,6 +325,12 @@ def build_data() -> dict:
         item["band"] = _extract_band(item.get("tags"))
         item["noise"] = item["category"] in BAND_FILTERABLE_CATEGORIES and item["band"] in ("C", "D")
         item["links"] = links.build_links(item.get("chain"), item.get("token_address"))
+    # Auto-buy verdict per alert (Sept 30 2026, Ali: "would these trades
+    # have been executed?") -- the real Stage 1/2 trigger decision recorded
+    # by scheduler._handle_scored, fetched in ONE batched read.
+    verdicts = state.get_autobuy_verdicts([i.get("token_address") for i in feed if i.get("band") in ("A", "B")])
+    for item in feed:
+        item["autobuy"] = _autobuy_text(verdicts.get(item.get("token_address")))
     _lap("alert_feed")
 
     open_raw = position_state.list_open_positions()
@@ -370,6 +419,7 @@ def build_data() -> dict:
         "compound_scalper": scalper_status,
         "fomo_signals": fomo_signals,
         "fomo_candidates": fomo_candidates,
+        "health": _health(),
     }
     _lap(f"TOTAL")
     return out
@@ -528,12 +578,16 @@ PAGE_TEMPLATE = """<!doctype html>
   </section>
 
   <section>
-    <h2>Fomo New-Trader Candidates <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(&gt;= $5k balance, not yet on your roster -- approve manually in roster.py)</span></h2>
+    <h2>Fomo New-Trader Candidates <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(&gt;= $5k balance, not on your roster -- auto-promoted when 7d AND 30d PnL are positive and not insider-flagged)</span></h2>
     <div id="fomo_candidates"></div>
   </section>
 </div>
 
 <div class="tabpanel" data-panel="system">
+  <section>
+    <h2>Health</h2>
+    <div id="health"></div>
+  </section>
   <section>
     <h2>Modules</h2>
     <div class="modules-summary" id="modules-summary"></div>
@@ -596,6 +650,14 @@ function renderAttentionAndHighlights(data) {
   if (items.some(i => i.level === "bad")) overallLevel = "bad";
   else if (items.some(i => i.level === "warn")) overallLevel = "warn";
 
+  const hh = data.health || {};
+  const staleRunners = (hh.runners || []).filter(r => r.stale).map(r => r.name);
+  if (staleRunners.length) {
+    items.push({ level: "warn", text: `Not running on schedule: ${esc(staleRunners.join(", "))} -- see System tab.` });
+  }
+  if (hh.fomo_backoff) {
+    items.push({ level: "warn", text: `Fomo API is out of credits -- roster buys/theses paused until credits reset or are topped up.` });
+  }
   const attnEl = document.getElementById("attention");
   if (!items.length) {
     attnEl.innerHTML = `<div class="attn attn-ok"><h3>All clear</h3>Nothing urgent right now -- no tripped circuits, no failed trades, no big moves on open positions.</div>`;
@@ -733,7 +795,7 @@ function render(data) {
 
   const fomoCandidates = data.fomo_candidates || [];
   document.getElementById("fomo_candidates").innerHTML = fomoCandidates.length ? `
-    <table><thead><tr><th>Seen</th><th>Handle</th><th>Display name</th><th>Balance</th><th>24h PnL</th><th>7d PnL</th><th>30d PnL</th><th>Volume</th></tr></thead>
+    <table><thead><tr><th>Seen</th><th>Handle</th><th>Display name</th><th>Balance</th><th>24h PnL</th><th>7d PnL</th><th>30d PnL</th><th>Volume</th><th>Insider?</th><th>Status</th></tr></thead>
     <tbody>${fomoCandidates.map(c => `<tr>
       <td>${esc(c.ago)}</td>
       <td class="mono">${esc(c.handle)}</td>
@@ -743,6 +805,8 @@ function render(data) {
       <td>${fmtUsd(c.pnl_7d)}</td>
       <td>${fmtUsd(c.pnl_30d)}</td>
       <td>${c.volume_usd != null ? '$' + Number(c.volume_usd).toLocaleString() : '-'}</td>
+      <td title="${esc(c.insider_detail)}">${c.insider === true ? '<span class="neg-pnl">INSIDER</span>' : c.insider === false ? 'no' : '<span class="na">unknown</span>'}</td>
+      <td title="${esc(c.promotion_reason)}">${c.promoted ? '<span class="pos-pnl">auto-promoted</span>' : '<span class="na">watching</span>'}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No new-trader candidates above $5k found yet.</div>';
 
   const allFeed = data.alert_feed || [];
@@ -753,17 +817,31 @@ function render(data) {
     : `Show all (incl. ${hiddenCount} band C/D noise)`;
   document.getElementById("noise-toggle").className = "toggle" + (showNoise ? " active" : "");
   document.getElementById("feed").innerHTML = shown.length ? `
-    <table><thead><tr><th>When</th><th>Category</th><th>Band</th><th>Token</th><th>Headline</th><th>Tags</th><th>Links</th></tr></thead>
+    <table><thead><tr><th>When</th><th>Category</th><th>Band</th><th>Token</th><th>Headline</th><th>Auto-buy</th><th>Tags</th><th>Links</th></tr></thead>
     <tbody>${shown.map(a => `<tr>
       <td title="${esc(a.ts_fmt)}">${esc(a.ago)}</td>
       <td class="cat-${esc(a.category)}">${esc(a.category)}</td>
       <td class="${a.band ? 'band-' + esc(a.band) : ''}">${esc(a.band || '-')}</td>
       <td>${esc(a.token_symbol)}</td>
       <td>${esc(a.headline)}</td>
+      <td class="${a.autobuy && a.autobuy.level === 'ok' ? 'pos-pnl' : 'na'}">${esc(a.autobuy ? a.autobuy.text : '-')}</td>
       <td>${Object.entries(a.tags || {}).map(([k,v]) => `<span class="tag">${esc(k)}: ${esc(v)}</span>`).join("")}</td>
       <td>${Object.entries(a.links || {}).map(([label,url]) => `<a class="linkbtn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" ")}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No alerts to show (try the toggle above if you want to see filtered noise too).</div>';
   document.getElementById("noise-toggle").onclick = () => { showNoise = !showNoise; render(window.__lastData); };
+
+  const h = data.health || {};
+  document.getElementById("health").innerHTML = `
+    <table><thead><tr><th>Runner</th><th>Last cycle</th><th>Where</th><th>Note</th></tr></thead>
+    <tbody>${(h.runners || []).map(r => `<tr>
+      <td>${esc(r.name)}</td>
+      <td class="${r.stale ? 'neg-pnl' : 'pos-pnl'}">${esc(r.ago)}${r.stale ? ' (not running on schedule)' : ''}</td>
+      <td>${esc(r.where)}</td><td>${esc(r.note)}</td></tr>`).join("")}</tbody></table>
+    <p>Fomo API credits remaining: <strong>${h.fomo_credits_remaining == null ? 'unknown' : Number(h.fomo_credits_remaining).toLocaleString()}</strong>
+      &middot; spent today: ${Number(h.fomo_spent_today || 0).toLocaleString()}
+      ${h.fomo_backoff ? ' &middot; <span class="neg-pnl">OUT OF CREDITS -- paused, retrying every 6h</span>' : ''}</p>
+    <p>Auto-promoted traders: ${(h.fomo_promoted || []).map(p => esc(p.display_name)).join(", ") || 'none yet'}</p>
+    <p>Most active Fomo traders NOT on your roster: ${(h.fomo_unmatched || []).map(u => esc(u.handle) + ' (' + u.count + ')').join(", ") || 'none recorded yet'}</p>`;
 
   const mods = data.modules || [];
   document.getElementById("modules-summary").innerHTML = `
