@@ -1529,6 +1529,26 @@ def flatten_geckoterminal_pools(gt_json) -> list:
     return out
 
 
+def goplus_top10_pct(data: dict) -> Optional[float]:
+    """Top-10 holder share from GoPlus's own `holders` list (Sept 30 2026:
+    the free Solana RPC lookup fails from GitHub's runners, which left every
+    Solana coin short of the 50% real-data buy gate). GoPlus reports percent
+    as a 0-1 fraction; a 0-100 total is converted; anything else stays
+    unknown rather than guessed."""
+    holders = data.get("holders") if isinstance(data, dict) else None
+    if not isinstance(holders, list) or not holders:
+        return None
+    try:
+        total = sum(float(h.get("percent", 0) or 0) for h in holders[:10])
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if 0 < total <= 1.0:
+        return total
+    if 1.0 < total <= 100.0:
+        return total / 100.0
+    return None
+
+
 # Live finding (Sept 30 2026 diagnostic): from GitHub's runners the free
 # public Solana RPC often times out on getTokenLargestAccounts (~40 s per
 # coin), so the Solana scan scored only 2 of 4 candidates inside its time
@@ -1583,7 +1603,9 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
             mint_revoked = parsed["mint_authority_revoked"]
             freeze_revoked = parsed["freeze_authority_revoked"]
             lp_locked = parsed["lp_locked"]
-        top10_pct = _gt_solana_top10_fast(address)
+        top10_pct = goplus_top10_pct((gp.get("data") or {}) if gp.get("ok") else {})
+        if top10_pct is None:
+            top10_pct = _gt_solana_top10_fast(address)
         is_pregrad = "pump" in str(item.get("dex_id") or "").lower()
         return RawSignals(
             top10_holder_pct=top10_pct,
