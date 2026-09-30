@@ -109,7 +109,22 @@ def _local_save_all(data: dict):
         json.dump(data, f)
 
 
+# Checklist 5.4 (Sept 30 2026): per-process count of state commands, so each
+# runner can report its real Upstash usage rate in its heartbeat note.
+COMMAND_COUNTER = {"n": 0, "since": time.time()}
+
+
+def _count(n: int = 1):
+    COMMAND_COUNTER["n"] += n
+
+
+def commands_per_minute() -> float:
+    mins = max(1e-6, (time.time() - COMMAND_COUNTER["since"]) / 60.0)
+    return COMMAND_COUNTER["n"] / mins
+
+
 def get_value(key: str):
+    _count()
     if backend() == "upstash":
         raw = _upstash_get_raw(key)
         if raw is None:
@@ -122,6 +137,7 @@ def get_value(key: str):
 
 
 def get_values(keys: List[str]) -> dict:
+    _count()
     """Batch version of get_value() -- returns {key: decoded_value_or_None}.
     Uses one pipelined Upstash call instead of len(keys) separate ones (see
     _upstash_get_many_raw's docstring). Local-file backend already has
@@ -144,6 +160,7 @@ def get_values(keys: List[str]) -> dict:
 
 
 def set_value(key: str, value) -> bool:
+    _count()
     encoded = json.dumps(value)
     if backend() == "upstash":
         return _upstash_set_raw(key, encoded)

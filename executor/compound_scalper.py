@@ -226,8 +226,15 @@ SOLANA_SELL_SLIPPAGE = 0.015   # matches swap_executor.py's Jupiter sell quote, 
 # Practical effect: BSC/RHC will rarely clear max_round_trip_cost_pct in
 # this mode until real fill data replaces this estimate -- an honest
 # consequence of no live data, not a bug to work around.
-BSC_RHC_BUY_SLIPPAGE = 0.20
-BSC_RHC_SELL_SLIPPAGE = 0.25
+# Sept 30 2026: these were set to the swap TOLERANCE ceilings (20%/25%),
+# which made every BSC/RHC round trip "cost" ~45% vs ~5% on Solana -- that
+# skewed paper-ledger and backtest P&L and blocked every BSC scalp. Expected
+# slippage is now 2x Solana's (thinner pools), still conservative; the
+# on-chain tolerance ceilings in swap_executor.py are unchanged, and pool
+# size is priced in separately by _liquidity_impact_penalty. Replace with
+# measured values once real fills exist (the test trade logs real cost).
+BSC_RHC_BUY_SLIPPAGE = 0.02
+BSC_RHC_SELL_SLIPPAGE = 0.03
 
 
 def _liquidity_impact_penalty(position_usd: float, liquidity_usd: Optional[float]) -> float:

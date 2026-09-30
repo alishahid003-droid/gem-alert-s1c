@@ -42,9 +42,13 @@ def test_unknown_liquidity_penalized_not_treated_as_zero():
     assert unknown > known_deep
 
 
-def test_bsc_cost_uses_wide_conservative_ceiling():
-    cost = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=500_000)
-    assert cost > 0.40  # deliberately conservative -- see module docstring
+def test_bsc_cost_is_expected_slippage_not_tolerance_ceiling():
+    # Changed Sept 30 2026: expected cost, not the 20%/25% swap tolerance.
+    deep = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=500_000)
+    sol = compound_scalper.estimate_round_trip_cost_pct("solana", 20.0, liquidity_usd=500_000)
+    assert 0.04 < deep < 0.08 and deep > sol          # still more conservative than Solana
+    thin = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=100)
+    assert thin > 0.15                                 # thin pools still priced in
 
 
 # --- entry_gate -------------------------------------------------------------

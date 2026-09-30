@@ -507,6 +507,14 @@ def _alert(alert: Alert, layer: str) -> dict:
     return send_res
 
 
+def _entry_ctx(scored: dict) -> dict:
+    """What the entry guards (executor/entry_guards.py) need, from data the
+    scorer already fetched -- no extra calls."""
+    raw = scored.get("raw") or {}
+    return {"liquidity_usd": raw.get("liquidity_usd"), "change_m5": raw.get("change_m5"),
+            "change_h1": raw.get("change_h1")}
+
+
 def _hard_fail(sr) -> bool:
     """Structural red flags no later momentum can fix (mint/freeze authority
     still live, honeypot/blacklist) -- never watched for a revival."""
@@ -596,6 +604,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
                 convergence_count=0, entry_mcap=mc,
                 signal_coverage=getattr(sr, "signal_coverage", None),
                 liquidity_usd=(scored.get("raw") or {}).get("liquidity_usd"),
+                entry_ctx=_entry_ctx(scored),
             )
         # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
         # 2026, Ali: "would these trades have been executed?") -- the real
@@ -616,6 +625,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         liq_usd = (scored.get("raw") or {}).get("liquidity_usd")
         scalp = handle_compound_scalper_candidate(
             chain, mint, score_band=sr.band, entry_mcap=mc, liquidity_usd=liq_usd,
+            entry_ctx=_entry_ctx(scored),
         )
         if scalp["fired"]:
             print(f"[compound-scalper:{chain}] SCALP OPENED {mint[:8]} -- "
@@ -974,7 +984,7 @@ def _run_revival_watch_cycle(board) -> dict:
             if momentum and not _hard_fail(sr):
                 scalp = handle_compound_scalper_candidate(chain, w["token"], score_band=sr.band,
                                                           entry_mcap=mc, liquidity_usd=m.get("liquidity_usd"),
-                                                          momentum=True)
+                                                          momentum=True, entry_ctx=_entry_ctx(scored))
                 if scalp.get("fired"):
                     print(f"[compound-scalper:{chain}] MOMENTUM SCALP {w['token'][:8]} ${scalp['position_usd']:.2f}")
     if checked:
@@ -1329,6 +1339,14 @@ def poll_layer13_fomo_copytrade() -> dict:
                 if stage2["fired"] and _stats():
                     _stats().note_execution(2, ev["chain"], ev["mint"], stage2["position_usd"],
                                             stage2["conviction_score"])
+            # Checklist 4.5: the traders we copied sold -> we sell.
+            if detected.get("roster_sells"):
+                from executor import copy_exit
+                mirrored = _safe(copy_exit.mirror_sells, detected["roster_sells"]) or []
+                out["copy_exits"] = len(mirrored) if isinstance(mirrored, list) else 0
+                for m in (mirrored if isinstance(mirrored, list) else []):
+                    print(f"[layer13] copy-exit {m['mint'][:8]} [{m['chain']}] after {m['trader']} sold: "
+                          f"attempted={m['sell_attempted']} ok={m.get('ok')} ({m.get('reason')})")
     else:
         out["alerts_skipped"] = "polled recently by another runner/cycle"
 
@@ -1981,7 +1999,14 @@ def run_poll_fast():
     l13 = _safe(poll_layer13_fomo_copytrade)
     if isinstance(l13, dict) and not l13.get("ok"):
         print(f"[layer13] {l13.get('reason')}")
-    _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(), f"alerts={alerts_sent}")
+    _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(),
+          f"alerts={alerts_sent} state_cmds={state.COMMAND_COUNTER['n']}")
+    # Checklist 5.5 / 5.6: stalled-runner alerts + once-a-day Telegram summary.
+    from executor import trade_ops
+    stalled = _safe(trade_ops.check_stalled_runners)
+    if stalled:
+        print(f"[ops] stalled runners: {stalled}")
+    _safe(trade_ops.maybe_send_daily_summary)
     if _stats():
         _print_cycle_summary(_stats())
 
@@ -2316,7 +2341,8 @@ def run_poll_slow():
             _f.write(f"\n### Slow-cycle result\n- alerts_sent: {alerts_sent}\n"
                      f"- madeonsol_calls: {madeonsol_calls}\n")
 
-    _safe(state.record_runner_heartbeat, "poll-slow", _runner_where(), f"alerts={alerts_sent}")
+    _safe(state.record_runner_heartbeat, "poll-slow", _runner_where(),
+          f"alerts={alerts_sent} state_cmds={state.COMMAND_COUNTER['n']}")
     if _stats():
         _print_cycle_summary(_stats())
 
@@ -2448,7 +2474,7 @@ def run_poll_madeonsol():
           f"~{total_calls} MadeOnSol call(s) used.")
 
     _safe(state.record_runner_heartbeat, "poll-madeonsol", _runner_where(),
-          f"alerts={total_alerts} madeonsol_calls={total_calls}")
+          f"alerts={total_alerts} madeonsol_calls={total_calls} state_cmds={state.COMMAND_COUNTER['n']}")
     if _stats():
         _print_cycle_summary(_stats())
 

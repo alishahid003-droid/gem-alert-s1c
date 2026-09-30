@@ -962,7 +962,7 @@ if ("Notification" in window && Notification.permission !== "granted" && Notific
   __notifyReady = true;
 }
 poll();
-setInterval(poll, 10000);
+setInterval(poll, 30000);  // 30 s (was 10 s): each refresh costs ~20 Upstash commands (checklist 5.4)
 </script>
 </body></html>
 """
@@ -981,7 +981,7 @@ setInterval(poll, 10000);
 # still gets new data every real poll cycle.
 _last_data_cache = {"data": None, "built_at": 0.0}
 _last_data_lock = threading.Lock()
-_DATA_CACHE_TTL_SECONDS = 8.0
+_DATA_CACHE_TTL_SECONDS = 25.0
 
 
 def _build_data_cached() -> dict:
