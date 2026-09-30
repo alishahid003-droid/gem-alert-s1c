@@ -83,6 +83,10 @@ def section_heartbeats():
     last13 = state.get_fomo_last_run()
     print(f"  layer13 last run: {_ago((last13 or {}).get('ts'))}  {last13 or ''}")
     print(f"  fomo alerts cursor: {state.get_fomo_alerts_since()}")
+    used = state.madeonsol_calls_today()
+    print(f"  MadeOnSol calls today (UTC day): {used} used, "
+          f"{state.madeonsol_budget_remaining()} left of {state.MADEONSOL_DAILY_BUDGET} "
+          f"(resets 00:00 UTC = 5:00 AM PKT)")
 
 
 def _fomo(path, params=None):
