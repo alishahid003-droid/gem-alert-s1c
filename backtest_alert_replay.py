@@ -47,12 +47,52 @@ def _band(item):
     return None
 
 
+_GT_ERRORS = defaultdict(int)
+
+
+def _gt_get(url, params):
+    """GeckoTerminal GET with pacing and a long back-off on 429 (the first
+    replay run lost 91 of 120 coins to rate-limit replies read as 'no pool')."""
+    r = {"ok": False}
+    for attempt in range(4):
+        try:
+            r = get_json(url, params=params)
+        except Exception as e:                       # network-level failure
+            _GT_ERRORS[type(e).__name__] += 1
+            time.sleep(GT_PAUSE_SECONDS)
+            continue
+        time.sleep(GT_PAUSE_SECONDS)
+        if r.get("ok"):
+            return r
+        status = r.get("status_code") or r.get("status")
+        _GT_ERRORS[str(status)] += 1
+        if str(status) != "429":
+            return r
+        time.sleep(20 * (attempt + 1))
+    return r
+
+
+def top_pools_dexscreener(chain, tokens):
+    """{token: (pool_address, liquidity_usd)} from ONE DexScreener batch call
+    per 30 tokens -- instead of one GeckoTerminal call per coin."""
+    from layers.layer14_revival import fetch_dexscreener_batch
+    out = {}
+    try:
+        found = fetch_dexscreener_batch(chain, tokens)
+    except Exception as e:
+        print(f"DexScreener batch failed for {chain}: {e}")
+        found = {}
+    for tok, pair in found.items():
+        if pair.get("pairAddress"):
+            out[tok] = (pair["pairAddress"], float((pair.get("liquidity") or {}).get("usd") or 0))
+    return out
+
+
 def top_pool(chain, token):
     net = GT_NET.get(chain)
     if not net:
         return None, None
-    r = get_json(f"{CONFIG.geckoterminal_base_url}/networks/{net}/tokens/{token}/pools", params={"page": 1})
-    time.sleep(GT_PAUSE_SECONDS)
+    r = _gt_get(f"{CONFIG.geckoterminal_base_url}/networks/{net}/tokens/{token}/pools", {"page": 1})
     data = (r.get("json") or {}).get("data") if r.get("ok") else None
     if not data:
         return None, None
@@ -62,9 +102,8 @@ def top_pool(chain, token):
 
 def candles_since(chain, pool, since_ts):
     net = GT_NET[chain]
-    r = get_json(f"{CONFIG.geckoterminal_base_url}/networks/{net}/pools/{pool}/ohlcv/minute",
-                 params={"aggregate": 5, "limit": 1000, "currency": "usd"})
-    time.sleep(GT_PAUSE_SECONDS)
+    r = _gt_get(f"{CONFIG.geckoterminal_base_url}/networks/{net}/pools/{pool}/ohlcv/minute",
+                {"aggregate": 5, "limit": 1000, "currency": "usd"})
     rows = (((r.get("json") or {}).get("data") or {}).get("attributes") or {}).get("ohlcv_list") if r.get("ok") else None
     if not rows:
         return []
@@ -101,18 +140,28 @@ def main():
     band_counts = {b: sum(1 for a in alerts if _band(a) == b) for b in "ABCD"}
     print(f"Alert replay: {len(alerts)} unique alerted coins from the live feed (bands {band_counts})\n")
 
+    pools = {}
+    for ch in GT_NET:
+        toks = [a["token_address"] for a in alerts if a["chain"] == ch]
+        if toks:
+            pools.update(top_pools_dexscreener(ch, toks))
+    print(f"DexScreener found pools for {len(pools)}/{len(alerts)} coins\n")
+
     results, skipped = [], defaultdict(int)
     for a in alerts:
         chain, tok, band = a["chain"], a["token_address"], _band(a)
-        pool, liq = top_pool(chain, tok)
+        pool, liq = pools.get(tok) or top_pool(chain, tok)
         if not pool:
-            skipped["no pool on GeckoTerminal"] += 1
+            skipped["no pool (DexScreener + GeckoTerminal)"] += 1
+            print(f"  {chain:15s} {tok[:10]} skipped: no pool")
             continue
         entry_ts = int(a["ts"]) + ENTRY_DELAY_MIN * 60
         cs = candles_since(chain, pool, entry_ts)
         idx = next((i for i, c in enumerate(cs) if c["unixTime"] >= entry_ts), None)
         if idx is None or len(cs) - idx < 3:
             skipped["not enough candles after alert"] += 1
+            print(f"  {chain:15s} {tok[:10]} skipped: {len(cs)} candles since alert "
+                  f"({(time.time() - a['ts']) / 60:.0f} min ago)")
             continue
         cost = estimate_round_trip_cost_pct(chain, POSITION_USD, liq)
         v = verdicts.get(tok) or {}
@@ -146,6 +195,7 @@ def main():
         print(f"         exits: {dict(exits)}")
         print("-" * 90)
     open_end = sum(1 for r in results if r["how"].startswith("still_open"))
+    print(f"GeckoTerminal non-OK replies by status: {dict(_GT_ERRORS)}")
     print(f"skipped: {dict(skipped)}; trades still open at data end (marked to last candle): {open_end}")
     print("Limits: last-24h live alerts only; open trades marked to market; entry = alert time + "
           f"{ENTRY_DELAY_MIN} min.")
