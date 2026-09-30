@@ -14,6 +14,9 @@ T0 = 1_790_700_000.0
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "s.json"))
+    # mechanics tests pin the rule values; defaults are tested separately
+    monkeypatch.setenv("STOP_LOSS_PCT", "0.25")
+    monkeypatch.setenv("TRAIL_GIVEBACK_PCT", "0.35")
     yield
 
 
@@ -105,3 +108,12 @@ def test_defensive_sell_sells_only_remaining(monkeypatch):
                         sold.append(amount_tokens) or ExecutionResult(True, "ok", filled_usd=1.0))
     defensive_sell.check_and_defend("solana", "M", None, None)
     assert sold == [pytest.approx(650.0)]
+
+
+def test_defaults_are_the_backtested_settings(monkeypatch):
+    for k in ("STOP_LOSS_PCT", "TRAIL_GIVEBACK_PCT", "BREAKEVEN_TRIGGER_MULT"):
+        monkeypatch.delenv(k, raising=False)
+    assert er.stop_loss_pct() == 0.55 and er.trail_giveback_pct() == 0.50
+    assert er.breakeven_trigger_mult() == 1.5
+    assert ev(0.60).action == "hold"          # a -40% dip no longer sells
+    assert ev(0.44).exit_type == "stop_loss"

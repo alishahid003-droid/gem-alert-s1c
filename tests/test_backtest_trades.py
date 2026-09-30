@@ -1,5 +1,13 @@
 """Sanity checks for backtest_trades' candle simulators (no network)."""
+import pytest
+
 import backtest_trades as bt
+
+
+@pytest.fixture(autouse=True)
+def _pin_rules(monkeypatch):
+    monkeypatch.setenv("STOP_LOSS_PCT", "0.25")
+    monkeypatch.setenv("TRAIL_GIVEBACK_PCT", "0.35")
 
 
 def mk(prices, step=300):

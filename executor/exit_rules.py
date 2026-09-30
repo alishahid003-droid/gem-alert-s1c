@@ -42,10 +42,16 @@ def _f(name: str, default: float) -> float:
         return default
 
 
-def stop_loss_pct() -> float:            return _f("STOP_LOSS_PCT", 0.25)
+# Defaults from backtest_trades.py's grid on the 24 labeled coins (Sept 30
+# 2026): stop -55% / lock 1.5x / trail 50% scored 75% wins (79% with the
+# entry filter at +15 min) vs 42% for the first -25% / 35% settings --
+# memecoins routinely dip 30-50% before running, and the tight stop sold
+# those dips. 24 coins overfit easily: the paper ledger runs these same
+# numbers live and is the real verdict (checklist 2.8).
+def stop_loss_pct() -> float:            return _f("STOP_LOSS_PCT", 0.55)
 def breakeven_trigger_mult() -> float:   return _f("BREAKEVEN_TRIGGER_MULT", 1.5)
 def trail_arm_mult() -> float:           return _f("TRAIL_ARM_MULT", 2.0)
-def trail_giveback_pct() -> float:       return _f("TRAIL_GIVEBACK_PCT", 0.35)
+def trail_giveback_pct() -> float:       return _f("TRAIL_GIVEBACK_PCT", 0.50)
 def time_stop_minutes() -> float:        return _f("TIME_STOP_MINUTES", 90.0)
 def time_stop_min_mult() -> float:       return _f("TIME_STOP_MIN_MULT", 1.2)
 

@@ -1529,6 +1529,31 @@ def flatten_geckoterminal_pools(gt_json) -> list:
     return out
 
 
+# Live finding (Sept 30 2026 diagnostic): from GitHub's runners the free
+# public Solana RPC often times out on getTokenLargestAccounts (~40 s per
+# coin), so the Solana scan scored only 2 of 4 candidates inside its time
+# budget. One slow/failed lookup switches the RPC holder check off for the
+# next 10 minutes -- the other signals (GoPlus, liquidity, activity,
+# Birdeye) still score every candidate.
+_SOL_TOP10_SLOW_SECONDS = 8.0
+_SOL_TOP10_COOLDOWN_SECONDS = 600
+_sol_top10_disabled_until = 0.0
+
+
+def _gt_solana_top10_fast(mint: str) -> Optional[float]:
+    global _sol_top10_disabled_until
+    if time.time() < _sol_top10_disabled_until:
+        return None
+    t0 = time.time()
+    try:
+        pct = fetch_solana_top10_holder_pct(mint)
+    except Exception:
+        pct = None
+    if pct is None or time.time() - t0 > _SOL_TOP10_SLOW_SECONDS:
+        _sol_top10_disabled_until = time.time() + _SOL_TOP10_COOLDOWN_SECONDS
+    return pct
+
+
 def signals_from_geckoterminal_pool(item: dict, chain: str,
                                      holder_growth_rate_per_hr: Optional[float] = None,
                                      price_drawdown_from_peak_pct: Optional[float] = None,
@@ -1558,7 +1583,7 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
             mint_revoked = parsed["mint_authority_revoked"]
             freeze_revoked = parsed["freeze_authority_revoked"]
             lp_locked = parsed["lp_locked"]
-        top10_pct = fetch_solana_top10_holder_pct(address)
+        top10_pct = _gt_solana_top10_fast(address)
         is_pregrad = "pump" in str(item.get("dex_id") or "").lower()
         return RawSignals(
             top10_holder_pct=top10_pct,

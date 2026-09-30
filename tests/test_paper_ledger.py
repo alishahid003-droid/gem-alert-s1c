@@ -11,6 +11,9 @@ T0 = 1_790_700_000.0
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "s.json"))
+    # mechanics tests pin the rule values; defaults are tested separately
+    monkeypatch.setenv("STOP_LOSS_PCT", "0.25")
+    monkeypatch.setenv("TRAIL_GIVEBACK_PCT", "0.35")
     monkeypatch.setenv("EXECUTION_ENABLED", "false")
     yield
 
