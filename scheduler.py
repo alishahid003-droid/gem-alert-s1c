@@ -2106,7 +2106,7 @@ if __name__ == "__main__":
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--poll", action="store_true", help="fast + slow in one process (local/manual only)")
     parser.add_argument("--seed-pumpfun-wallets", action="store_true", help="one-off: writes PUMPFUN_MANUAL_SEED_BATCHES into the live roster")
-    parser.add_argument("--poll-fast", action="store_true", help="discovery only, looped every ~20min internally -- runs on the fast cron (see run_poll_fast_loop)")
+    parser.add_argument("--poll-fast", action="store_true", help="LEGACY/manual-only: discovery looped every ~20min internally (run_poll_fast_loop), from before cron-job.org existed. Do NOT use this in poll-fast.yml -- it fights cron-job.org's own 10-min re-dispatch for the concurrency slot (real bug, Sept 30 2026). Use --poll-fast-once there instead.")
     parser.add_argument("--poll-fast-once", action="store_true", help="discovery only, single cycle, no loop -- for manual/local testing")
     parser.add_argument("--poll-slow", action="store_true", help="expensive layers only -- runs on the slow cron")
     parser.add_argument("--poll-madeonsol", action="store_true", help="Layer 1 + Layer 8 + Layer 2+9 only -- run on your OWN PC via Task Scheduler, never on GitHub Actions (MadeOnSol free-key rate limit)")

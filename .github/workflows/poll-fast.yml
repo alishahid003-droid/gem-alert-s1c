@@ -26,12 +26,33 @@ concurrency:
 jobs:
   poll-fast:
     runs-on: ubuntu-latest
+    # Real bug found Sept 30 2026: with no timeout, a hung/looping run
+    # can occupy this concurrency group indefinitely (up to GitHub's own
+    # 6h default), silently cancelling every dispatch queued behind it.
+    # Capped well under the 10-min cron-job.org cadence so a stuck run
+    # can never block more than one future cycle.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
+      # UPDATED Sept 30 2026: switched from --poll-fast (the old internal
+      # ~5h45m self-looping mode, run_poll_fast_loop -- built back when
+      # GitHub's native schedule trigger was found to fire unreliably) to
+      # --poll-fast-once (a single cycle, no loop). Real bug found live:
+      # cron-job.org now reliably re-dispatches this workflow every 10 min,
+      # but the workflow was still invoking the OLD looping entrypoint --
+      # every dispatch tried to hold this group's single concurrency slot
+      # for up to 5h45m. One run (started before this fix) ended up stuck
+      # occupying that slot for 4h38m+, during which 130+ consecutive
+      # cron-job.org dispatches queued behind it and got cancelled
+      # ("Canceling since a higher priority waiting request exists"),
+      # each with 0s actual job run time -- real discovery cycles silently
+      # not happening for that entire stretch. cron-job.org's own 10-min
+      # cadence is now the sole source of pacing; the loop mode is no
+      # longer appropriate for this workflow.
       - name: Run one fast poll cycle (discovery only)
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
@@ -47,4 +68,4 @@ jobs:
           EXECUTION_BSC_PRIVATE_KEY: ${{ secrets.EXECUTION_BSC_PRIVATE_KEY }}
           EXECUTION_RHC_PRIVATE_KEY: ${{ secrets.EXECUTION_RHC_PRIVATE_KEY }}
           RHC_RPC_URL: ${{ secrets.RHC_RPC_URL }}
-        run: python scheduler.py --poll-fast
+        run: python scheduler.py --poll-fast-once

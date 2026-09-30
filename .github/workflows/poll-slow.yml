@@ -22,6 +22,10 @@ concurrency:
 jobs:
   poll-slow:
     runs-on: ubuntu-latest
+    # Same real-bug protection as poll-fast.yml (Sept 30 2026) -- capped
+    # well under the 20-min cron-job.org cadence so a hung run can never
+    # block more than one future cycle.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
