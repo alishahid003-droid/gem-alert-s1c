@@ -87,3 +87,17 @@ def test_select_gt_candidates_filters_fresh_and_illiquid():
              {"address": "c", "liquidity_usd": 20000.0, "pool_created_at": iso(30)},    # good
              {"address": "c", "liquidity_usd": 20000.0, "pool_created_at": iso(30)}]    # duplicate
     assert [i["address"] for i in l0.select_gt_candidates(items, now_ts=now)] == ["c"]
+
+
+def test_goplus_top10_for_solana_coverage(monkeypatch):
+    assert l0.goplus_top10_pct({"holders": [{"percent": "0.05"}] * 10}) == pytest.approx(0.5)
+    assert l0.goplus_top10_pct({"holders": [{"percent": "3"}] * 10}) == pytest.approx(0.3)
+    assert l0.goplus_top10_pct({}) is None
+    sol_gp = {"mintable": {"status": "0"}, "freezable": {"status": "0"},
+              "holders": [{"percent": "0.02"}] * 10,
+              "lp_holders": [{"balance": "100", "is_locked": 1}]}   # LP data present, as live
+    monkeypatch.setattr(l0, "fetch_goplus_security", lambda c, a: {"ok": True, "data": sol_gp})
+    monkeypatch.setattr(l0, "fetch_solana_top10_holder_pct", lambda m: None)   # RPC down, as on GitHub
+    monkeypatch.setattr(l0, "_evm_launch_drawdown", lambda c, i: None)
+    sr = l0.score_geckoterminal_pools("solana", [_item(address="SolX", dex_id="raydium")])[0]["score"]
+    assert sr.signal_coverage >= 0.5
