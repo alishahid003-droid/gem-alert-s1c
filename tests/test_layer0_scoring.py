@@ -10,7 +10,8 @@ from layers.layer0_scoring import (
     PREGRAD_SOL_BANDS, GRADUATED_OR_OTHER_BANDS, score_mobula_pulse_items,
     score_solana_mint, compute_holder_growth_rate_per_hr, fetch_dexscreener_vol_liq,
     HOLDER_GROWTH_MIN_ELAPSED_SECONDS, fetch_goplus_security,
-    parse_goplus_solana_security,
+    parse_goplus_solana_security, compute_activity_decay_ratio,
+    ACTIVITY_DECAY_MIN_H24_TXNS,
 )
 
 
@@ -608,6 +609,48 @@ def test_compute_holder_growth_rate_per_hr_recent_window_still_respects_min_elap
     now = time.time()
     history = [(now - 60, 100), (now, 105)]
     assert compute_holder_growth_rate_per_hr(history) is None
+
+
+# ---------------------------------------------------------------------------
+# Activity-decay ratio (pump-dump detection) -- added Sept 30 2026,
+# checklist item C.
+# ---------------------------------------------------------------------------
+
+def test_compute_activity_decay_ratio_needs_both_counts():
+    assert compute_activity_decay_ratio(None, 100) is None
+    assert compute_activity_decay_ratio(5, None) is None
+    assert compute_activity_decay_ratio(None, None) is None
+
+
+def test_compute_activity_decay_ratio_rejects_thin_baseline():
+    # h24 total under ACTIVITY_DECAY_MIN_H24_TXNS -- too little real
+    # trading to trust a baseline rate at all, even if h1 is 0.
+    assert compute_activity_decay_ratio(0, ACTIVITY_DECAY_MIN_H24_TXNS - 1) is None
+
+
+def test_compute_activity_decay_ratio_steady_activity_is_near_one():
+    # 240 txns over 24h = 10/hr average; last hour also had 10 -> ratio 1.0
+    ratio = compute_activity_decay_ratio(10, 240)
+    assert ratio is not None
+    assert abs(ratio - 1.0) < 0.01
+
+
+def test_compute_activity_decay_ratio_real_collapse():
+    # 480 txns over 24h = 20/hr average; last hour only had 1 -> ratio 0.05
+    # (activity down to 5% of its own 24h pace -- a real cliff).
+    ratio = compute_activity_decay_ratio(1, 480)
+    assert ratio is not None
+    assert abs(ratio - 0.05) < 0.001
+
+
+def test_compute_activity_decay_ratio_accelerating_activity_above_one():
+    # A token picking up steam: last hour running hotter than its 24h
+    # average -- ratio > 1, never clamped, since this only ever gates a
+    # DOWNWARD override (score_token itself enforces that, not this
+    # function -- this stays a pure, honest ratio).
+    ratio = compute_activity_decay_ratio(50, 240)  # 10/hr avg, 50 last hour
+    assert ratio is not None
+    assert abs(ratio - 5.0) < 0.01
 
 
 def test_fetch_dexscreener_vol_liq_picks_highest_liquidity_pair(monkeypatch):
@@ -1220,6 +1263,27 @@ def _near_perfect_signals(price_drawdown_from_peak_pct=None):
     )
 
 
+def _near_perfect_signals_for_activity(txn_activity_decay_ratio=None):
+    """Same idea as _near_perfect_signals above, but isolates the NEW
+    activity-decay override (added Sept 30 2026, checklist item C) instead
+    -- every other signal maxed out/healthy, including a healthy (non-
+    collapsed) price_drawdown_from_peak_pct so the two overrides don't
+    interfere with each other in these tests."""
+    return RawSignals(
+        top10_holder_pct=0.05,
+        lp_locked_or_curve_healthy=True,
+        mint_authority_revoked=True,
+        freeze_authority_revoked=True,
+        vol_to_liq_ratio=3.0,
+        holder_growth_rate_per_hr=30.0,
+        bundler_sniper_pct=0.0,
+        price_drawdown_from_peak_pct=-5.0,
+        liquidity_usd=50_000.0,
+        is_pregraduation_solana=False,
+        txn_activity_decay_ratio=txn_activity_decay_ratio,
+    )
+
+
 def test_near_perfect_signals_without_collapse_score_band_a():
     # Sanity baseline -- confirms the override is what's forcing D below,
     # not some other effect of these particular signal values.
@@ -1279,3 +1343,84 @@ def test_override_applies_to_pregraduation_solana_bands_too():
     sig.is_pregraduation_solana = True
     result = score_token(sig)
     assert result.band == "D"
+
+
+# ---------------------------------------------------------------------------
+# Activity-decay override tests (added Sept 30 2026, checklist item C) --
+# same discipline as the drawdown-override tests above, mirrored for the
+# new independent signal.
+# ---------------------------------------------------------------------------
+
+def test_no_activity_decay_signal_scores_band_a():
+    # Sanity baseline, same role as test_near_perfect_signals_without_collapse_score_band_a.
+    result = score_token(_near_perfect_signals_for_activity(txn_activity_decay_ratio=None))
+    assert result.band == "A"
+
+
+def test_severe_activity_decay_overrides_band_to_d():
+    # Real collapse pattern: last hour running at 5% of the 24h average pace.
+    result = score_token(_near_perfect_signals_for_activity(txn_activity_decay_ratio=0.05))
+    assert result.band == "D"
+    assert any("OVERRIDE" in r for r in result.reasons)
+    assert any("activity collapsed" in r for r in result.reasons)
+
+
+def test_activity_decay_exactly_at_threshold_triggers_override():
+    result = score_token(_near_perfect_signals_for_activity(txn_activity_decay_ratio=0.15))
+    assert result.band == "D"
+
+
+def test_activity_decay_just_above_threshold_does_not_trigger():
+    result = score_token(_near_perfect_signals_for_activity(txn_activity_decay_ratio=0.151))
+    assert result.band == "A"
+    assert not any("activity collapsed" in r for r in result.reasons)
+
+
+def test_steady_activity_does_not_trigger_override():
+    result = score_token(_near_perfect_signals_for_activity(txn_activity_decay_ratio=1.0))
+    assert result.band == "A"
+
+
+def test_accelerating_activity_does_not_trigger_override():
+    # Ratio > 1 (activity picking up, not collapsing) must never be treated
+    # as a decay signal.
+    result = score_token(_near_perfect_signals_for_activity(txn_activity_decay_ratio=3.0))
+    assert result.band == "A"
+
+
+def test_activity_decay_override_never_promotes_a_band_only_demotes():
+    sig = RawSignals(
+        top10_holder_pct=0.9, lp_locked_or_curve_healthy=False,
+        mint_authority_revoked=False, freeze_authority_revoked=False,
+        vol_to_liq_ratio=200.0, holder_growth_rate_per_hr=0.0,
+        bundler_sniper_pct=0.9, price_drawdown_from_peak_pct=-5.0,
+        liquidity_usd=100.0, is_pregraduation_solana=False,
+        txn_activity_decay_ratio=0.05,
+    )
+    result = score_token(sig)
+    assert result.band == "D"
+
+
+def test_activity_decay_and_drawdown_overrides_can_both_fire_independently():
+    # Real-world case: both signals confirm the same pump-dump. Must not
+    # error -- band lands on D either way. The drawdown override runs
+    # first and already sets band=D, so the activity-decay override's own
+    # `if band != "D"` guard correctly skips re-appending a second reason
+    # (same "no-op once already at the floor" behavior as
+    # test_override_never_promotes_a_band_only_demotes above) -- this
+    # confirms the two overrides compose safely, not that both always log.
+    sig = _near_perfect_signals(price_drawdown_from_peak_pct=-80.0)
+    sig.txn_activity_decay_ratio = 0.05
+    result = score_token(sig)
+    assert result.band == "D"
+    assert any("OVERRIDE" in r for r in result.reasons)
+
+    # And the reverse order -- activity-decay alone (no drawdown collapse)
+    # must independently reach D on its own, confirming it's not silently
+    # dependent on the drawdown override having fired first.
+    sig2 = _near_perfect_signals(price_drawdown_from_peak_pct=-5.0)
+    sig2.txn_activity_decay_ratio = 0.05
+    result2 = score_token(sig2)
+    assert result2.band == "D"
+    assert any("activity collapsed" in r for r in result2.reasons)
+

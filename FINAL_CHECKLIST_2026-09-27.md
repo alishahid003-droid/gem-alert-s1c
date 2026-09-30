@@ -730,6 +730,33 @@ they're slipping into band B alongside real moonshots:
   cliff after the peak (same category as the arXiv research already cited
   -- legit tokens sustain ~299 tx/hr, rugs sit at ~0.08 tx/hr from the
   start; a pump-dump likely shows a sharp rate COLLAPSE post-peak instead).
+  - [x] DONE Sept 30 2026: implemented as `compute_activity_decay_ratio`
+    (layers/layer0_scoring.py) -- h1 tx rate / 24h-average tx rate, using
+    DexScreener's real txns.h1/txns.h24 buy+sell counts (free, same
+    response already fetched for vol/liq, no extra call). Wired into
+    score_solana_mint and used as a NEW, independent hard override
+    (activity collapsed to <=15% of the token's own 24h average pace ->
+    band forced to D), same discipline as the existing launch-window
+    price-drawdown override: never promotes a band, never fires on
+    missing/unreliable data (requires >=20 real h24 txns to trust the
+    baseline at all -- ACTIVITY_DECAY_MIN_H24_TXNS). Deliberately kept
+    OUT of the weighted score (would require recalibrating every existing
+    band threshold) -- lives as a second, independent confirmation
+    signal from a different data source (DexScreener txn counts) than
+    the existing Birdeye-price-based override, so it can catch a
+    pump-dump even when Birdeye's launch-window check is unavailable or
+    hasn't flagged severe drawdown yet. 11 new regression tests (pure
+    function + override composition, including both overrides firing on
+    the same real-shaped pump-dump). Full suite: 537/538 (same single
+    pre-existing, unrelated wallet-tier failure as before this change).
+  - Bundler/sniper-wallet concentration weighting specifically for
+    pump-dump detection (the other bullet above) -- NOT done this
+    session, left open. It's already fetched and used in the band-A
+    2-signal gate, but not yet weighted as a pump-dump-specific
+    fingerprint (same-wallet-buys-early-sells-at-peak pattern) -- would
+    need real labeled pump-dump wallet data to calibrate against, which
+    the still-small labeled sample (see item B above) doesn't yet
+    support without guessing.
 - [ ] Once the sample is wider (item B above), re-run the categorized
   backtest and look specifically at the per-token pump-dump breakdown for
   a common pattern -- n=2 today is too small to see one.

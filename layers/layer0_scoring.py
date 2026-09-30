@@ -50,6 +50,16 @@ class RawSignals:
     price_drawdown_from_peak_pct: Optional[float] = None  # Birdeye real launch-window shape, e.g. -80.0 = -80% off peak; None if unavailable/RHC
     liquidity_usd: Optional[float] = None
     is_pregraduation_solana: bool = False
+    # DexScreener real txn-count activity-decay ratio (added Sept 30 2026,
+    # checklist item C) -- h1 tx rate / 24h-average tx rate. 1.0 = steady
+    # activity, <1.0 = declining, e.g. 0.1 = last hour's rate is only 10%
+    # of the 24h average (activity has fallen off a cliff -- the pattern
+    # the arXiv research flags for post-peak collapse). NOT folded into
+    # the weighted score below (see compute_activity_decay_ratio's
+    # docstring for why) -- used only as an independent override signal,
+    # same convention as price_drawdown_from_peak_pct's launch-window
+    # collapse override.
+    txn_activity_decay_ratio: Optional[float] = None
 
 
 @dataclass
@@ -254,6 +264,25 @@ def score_token(sig: RawSignals) -> ScoreResult:
                             f"({sig.price_drawdown_from_peak_pct:.1f}% from peak) -- band {band} -> D")
             band = "D"
 
+    # Activity-decay override (added Sept 30 2026, checklist item C) -- a
+    # second, independent pump-dump confirmation using real DexScreener
+    # txn counts instead of Birdeye price data (see
+    # compute_activity_decay_ratio's docstring above for the full
+    # reasoning). Threshold: last hour running at <=15% of the token's own
+    # 24h average pace is treated as a real activity collapse, not normal
+    # noise -- picked to sit clearly below ordinary hour-to-hour
+    # variation while still catching a real post-peak dropoff early.
+    # Same override discipline as the drawdown check right above: only
+    # moves a band DOWN, never up, never fires on missing/unreliable data
+    # (compute_activity_decay_ratio already returns None below its own
+    # ACTIVITY_DECAY_MIN_H24_TXNS floor).
+    if sig.txn_activity_decay_ratio is not None and sig.txn_activity_decay_ratio <= 0.15:
+        if band != "D":
+            reasons.append(f"OVERRIDE: activity collapsed to "
+                            f"{sig.txn_activity_decay_ratio*100:.1f}% of 24h average pace "
+                            f"-- band {band} -> D")
+            band = "D"
+
     # Multi-signal agreement gate for band A, added Sept 29 2026 (Ali's
     # "80%+ precision" push, checklist item #2). Real failure mode this
     # closes: a blended average score can clear band A off several
@@ -309,7 +338,8 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
                                  goplus_freeze_authority_revoked: Optional[bool] = None,
                                  goplus_lp_locked: Optional[bool] = None,
                                  price_drawdown_from_peak_pct: Optional[float] = None,
-                                 rpc_top10_holder_pct: Optional[float] = None) -> RawSignals:
+                                 rpc_top10_holder_pct: Optional[float] = None,
+                                 txn_activity_decay_ratio: Optional[float] = None) -> RawSignals:
     """risk_json from GET /tokens/{mint}/risk, holders_json from
     /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle.
 
@@ -390,6 +420,7 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
         price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
         liquidity_usd=liquidity_usd,
         is_pregraduation_solana=is_pregraduation,
+        txn_activity_decay_ratio=txn_activity_decay_ratio,
     )
 
 
@@ -480,6 +511,52 @@ def compute_holder_growth_rate_per_hr(history: List[Tuple[float, float]]) -> Opt
 
 
 # ---------------------------------------------------------------------------
+# Activity-decay ratio for pump-dump detection -- added Sept 30 2026,
+# checklist item C ("Consider an activity-decay signal: transaction rate
+# falling off a cliff after the peak"). Real research basis (arXiv
+# 2603.24625, cited elsewhere in this file): legitimate tokens sustain
+# ~299 tx/hr, real rugs sit at ~0.08 tx/hr from the START. A pump-dump is
+# structurally different from a rug -- it looks completely healthy at
+# launch (real organic buying), then activity collapses AFTER the peak
+# once early buyers have sold and interest dries up. This is a second,
+# independent confirmation of that same pattern the price-drawdown
+# override already looks for, from a completely different data source
+# (DexScreener real txn counts, not Birdeye OHLCV) -- catches a pump-dump
+# even on the rare token where Birdeye's launch-window check is
+# unavailable or hasn't flagged severe drawdown yet.
+#
+# Deliberately NOT folded into score_token's weighted average below, same
+# reasoning as price_drawdown_from_peak_pct's launch-window collapse
+# override: a severe, real activity collapse should never be diluted by
+# an otherwise-healthy structural snapshot (mint/freeze authority revoked,
+# LP locked, etc. all look fine on a pump-dump right up until the crash).
+# Used only as a hard override -- can only move a band DOWN, never up, and
+# never fires on missing data (None never fakes a verdict, same
+# convention as every other signal in this file).
+ACTIVITY_DECAY_MIN_H24_TXNS = 20  # floor to trust the 24h baseline rate at all -- avoids noise on barely-traded tokens
+
+
+def compute_activity_decay_ratio(txns_h1_total: Optional[int], txns_h24_total: Optional[int]) -> Optional[float]:
+    """txns_h1_total/txns_h24_total: total (buys+sells) transaction counts
+    over the last 1h and 24h, as returned by fetch_dexscreener_vol_liq.
+    Returns h1_rate / 24h-average-hourly-rate, e.g. 0.1 = the last hour is
+    running at only 10% of the token's own 24h average pace -- a real,
+    self-relative baseline (not a fixed number that would misfire on a
+    naturally quiet or naturally busy token). Returns None if either count
+    is missing, or if txns_h24_total is under ACTIVITY_DECAY_MIN_H24_TXNS
+    (too little real trading to trust a baseline at all) -- never
+    fabricates a ratio from too little data."""
+    if txns_h1_total is None or txns_h24_total is None:
+        return None
+    if txns_h24_total < ACTIVITY_DECAY_MIN_H24_TXNS:
+        return None
+    h24_hourly_avg = txns_h24_total / 24.0
+    if h24_hourly_avg <= 0:
+        return None
+    return txns_h1_total / h24_hourly_avg
+
+
+# ---------------------------------------------------------------------------
 # Volume/liquidity ratio for Solana/RHC -- real wiring, Sept 25 2026.
 # signals_from_madeonsol_risk used to hardcode vol_to_liq_ratio=None with a
 # comment claiming it was "wired in scheduler" -- it never was anywhere in
@@ -528,8 +605,29 @@ def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
     launch_ts_ms = best.get("pairCreatedAt")
     if volume_24h is None or liquidity_usd is None:
         return {"ok": False, "reason": "pair missing volume/liquidity fields"}
+
+    # Real txn counts for the activity-decay pump-dump signal (added Sept 30
+    # 2026, checklist item C -- "activity-decay signal: transaction rate
+    # falling off a cliff after the peak"). Same "best" (deepest-liquidity)
+    # pair already picked above -- DexScreener's txns object always carries
+    # m5/h1/h6/h24 buy+sell counts alongside volume/liquidity on this same
+    # response, so this is free (no extra call). Never a hard dependency:
+    # missing/malformed txns just leaves both totals at None, same
+    # degrade-gracefully convention as volume/liquidity above -- see
+    # compute_activity_decay_ratio, which treats None as "can't compute."
+    txns = best.get("txns") or {}
+    txns_h1_total = None
+    txns_h24_total = None
+    h1 = txns.get("h1")
+    h24 = txns.get("h24")
+    if isinstance(h1, dict) and h1.get("buys") is not None and h1.get("sells") is not None:
+        txns_h1_total = h1["buys"] + h1["sells"]
+    if isinstance(h24, dict) and h24.get("buys") is not None and h24.get("sells") is not None:
+        txns_h24_total = h24["buys"] + h24["sells"]
+
     return {"ok": True, "volume_24h": volume_24h, "liquidity_usd": liquidity_usd,
-            "launch_ts_ms": launch_ts_ms}
+            "launch_ts_ms": launch_ts_ms, "txns_h1_total": txns_h1_total,
+            "txns_h24_total": txns_h24_total}
 
 
 def fetch_dexscreener_token_price_usd(chain: str, address: str) -> Optional[float]:
@@ -1493,6 +1591,14 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
         if liquidity_usd:
             vol_to_liq_ratio = dex["volume_24h"] / liquidity_usd
 
+    # Real activity-decay ratio (Sept 30 2026, see
+    # compute_activity_decay_ratio's docstring) -- free, same DexScreener
+    # response as vol/liq above, no extra call.
+    txn_activity_decay_ratio = None
+    if dex.get("ok"):
+        txn_activity_decay_ratio = compute_activity_decay_ratio(
+            dex.get("txns_h1_total"), dex.get("txns_h24_total"))
+
     # GoPlus fallback (Sept 25 2026, see parse_goplus_solana_security's
     # docstring) -- only called when MadeOnSol's own /risk call actually
     # failed (the real, live symptom of Ali's BASIC-tier key hitting
@@ -1563,6 +1669,7 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
         goplus_lp_locked=goplus_lp_locked,
         price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
         rpc_top10_holder_pct=rpc_top10_holder_pct,
+        txn_activity_decay_ratio=txn_activity_decay_ratio,
     )
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 
