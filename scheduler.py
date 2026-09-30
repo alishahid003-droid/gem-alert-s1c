@@ -536,8 +536,9 @@ def _entry_ctx(scored: dict) -> dict:
     """What the entry guards (executor/entry_guards.py) need, from data the
     scorer already fetched -- no extra calls."""
     raw = scored.get("raw") or {}
+    sr = scored.get("score")
     return {"liquidity_usd": raw.get("liquidity_usd"), "change_m5": raw.get("change_m5"),
-            "change_h1": raw.get("change_h1")}
+            "change_h1": raw.get("change_h1"), "coverage": getattr(sr, "signal_coverage", None)}
 
 
 def _hard_fail(sr) -> bool:
@@ -1594,6 +1595,12 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
                "change_h1": m.get("change_h1"), "signals": 1}
         res = _safe(handle_moonshot_candidate, chain, addr, band, m.get("mcap_usd"), m.get("liquidity_usd"),
                     score, ctx) or {}
+        from executor import compound_scalper as _cs
+        if _cs.sprint_mode():
+            # Sprint: a moonshot qualifier is also a sprint entry (escape velocity).
+            from executor.entrypoint import handle_compound_scalper_candidate
+            _safe(handle_compound_scalper_candidate, chain, addr, band, m.get("mcap_usd"),
+                  liquidity_usd=m.get("liquidity_usd"), momentum=True, entry_ctx={**ctx, "moonshot": True})
         symbol = (pair.get("baseToken") or {}).get("symbol") or addr[:8]
         text = (f"🌙 *MOONSHOT candidate* [{chain}] {symbol} (score {score}/100, band {band or '?'})\n"
                 f"`{addr}`\n"
