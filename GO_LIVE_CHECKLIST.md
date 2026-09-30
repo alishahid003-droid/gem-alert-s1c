@@ -39,7 +39,7 @@ target is a number we measure against every week — not something assumed.
 - [x] **1.3 ALI** — On the PC: `git pull`, then double-click **`setup_pc.bat`** (does 1.3 + 1.4 safely: backs up .env, removes test lines, asks your wallet size, disables any duplicate old MadeOnSol task, registers the 15-min job). DONE-WHEN: System tab shows `poll-madeonsol … (local-pc)` under 30 min old. — done Sept 30: diagnostic 12:37 UTC shows `poll-madeonsol last cycle 2m ago (local-pc) madeonsol_calls=7`.
 - [x] **1.4 ALI** — (done automatically by `setup_pc.bat`) Delete the `STAGE1_POSITION_USD=3`, `STAGE2_POSITION_USD=3`, `TOTAL_WALLET_USD=7` test lines from the PC `.env`. DONE-WHEN: lines gone. — done Sept 30 17:28 PKT via setup_pc.bat (backup `.env.backup-20260930-172801`, 3 test lines removed, TOTAL_WALLET_USD=100)
 - [x] **1.5 ALI** — Add GitHub Secret `TOTAL_WALLET_USD` = real trading-wallet size in USD. DONE-WHEN: diagnostic shows it SET. NOTE: poll-fast/poll-slow did not pass this secret through until `TOTAL_WALLET_USD` was added to both workflows (Sept 30) — set it to 100 to match the PC. — done Sept 30: diagnostic 12:35 UTC shows stage1 $30 / budget $60 (= $100 wallet) on GitHub runs.
-- [ ] **1.6 BOTH** — Run "Live diagnostic (read-only)" after 1 hour. DONE-WHEN: all 3 runners fresh, orphan records repaired, band A/B alerts show an Auto-buy verdict.
+- [x] **1.6 BOTH** — Run "Live diagnostic (read-only)" after 1 hour. DONE-WHEN: all 3 runners fresh, orphan records repaired, band A/B alerts show an Auto-buy verdict. — done Sept 30 13:33 UTC: fast-watch, poll-fast, poll-slow, poll-madeonsol all fresh; orphans repaired; Auto-buy verdicts recorded on Solana/Robinhood/BSC/Base alerts.
 - [ ] **1.7 ALI** — fomoapi.io: wait for the monthly reset or top up. DONE-WHEN: System tab shows credits > 0.
 
 ## Phase 2 — Measure before money (the win-rate engine)
@@ -82,7 +82,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 
 ## Phase 5 — Speed & reliability (don't lose trades to plumbing)
 
-- [ ] **5.1 CLAUDE** — **Fast position watcher on the PC**: checks open positions every 5–10 s for stop/target/rug exits (today: every 10 min on GitHub — far too slow for memecoins). DONE-WHEN: runs under Task Scheduler, heartbeat on dashboard. — BUILT `f3b36f9` (worker_fast_watch.py, 20 s; registered by setup_pc.bat). Tick when the dashboard shows `fast-watch … local-pc`.
+- [x] **5.1 CLAUDE** — **Fast position watcher on the PC**: checks open positions every 5–10 s for stop/target/rug exits (today: every 10 min on GitHub — far too slow for memecoins). DONE-WHEN: runs under Task Scheduler, heartbeat on dashboard. — BUILT `f3b36f9` (worker_fast_watch.py, 20 s; registered by setup_pc.bat). Tick when the dashboard shows `fast-watch … local-pc`. — live Sept 30: `fast-watch last cycle 1m ago (local-pc)`. Auto-start at login via Startup folder (PR #4, no admin).
 - [ ] **5.2 CLAUDE** — **Solana priority fee** (and Jito tip option) on buys/sells so they land during congestion — currently none is set. DONE-WHEN: in swap path + tested.
 - [ ] **5.3 CLAUDE** — **Buy/sell retry with fresh quote** (1 retry, re-checked slippage) on transient failures. DONE-WHEN: tested.
 - [ ] **5.4 CLAUDE** — **Upstash usage check**: measure commands/day vs free-tier limit; batch/cache further if near it. DONE-WHEN: number logged, headroom ≥ 2x.
@@ -119,6 +119,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 ---
 
 ### Change log
+- Sept 30 2026 13:33 UTC — PR #4 merged (fast watcher auto-start without admin). Solana coverage fix: top-10 holders from GoPlus (RPC fails on GitHub).
 - Sept 30 2026 — PR #2 merged (`62f3447`): win-rate engine, exit rules, MadeOnSol pacing, Solana/Robinhood discovery, trade backtest. PR #3 merged (`811fdfd`): Layer 14 revival + momentum scalper, 20 s fast watcher, backtested scalper settings, batched paper pricing. New loops verified to make zero MadeOnSol calls.
 - Sept 30 2026 — checklist created; Phase 0 filled from today's commits.
 - Sept 30 2026 — 1.1/1.2 done: PR #1 merged into main (`9053bd2`).
