@@ -87,6 +87,8 @@ def section_heartbeats():
     print(f"  MadeOnSol calls today (UTC day): {used} used, "
           f"{state.madeonsol_budget_remaining()} left of {state.MADEONSOL_DAILY_BUDGET} "
           f"(resets 00:00 UTC = 5:00 AM PKT)")
+    if hasattr(state, "madeonsol_pacing_status"):
+        print(f"  MadeOnSol pacing: {state.madeonsol_pacing_status()}")
 
 
 def _fomo(path, params=None):

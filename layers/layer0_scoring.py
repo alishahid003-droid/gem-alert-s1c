@@ -1254,8 +1254,8 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     # BASIC-tier cap this protects against. Fails closed rather than
     # partially spending the day's remaining budget on a call that would
     # get rejected anyway.
-    if state.madeonsol_budget_remaining() < 3:
-        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted "
+    if not state.madeonsol_can_spend(3, priority=True):  # paced (checklist 5.7), priority tier
+        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted/paced "
                                         f"({state.madeonsol_calls_today()}/{state.MADEONSOL_DAILY_BUDGET})"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}

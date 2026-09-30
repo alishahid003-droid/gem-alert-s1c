@@ -1870,7 +1870,7 @@ def _run_layer8_cycle(board):
                 # per-cycle overflow above, so nothing here is lost, just
                 # deferred to whenever budget frees up (next UTC day, or a
                 # quieter cycle).
-                if state.madeonsol_budget_remaining() < 3:
+                if not state.madeonsol_can_spend(3, priority=True):  # paced, checklist 5.7
                     state.queue_rescan(p["token"], p["chain"], p["is_pregraduation"])
                     continue
                 scored = _safe(score_solana_mint, p["token"], chain, is_pregraduation=p["is_pregraduation"])
