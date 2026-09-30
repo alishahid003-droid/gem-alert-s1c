@@ -2,10 +2,39 @@
 data source (a layer should degrade, not crash the whole poll cycle), and
 makes every call diagnosable when something is actually blocked at the
 network level (as opposed to the API just saying "no results")."""
+import threading
 import time
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+# Shared, thread-safe connection pool (Sept 30 2026 -- Ali's real dashboard
+# log showed a single /api/data build_data() call taking 12-26 SECONDS
+# total, even after the Upstash-pipelining fix collapsed dozens of position
+# reads into one call. Root cause: every call here used the bare
+# `requests.request(...)` module function, which opens a brand-new TCP+TLS
+# connection for every single HTTP call, with no keep-alive reuse -- from
+# Ali's real Pakistan connection to Upstash/DexScreener/fomoapi.io's
+# servers, each fresh handshake alone can cost 500ms-1.5s+, and build_data()
+# makes 8-10+ such calls per request. A shared requests.Session() with
+# urllib3's connection pooling reuses the underlying TCP+TLS connection
+# across calls to the same host, cutting that per-call handshake cost to
+# near zero after the first call. Session objects use a thread-local-free,
+# lock-protected connection pool internally and are the documented,
+# standard way to share one across threads (dashboard.py's ThreadPoolExecutor
+# for concurrent DexScreener price lookups is exactly that case) -- the
+# extra Lock here only guards the lazy one-time construction, not each call.
+_session = None
+_session_lock = threading.Lock()
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        with _session_lock:
+            if _session is None:
+                _session = requests.Session()
+    return _session
 
 
 class ApiUnreachable(Exception):
@@ -55,7 +84,7 @@ def _request_with_429_retry(method, url, headers=None, params=None, data=None, j
     attempts = 0
     while True:
         try:
-            resp = requests.request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
+            resp = _get_session().request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
         except (requests.ConnectionError, requests.Timeout) as e:
             raise ApiUnreachable(f"{method} {url} failed at network level: {e}") from e
         if resp.status_code != 429 or attempts >= _MAX_429_RETRIES:

@@ -70,6 +70,7 @@ Positions/pnl/alerts/trades stay READ-ONLY exactly as before: this cannot
 send alerts, open/close positions, or change any config.
 """
 import json
+import threading
 import time
 import concurrent.futures
 from datetime import datetime, timezone
@@ -735,6 +736,39 @@ setInterval(poll, 10000);
 """
 
 
+# Sept 30 2026 -- Ali's real dashboard log showed several /api/data
+# requests overlapping in flight at once (the frontend polls every 10s,
+# but one full build_data() call was taking 12-26s on his real network --
+# see utils/http.py's connection-pooling fix for the main cause -- so a
+# new poll fired before the previous one finished, stacking redundant
+# concurrent Upstash/DexScreener calls). This short-TTL cache means a
+# request that arrives while a very recent one is still fresh gets served
+# that result instantly instead of triggering a whole new, expensive
+# rebuild -- purely a performance/cost guard, never a staleness risk the
+# person would notice: 8s is under the 10s poll interval, so the page
+# still gets new data every real poll cycle.
+_last_data_cache = {"data": None, "built_at": 0.0}
+_last_data_lock = threading.Lock()
+_DATA_CACHE_TTL_SECONDS = 8.0
+
+
+def _build_data_cached() -> dict:
+    """Holds _last_data_lock across the ENTIRE build (not just the cache
+    read/write) so two requests that arrive close together -- the overlap
+    Ali's log showed -- never trigger two concurrent, redundant
+    build_data() calls: the second one simply waits for the first to
+    finish and then gets served its fresh result from cache instead of
+    starting its own."""
+    with _last_data_lock:
+        now = time.time()
+        if _last_data_cache["data"] is not None and (now - _last_data_cache["built_at"]) < _DATA_CACHE_TTL_SECONDS:
+            return _last_data_cache["data"]
+        data = build_data()
+        _last_data_cache["data"] = data
+        _last_data_cache["built_at"] = time.time()
+        return data
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # keep the console quiet; errors still show via do_GET's own prints
@@ -742,7 +776,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/data"):
             try:
-                payload = json.dumps(build_data()).encode("utf-8")
+                payload = json.dumps(_build_data_cached()).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))

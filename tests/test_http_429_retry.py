@@ -25,6 +25,20 @@ class _FakeResponse:
         return self._json_body
 
 
+class _FakeSession:
+    """Sept 30 2026 -- utils/http.py now routes every call through a
+    shared requests.Session() (see its own module docstring: connection
+    reuse to cut per-call handshake latency), so these tests patch
+    http_mod._get_session() to return this stub instead of patching
+    requests.request directly -- same fake_request functions as before,
+    just called via .request(...) on this stand-in "session"."""
+    def __init__(self, fake_request):
+        self._fake_request = fake_request
+
+    def request(self, method, url, headers=None, params=None, data=None, json=None, timeout=20):
+        return self._fake_request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
+
+
 def test_get_retries_once_on_429_with_retry_after_then_succeeds(monkeypatch):
     calls = []
 
@@ -34,7 +48,7 @@ def test_get_retries_once_on_429_with_retry_after_then_succeeds(monkeypatch):
             return _FakeResponse(429, headers={"Retry-After": "0"})
         return _FakeResponse(200, json_body={"ok": True})
 
-    monkeypatch.setattr(http_mod.requests, "request", fake_request)
+    monkeypatch.setattr(http_mod, "_get_session", lambda: _FakeSession(fake_request))
     result = http_mod.get_json("https://example.test/x")
 
     assert len(calls) == 2  # one 429, one real retry after Retry-After
@@ -51,7 +65,7 @@ def test_get_does_not_retry_429_without_retry_after_header(monkeypatch):
         calls.append(method)
         return _FakeResponse(429, headers={}, json_body={"resets_at": "2026-09-26T00:00:00.000Z"})
 
-    monkeypatch.setattr(http_mod.requests, "request", fake_request)
+    monkeypatch.setattr(http_mod, "_get_session", lambda: _FakeSession(fake_request))
     result = http_mod.get_json("https://example.test/x")
 
     assert len(calls) == 1  # no retry attempted
@@ -66,7 +80,7 @@ def test_get_gives_up_after_max_429_retries(monkeypatch):
         calls.append(method)
         return _FakeResponse(429, headers={"Retry-After": "0"})
 
-    monkeypatch.setattr(http_mod.requests, "request", fake_request)
+    monkeypatch.setattr(http_mod, "_get_session", lambda: _FakeSession(fake_request))
     result = http_mod.get_json("https://example.test/x")
 
     # 1 initial + _MAX_429_RETRIES(2) retries = 3 total, then gives up
@@ -90,7 +104,7 @@ def test_post_json_still_works_normally(monkeypatch):
         assert method == "POST"
         return _FakeResponse(200, json_body={"ok": True})
 
-    monkeypatch.setattr(http_mod.requests, "request", fake_request)
+    monkeypatch.setattr(http_mod, "_get_session", lambda: _FakeSession(fake_request))
     result = http_mod.post_json("https://example.test/x", json={"a": 1})
     assert result["ok"] is True
 
@@ -99,6 +113,6 @@ def test_connection_error_still_raises_apiunreachable(monkeypatch):
     def fake_request(method, url, headers=None, params=None, data=None, json=None, timeout=20):
         raise http_mod.requests.ConnectionError("boom")
 
-    monkeypatch.setattr(http_mod.requests, "request", fake_request)
+    monkeypatch.setattr(http_mod, "_get_session", lambda: _FakeSession(fake_request))
     with pytest.raises(http_mod.ApiUnreachable):
         http_mod.get("https://example.test/x")

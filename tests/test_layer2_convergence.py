@@ -100,14 +100,29 @@ from layers.layer2_convergence import large_untracked_buys, LARGE_UNTRACKED_BUY_
 
 def test_large_untracked_buy_detected():
     """NotTracked's 9.0 SOL buy on TOKEN_B is exactly the scenario Ali
-    described -- must be surfaced even though the name isn't on roster."""
+    described -- must be surfaced even though the name isn't on roster.
+    Passes an explicit low min_sol so this test exercises the DETECTION
+    mechanism itself, independent of LARGE_UNTRACKED_BUY_MIN_SOL's current
+    business value (Ali raised that from 5.0 to 30.0 SOL live on Sept 30
+    2026 -- see test_default_threshold_is_30_sol below for that)."""
     trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
-    events = large_untracked_buys(trades)
+    events = large_untracked_buys(trades, min_sol=5.0)
     assert len(events) == 1
     assert events[0]["name"] == "NotTracked"
     assert events[0]["wallet"] == "W4"
     assert events[0]["token"] == "TOKEN_B"
     assert events[0]["sol_amount"] == 9.0
+
+
+def test_default_threshold_is_30_sol():
+    """Ali, Sept 30 2026, live: raised from the original 5.0 SOL first-pass
+    guess to 30.0 SOL because 5.0 was firing on ordinary-sized buys and
+    drowning the insider-watch feed in noise. NotTracked's 9.0 SOL buy
+    must NOT fire at the current default -- only a real 30+ SOL buy should."""
+    trades = _load("madeonsol_kol_feed_buy_sample.json")["trades"]
+    events = large_untracked_buys(trades)  # default min_sol
+    assert events == []
+    assert LARGE_UNTRACKED_BUY_MIN_SOL == 30.0
 
 
 def test_tracked_names_never_appear_even_if_large():

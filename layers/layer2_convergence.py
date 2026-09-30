@@ -134,16 +134,18 @@ def single_trader_buy_events(trades: list, roster: set = CONVERGENCE_ROSTER) -> 
 # balance...maybe he can be an insider entering." Real gap: single_trader_
 # buy_events (above) and detect_convergence() both only look at the 38
 # names on roster.py -- an unlisted wallet buying big is currently
-# invisible no matter how large. FIRST-PASS THRESHOLD, deliberately
-# arbitrary and flagged for tuning with real data (same honesty standard as
-# layer2b_pumpfun_smart_money's promotion bar): the sample KOL-feed fixture
-# has tracked traders sizing 1-5 SOL and one untracked wallet at 9 SOL, so
-# 5.0 SOL is a reasonable starting "notably large" line, not a researched
-# one. This does NOT auto-promote the wallet into the tracked roster (that
-# would need a track record, which a single trade can't establish) -- it
-# just surfaces the buy so Ali can judge for himself, same spirit as Layer
-# 2b's cold-start but immediate instead of waiting for 5 closed trades.
-LARGE_UNTRACKED_BUY_MIN_SOL = 5.0
+# invisible no matter how large. This does NOT auto-promote the wallet
+# into the tracked roster (that would need a track record, which a single
+# trade can't establish) -- it just surfaces the buy so Ali can judge for
+# himself, same spirit as Layer 2b's cold-start but immediate instead of
+# waiting for 5 closed trades.
+#
+# RAISED to 30.0 SOL (Ali, Sept 30 2026, live -- the original 5.0 SOL
+# first-pass guess was firing on every ordinary-sized buy, drowning the
+# insider-watch feed in noise). 30 SOL is still Ali's own call, not a
+# researched number -- flagged for further tuning with real data same as
+# the original 5.0 was.
+LARGE_UNTRACKED_BUY_MIN_SOL = 30.0
 
 
 def large_untracked_buys(trades: list, roster: set = CONVERGENCE_ROSTER,
