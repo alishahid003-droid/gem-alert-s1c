@@ -312,6 +312,31 @@ SOLANA_LABELED = [
     # HhnhZTbXzzEmYLNNzyQSBXWD5s4AEQptqJkBC8N5SGCZ: $7.3K liquidity, $9.1K
     # mcap, 24h -96.3%, 24,775 total 24h txns (9,635 buys/15,140 sells),
     # $645K 24h volume.
+    #
+    # 2 more real pump_dump examples -- added Sept 30 2026, closing the
+    # gap to 8-10/category. Sourced from DexScreener's website (not the
+    # raw search API) sorted by 6h price change ascending with
+    # $15K-$100K liquidity / $100K+ volume floors, targeting the "pumped,
+    # held a level, then dumped in the last few hours" shape specifically
+    # (small/flat or positive 1h change but a large negative 6h change --
+    # the crash already happened and is now stabilizing/recovering,
+    # unlike a still-actively-crashing token). That same listing surfaced
+    # an even larger templated/clone-family cluster than the earlier
+    # $0.0521 one: dozens of differently-named tokens (USDF, SNOWBALL,
+    # YAP, HALLOWINU, ZACHXBT, BOB, LESTER, BLUEPRINT, and many more)
+    # all priced in the same suspicious ~$0.04-$0.049 band (a
+    # "robinhood_chain"-style xStock-clone family) -- deliberately
+    # excluded entirely, same discipline as before. These 2 are the
+    # genuinely distinct candidates, verified via DexScreener's public
+    # API:
+    ("OMNINU", "solana", "rsE4qbZ6Decdu1stnoHnC7QrNtqjuzuAuD9xnNGpump", "pump_dump", False),
+    # Omninu/PUMP, PumpSwap pair HnSiwJKhNNEZkm4HmVbXFVcviKF8ynCKc94hfy9MrGsB:
+    # $45.4K liquidity, $158.9K mcap, 1h -6.07% (small, stabilizing), 6h
+    # -51.87% (the dump), 24h -14.44%, real $310.6K 24h volume.
+    ("Muse", "solana", "AA5uXneY5LZwekC1WZRuCAH56BgkcZWp6kATCEiepump", "pump_dump", False),
+    # Muse/SOL, PumpSwap pair BUx9zYaAV1x4iJv5KKYQCtr2ZuEgDrc8M18AbrimBU5k:
+    # $51.5K liquidity, $338.5K mcap, 1h +8.05% (recovering), 6h -66.12%
+    # (the dump), 24h -45.92%, real $87.9K 24h volume.
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
