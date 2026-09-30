@@ -205,6 +205,22 @@ def solana_swap_speed_params() -> dict:
             "prioritizationFeeLamports": {"priorityLevelWithMaxLamports": {"maxLamports": cap, "priorityLevel": level}}}
 
 
+def price_impact_refusal(price_impact_pct) -> Optional[str]:
+    """Checklist 3.3: Jupiter's priceImpactPct is a fraction string ("0.012"
+    = 1.2%). Refuse above MAX_PRICE_IMPACT_PCT percent (default 3). Missing
+    or unparseable -> no refusal (the pool-share guard still applies)."""
+    import os
+    try:
+        pct = float(price_impact_pct) * 100
+    except (TypeError, ValueError):
+        return None
+    try:
+        cap = float(os.environ.get("MAX_PRICE_IMPACT_PCT", "3"))
+    except ValueError:
+        cap = 3.0
+    return f"price impact {pct:.1f}% above {cap:.0f}%" if pct > cap else None
+
+
 def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     guard = _refuse_unless_ready("solana")
     if guard:
@@ -231,6 +247,11 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     })
     if not quote.get("ok"):
         return ExecutionResult(False, f"jupiter quote failed: status {quote.get('status_code')}")
+
+    # Checklist 3.3: refuse when our own buy would move the price too much.
+    impact = price_impact_refusal((quote.get("json") or {}).get("priceImpactPct"))
+    if impact:
+        return ExecutionResult(False, f"refused before buying: {impact}")
 
     # Checklist 3.2: never buy what can't be sold back.
     from executor.sellability import check_sellable

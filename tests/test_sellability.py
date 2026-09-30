@@ -95,3 +95,11 @@ def test_test_trade_refuses_big_size(monkeypatch):
     import test_trade
     monkeypatch.setattr(sys, "argv", ["test_trade.py", "--usd", "50", "--dry-run"])
     assert test_trade.main() == 2
+
+
+def test_price_impact_refusal():
+    from executor.swap_executor import price_impact_refusal
+    assert price_impact_refusal("0.05") and "5.0%" in price_impact_refusal("0.05")
+    assert price_impact_refusal("0.01") is None
+    assert price_impact_refusal(None) is None
+    assert price_impact_refusal("junk") is None
