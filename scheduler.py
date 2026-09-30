@@ -1991,7 +1991,8 @@ def run_poll_fast():
     l13 = _safe(poll_layer13_fomo_copytrade)
     if isinstance(l13, dict) and not l13.get("ok"):
         print(f"[layer13] {l13.get('reason')}")
-    _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(), f"alerts={alerts_sent}")
+    _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(),
+          f"alerts={alerts_sent} state_cmds={state.COMMAND_COUNTER['n']}")
     if _stats():
         _print_cycle_summary(_stats())
 
@@ -2326,7 +2327,8 @@ def run_poll_slow():
             _f.write(f"\n### Slow-cycle result\n- alerts_sent: {alerts_sent}\n"
                      f"- madeonsol_calls: {madeonsol_calls}\n")
 
-    _safe(state.record_runner_heartbeat, "poll-slow", _runner_where(), f"alerts={alerts_sent}")
+    _safe(state.record_runner_heartbeat, "poll-slow", _runner_where(),
+          f"alerts={alerts_sent} state_cmds={state.COMMAND_COUNTER['n']}")
     if _stats():
         _print_cycle_summary(_stats())
 
@@ -2458,7 +2460,7 @@ def run_poll_madeonsol():
           f"~{total_calls} MadeOnSol call(s) used.")
 
     _safe(state.record_runner_heartbeat, "poll-madeonsol", _runner_where(),
-          f"alerts={total_alerts} madeonsol_calls={total_calls}")
+          f"alerts={total_alerts} madeonsol_calls={total_calls} state_cmds={state.COMMAND_COUNTER['n']}")
     if _stats():
         _print_cycle_summary(_stats())
 
