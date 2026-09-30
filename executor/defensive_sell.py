@@ -36,7 +36,10 @@ def check_and_defend(chain: str, token: str, prev_signals, curr_signals,
     # Rug signal fired -- attempt an immediate sell of the full position.
     result = swap_executor.execute_sell(
         chain=chain, token_address=token,
-        amount_tokens=pos.get("amount_tokens", 0),  # populated once buy execution actually records fills
+        # FIXED Sept 30 2026: sell only what's still held -- after moonbag
+        # trims, 100% of the original amount no longer exists in the wallet
+        # and the rug-exit sell would fail exactly when it matters most.
+        amount_tokens=pos.get("amount_tokens", 0) * position_state.remaining_pct(chain, token),
         reason="; ".join(reasons),
     )
 

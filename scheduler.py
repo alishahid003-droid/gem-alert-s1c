@@ -131,6 +131,7 @@ import executor.compound_scalper as compound_scalper
 import executor.position_state as position_state
 import executor.moonbag as moonbag
 import executor.defensive_sell as defensive_sell
+import executor.exit_rules as exit_rules
 import executor.campaign_milestones as campaign_milestones
 from layers.layer0_scoring import RawSignals, fetch_dexscreener_snapshot
 from layers.layer3_backing_check import check_backing_spike
@@ -973,7 +974,7 @@ def _run_position_management_cycle() -> dict:
     not just a low absolute number -- state stores the last-seen liquidity
     per chain:token, same pattern worker_stonkfun_snipe.py already uses,
     so this is correct across cycles/restarts too)."""
-    managed, trims_fired, milestones_fired, defends_fired = [], [], [], []
+    managed, trims_fired, milestones_fired, defends_fired, exits_fired = [], [], [], [], []
     for pos in position_state.list_open_positions():
         chain, token = pos.get("chain"), pos.get("token")
         if not chain or not token:
@@ -985,6 +986,16 @@ def _run_position_management_cycle() -> dict:
         current_mcap = snap["mcap_usd"]
         current_liq = snap.get("liquidity_usd")
         managed.append(f"{chain}:{token[:8]}")
+
+        # Exit discipline first (Phase 4, Sept 30 2026): stop-loss, breakeven
+        # lock, trailing stop, time stop -- see executor/exit_rules.py.
+        exit_result = _safe(exit_rules.check_and_exit, chain, token, current_mcap, current_liq)
+        if isinstance(exit_result, dict) and exit_result.get("decision"):
+            exits_fired.append(exit_result)
+            d = exit_result["decision"]
+            print(f"[position-mgmt:{chain}] {d.exit_type.upper()} {token[:8]}: {d.reason}")
+            if d.action == "exit_all":
+                continue
 
         trim_result = moonbag.check_and_trim(chain, token, current_mcap)
         if trim_result is not None:
@@ -1014,7 +1025,8 @@ def _run_position_management_cycle() -> dict:
               f"{len(trims_fired)} trim(s), {len(milestones_fired)} milestone action(s), "
               f"{len(defends_fired)} defensive exit(s) fired this cycle.")
     return {"managed": managed, "trims_fired": trims_fired,
-            "milestones_fired": milestones_fired, "defends_fired": defends_fired}
+            "milestones_fired": milestones_fired, "defends_fired": defends_fired,
+            "exits_fired": exits_fired}
 
 
 def _run_compound_scalper_cycle() -> dict:
