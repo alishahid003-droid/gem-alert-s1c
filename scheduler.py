@@ -1091,6 +1091,12 @@ def _run_position_management_cycle() -> dict:
             continue
         current_mcap = snap["mcap_usd"]
         current_liq = snap.get("liquidity_usd")
+        # Nothing actually held (buy refused/failed, or execution off): no
+        # trims, milestones or rug-sells to run. Live diagnostic Sept 30
+        # found sell attempts on a coin that was never bought.
+        if not pos.get("amount_tokens"):
+            continue
+        _safe(position_state.sanity_rebase_entry, chain, token, current_mcap)
         managed.append(f"{chain}:{token[:8]}")
 
         # Exit discipline first (Phase 4, Sept 30 2026): stop-loss, breakeven

@@ -118,3 +118,11 @@ def test_batch_pricing_one_call_per_chain():
     pl.manage(now=T0 + 60, batch_fn=batch)
     assert calls == [("solana", 5)]
     assert pl.scoreboard()["overall"]["n"] == 5        # all stopped out at -60%
+
+
+def test_paper_entry_sanity_rebase():
+    pl.open_paper("solana", "B", "stage1", "score_band_B", 30, 6_300, now=T0)
+    pl.manage(snap(20_000_000), now=T0 + 60)          # 3,173x in a minute = data mismatch
+    pos = pl._open()["stage1:solana:B"]
+    assert pos["entry_mcap"] == 20_000_000 and pos["entry_mcap_original"] == 6_300
+    assert pl.scoreboard()["overall"]["n"] == 0       # no fake win booked

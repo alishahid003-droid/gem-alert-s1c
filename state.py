@@ -119,7 +119,7 @@ def _count(n: int = 1):
 
 
 def commands_per_minute() -> float:
-    mins = max(1e-6, (time.time() - COMMAND_COUNTER["since"]) / 60.0)
+    mins = max(1.0, (time.time() - COMMAND_COUNTER["since"]) / 60.0)   # no inflated rate at start-up
     return COMMAND_COUNTER["n"] / mins
 
 

@@ -141,3 +141,30 @@ def test_defaults_are_the_backtested_settings(monkeypatch):
     assert er.breakeven_trigger_mult() == 1.5
     assert ev(0.60).action == "hold"          # a -40% dip no longer sells
     assert ev(0.44).exit_type == "stop_loss"
+
+
+def test_entry_baseline_for_moonshot_stage():
+    from executor.moonbag import _entry_mcap
+    assert _entry_mcap({"stages": {"moonshot": {"entry_mcap": 800_000}}}) == 800_000
+
+
+def test_sanity_rebase_bogus_entry():
+    import time
+    position_state.record_stage_entry("solana", "BOGUS", "stage1", 20, 6_300, "x")
+    assert position_state.sanity_rebase_entry("solana", "BOGUS", 20_000_000) is True
+    pos = position_state.get_position("solana", "BOGUS")
+    assert pos["stages"]["stage1"]["entry_mcap"] == 20_000_000
+    assert position_state.sanity_rebase_entry("solana", "BOGUS", 1) is False     # checked once only
+    position_state.record_stage_entry("solana", "REAL", "stage1", 20, 100_000, "x")
+    assert position_state.sanity_rebase_entry("solana", "REAL", 180_000) is False  # a normal move stays
+
+
+def test_management_skips_positions_with_nothing_held(monkeypatch):
+    import scheduler
+    position_state.record_stage_entry("solana", "NOBUY", "stage1", 20, 100_000, "x")
+    monkeypatch.setattr(scheduler, "fetch_dexscreener_snapshot",
+                        lambda c, t: {"mcap_usd": 400_000_000, "liquidity_usd": 10})
+    sells = []
+    monkeypatch.setattr(swap_executor, "execute_sell", lambda **kw: sells.append(kw))
+    out = scheduler._run_position_management_cycle()
+    assert sells == []

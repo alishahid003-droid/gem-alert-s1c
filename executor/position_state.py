@@ -398,3 +398,34 @@ def set_exit_profile(chain: str, token: str, profile: str):
     pos["exit_profile"] = profile
     state.set_value(_key(chain, token), pos)
     return pos
+
+
+ENTRY_SANITY_MAX_RATIO = 5.0
+ENTRY_SANITY_WINDOW_SECONDS = 20 * 60
+
+
+def sanity_rebase_entry(chain: str, token: str, current_mcap: Optional[float],
+                        now: Optional[float] = None) -> bool:
+    """Live diagnostic Sept 30 2026: a position showed a 3,173x "gain"
+    minutes after entry -- the entry mcap had come from a different data
+    source/unit (GeckoTerminal) than the one management prices with
+    (DexScreener). A real memecoin doesn't move >5x either way inside 20
+    minutes of our entry often enough to trust such a number, so on the
+    FIRST priced management read within that window, an entry more than 5x
+    away from the live mcap is re-based to the live mcap. Checked once."""
+    pos = get_position(chain, token)
+    if not pos or pos.get("entry_checked") or not current_mcap:
+        return False
+    now = now if now is not None else time.time()
+    pos["entry_checked"] = True
+    rebased = False
+    if now - (pos.get("opened_ts") or now) <= ENTRY_SANITY_WINDOW_SECONDS:
+        for st in (pos.get("stages") or {}).values():
+            em = st.get("entry_mcap")
+            if em and (current_mcap / em > ENTRY_SANITY_MAX_RATIO or em / current_mcap > ENTRY_SANITY_MAX_RATIO):
+                st["entry_mcap_original"] = em
+                st["entry_mcap"] = current_mcap
+                rebased = True
+    pos["entry_rebased"] = rebased
+    state.set_value(_key(chain, token), pos)
+    return rebased
