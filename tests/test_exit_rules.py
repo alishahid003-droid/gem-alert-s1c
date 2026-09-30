@@ -77,7 +77,8 @@ def test_check_and_exit_breakeven_then_stop(monkeypatch):
     closed = position_state.get_position("solana", "M")
     assert closed["status"] == "closed"
     # sold only what remained, and P&L counts the earlier lock proceeds
-    lock_pct = 1.03 / 1.6
+    from executor.compound_scalper import estimate_round_trip_cost_pct
+    lock_pct = (1 + estimate_round_trip_cost_pct("solana", 30.0, 50_000)) / 1.6
     assert sells[0] == pytest.approx(1000.0 * lock_pct)
     assert sells[1] == pytest.approx(1000.0 * (1 - lock_pct))  # only what remained
     assert closed["pnl_usd"] == pytest.approx(31.0 + 31.0 - 30.0)
