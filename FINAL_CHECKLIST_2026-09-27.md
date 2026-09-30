@@ -116,6 +116,18 @@ that reset, except step 0.
   Mobula-pulse-scored tokens (Base/BSC/TON/ETH, keyless, DOES run on
   GitHub Actions -- score_mobula_pulse_items) -- Solana/RHC's version of
   these two signals needs that local job running to ever populate.
+  [UPDATE Sept 30 2026]: found run_madeonsol_hidden.vbs sitting
+  untracked in the repo folder (not created by me -- must be Ali's own
+  file from setting this up): a hidden-window VBScript wrapper running
+  "python scheduler.py --poll-madeonsol" in the repo folder -- the
+  standard way to run a script silently via Windows Task Scheduler
+  without a visible cmd window popping up. Strong evidence Ali DID set
+  this up at some point, but this session's device_bash bridge still
+  can't confirm the Task Scheduler entry itself is registered and
+  currently firing on schedule (schtasks.exe unreachable from this
+  sandboxed shell, same limitation as before). Still needs Ali to
+  confirm directly: is the scheduled task that runs this .vbs actually
+  enabled and running right now?
 - [ ] Confirm `holder_growth_rate_per_hr` starts producing a real non-None
   number after 2+ cycles on the same token (it needs history to compute a
   rate — first sighting of any token will show None, that's expected).
@@ -746,6 +758,20 @@ independently verified tokens, never guessed:
   rug / pump_dump) before treating the resulting % as a real credibility
   number instead of a directional smoke test -- current n=5/4/2 is exactly
   the gap the script itself is already flagging.
+  [UPDATE Sept 30 2026]: continued sourcing per Ali's "what further
+  things are left and u need to search" instruction. Added 3 more
+  verified rugs (HOOKEDCAT, INUINK, SITRUMP -- distinct from a large
+  templated/clone scam-factory cluster found in the same sort and
+  deliberately excluded, see backtest_categorized.py comments) and 2
+  more verified moonshots (BONK, WIF -- pivoted away from the noisy
+  24h-gainer sort to well-known multi-year-established tokens, verified
+  via DexScreener's token-pairs/v1 endpoint). SOLANA_LABELED now: 9
+  moonshot, 9 rug, 7 pump_dump, 1 flat -- moonshot and rug both at
+  target, pump_dump still 1 short. Pump_dump is the harder category
+  (needs a genuine "pumped, held, then dumped but liquidity still
+  present" shape, not just a collapse) -- next session should focus
+  there specifically if more labeled data is wanted before a wide-scope
+  validation run.
 
 ### C. Closing the pump-dump gap specifically (0/2 this run, 0/4 last run)
 Pump-dumps are structurally different from rugs -- liquidity isn't drained
