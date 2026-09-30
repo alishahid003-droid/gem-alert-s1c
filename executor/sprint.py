@@ -45,6 +45,8 @@ def entry_ok(ctx: Optional[dict], moonshot: bool = False) -> Tuple[bool, str]:
     Unknown values don't block, except real-data coverage, which must be
     known and >= SPRINT_MIN_COVERAGE for a score-driven entry."""
     ctx = ctx or {}
+    if ctx.get("lane") == "momentum":
+        return lane_allowed()
     if moonshot or ctx.get("moonshot"):
         return True, "moonshot qualifier (escape velocity)"
     cov = ctx.get("coverage")
@@ -56,6 +58,23 @@ def entry_ok(ctx: Optional[dict], moonshot: bool = False) -> Tuple[bool, str]:
     if h1 is not None and h1 <= _f("SPRINT_MIN_H1_PCT", 0):
         return False, f"sprint: no upward momentum ({h1:+.0f}% in 1 h)"
     return True, "sprint confluence: real-data band B+ with live momentum"
+
+
+def lane_allowed() -> Tuple[bool, str]:
+    """The momentum lane pauses itself if its real record goes bad: after
+    LANE_MIN_TRADES_FOR_VERDICT (6) real lane exits, it needs a win rate of
+    at least LANE_MIN_WIN_RATE (50%) to keep trading."""
+    if (os.environ.get("SPRINT_MOMENTUM", "true") or "").strip().lower() == "false":
+        return False, "momentum lane switched off (SPRINT_MOMENTUM=false)"
+    from executor import compound_scalper as cs
+    trades = [t for t in cs._get_pool().get("trades", []) if t.get("profile") == "quick"
+              and t.get("exit_type") != "take_profit_partial"]
+    n = len(trades)
+    if n >= _f("LANE_MIN_TRADES_FOR_VERDICT", 6):
+        wins = sum(1 for t in trades if (t.get("pnl_usd") or 0) > 0)
+        if wins / n < _f("LANE_MIN_WIN_RATE", 0.5):
+            return False, f"momentum lane paused: {wins}/{n} real wins (needs {_f('LANE_MIN_WIN_RATE', 0.5):.0%})"
+    return True, "momentum lane: live buying burst"
 
 
 def maybe_resume(pool: dict, now: Optional[float] = None) -> dict:

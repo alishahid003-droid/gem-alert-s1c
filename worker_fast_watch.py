@@ -53,6 +53,8 @@ def busy() -> bool:
     try:
         import executor.position_state as position_state
         import executor.compound_scalper as compound_scalper
+        if compound_scalper.sprint_mode():
+            return True      # sprint: 20-s ticks for the momentum lane
         if any(p.get("amount_tokens") for p in position_state.list_open_positions()):
             return True
         return bool(compound_scalper.status().get("open_position"))
@@ -69,6 +71,7 @@ def tick(n: int, fast: bool = True) -> dict:
     state.record_runner_heartbeat("fast-watch", scheduler._runner_where(), note)
     out["positions"] = scheduler._safe(scheduler._run_position_management_cycle)
     out["scalper"] = scheduler._safe(scheduler._run_compound_scalper_cycle)
+    out["lane"] = scheduler._safe(scheduler._run_momentum_lane)     # paper always; real buys in sprint
     do_paper = (n % 3 == 0) if fast else (n % 2 == 0)
     do_revival = (n % 3 == 0) if fast else (n % 2 == 1)
     if do_paper:

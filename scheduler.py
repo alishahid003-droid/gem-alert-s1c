@@ -1543,6 +1543,7 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
         fetched_items.extend(flatten_geckoterminal_pools(r.get("json")))
     items = select_gt_candidates(fetched_items)
     _safe(_run_moonshot_screen, chain, fetched_items)
+    _safe(_store_lane_watchlist, chain, fetched_items)
     print(f"[layer0b/8:{chain}] {len(fetched_items)} pool(s) fetched, {len(items)} tradeable candidate(s) "
           f"(>= ${GT_MIN_LIQUIDITY_USD:,.0f} liquidity, >= {GT_MIN_AGE_MINUTES:.0f} min old)")
     for scored in score_geckoterminal_pools(chain, items):
@@ -1558,6 +1559,66 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
 
 
 MOONSHOT_ALERT_COOLDOWN_SECONDS = 6 * 3600
+LANE_WATCH_MAX = 30
+LANE_REENTRY_COOLDOWN_SECONDS = 60 * 60
+LANE_MAX_NEW_PER_RUN = 3
+LANE_CHAINS = ("solana", "bsc", "robinhood_chain", "base")
+
+
+def _store_lane_watchlist(chain: str, fetched_items: list):
+    """Trending/new pools with real liquidity, kept for the sprint momentum
+    lane (layers/layer16) to re-price every fast-watch tick."""
+    cands = [it for it in fetched_items or []
+             if it.get("address") and (it.get("liquidity_usd") or 0) >= 25_000]
+    cands.sort(key=lambda it: -(it.get("volume_24h_usd") or 0))
+    seen, addrs = set(), []
+    for it in cands:
+        if it["address"] not in seen:
+            seen.add(it["address"])
+            addrs.append(it["address"])
+    state.set_value(f"lane_watch:{chain}", {"ts": time.time(), "tokens": addrs[:LANE_WATCH_MAX]})
+
+
+def _run_momentum_lane() -> dict:
+    """Sprint momentum lane (layers/layer16_momentum_lane.py): one DexScreener
+    batch call per chain on the stored watchlist; every qualifying burst is
+    paper-traded (source "momentum_lane"), and the best one goes to the
+    sprint pool when it's flat."""
+    # Paper-trades every burst ALWAYS (so the lane's real win rate exists
+    # before any money goes in); real buys only in sprint mode.
+    from executor import compound_scalper as cs
+    from layers import layer16_momentum_lane as l16
+    from executor.entrypoint import handle_compound_scalper_candidate
+    best = None
+    qualified = 0
+    for chain in LANE_CHAINS:
+        wl = state.get_value(f"lane_watch:{chain}") or {}
+        if not wl.get("tokens") or time.time() - (wl.get("ts") or 0) > 3600:
+            continue
+        pairs = layer14.fetch_dexscreener_batch(chain, wl["tokens"])
+        for addr, pair in pairs.items():
+            ok, score, m, _ = l16.burst(pair)
+            if not ok or state.cache_get(f"lane_seen:{chain}:{addr}", LANE_REENTRY_COOLDOWN_SECONDS):
+                continue
+            qualified += 1
+            if qualified > LANE_MAX_NEW_PER_RUN:
+                break
+            state.cache_set(f"lane_seen:{chain}:{addr}", True)
+            paper_ledger.open_paper(chain, addr, "momentum_lane", "momentum_lane", paper_ledger.PAPER_SCALP_USD,
+                                    m.get("mcap_usd"), liquidity_usd=m.get("liquidity_usd"),
+                                    tags={"lane_score": score}, strategy="quick", exit_profile="quick")
+            if best is None or score > best[0]:
+                best = (score, chain, addr, m)
+    fired = None
+    if best and cs.sprint_mode() and cs.status().get("open_position") is None:
+        score, chain, addr, m = best
+        fired = handle_compound_scalper_candidate(
+            chain, addr, None, m.get("mcap_usd"), liquidity_usd=m.get("liquidity_usd"), momentum=True,
+            entry_ctx={"lane": "momentum", "liquidity_usd": m.get("liquidity_usd"),
+                       "change_m5": m.get("change_m5"), "change_h1": m.get("change_h1")})
+        if fired.get("fired"):
+            print(f"[momentum-lane:{chain}] BUY {addr[:10]} score {score} ${fired.get('position_usd', 0):.2f}")
+    return {"qualified": qualified, "fired": bool(fired and fired.get("fired"))}
 
 
 def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:

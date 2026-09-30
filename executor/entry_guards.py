@@ -48,7 +48,11 @@ def check(score_band: Optional[str], position_usd: float, ctx: Optional[dict] = 
     # wallet-convergence fire is an independent signal that is allowed below
     # band B by design (executor.triggers.evaluate_stage1).
     independent = int(ctx.get("signals") or 1) >= 2
-    if not independent and BAND_RANK.get(score_band or "", -1) < BAND_RANK.get(min_band, 2):
+    # The sprint momentum lane (layers/layer16) trades a live buying burst,
+    # not a structural score; its own gates (liquidity, depth, crowd) plus
+    # the buy-time sell-leg / honeypot checks stand in for the band floor.
+    lane = ctx.get("lane") == "momentum"
+    if not independent and not lane and BAND_RANK.get(score_band or "", -1) < BAND_RANK.get(min_band, 2):
         return False, f"band {score_band or '?'} below real-money minimum {min_band}"
 
     liq = ctx.get("liquidity_usd")
