@@ -66,7 +66,10 @@ def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float, stag
     callable the old way; both real callers below always pass it."""
     buy_fn = _BUY_FUNCTIONS.get(chain)
     if buy_fn is None:
-        return {"attempted": False, "reason": f"no buy function wired for chain '{chain}'"}
+        reason = f"no buy function wired for chain '{chain}'"
+        if stage is not None:
+            position_state.mark_stage_buy_failed(chain, token, stage, reason=reason)
+        return {"attempted": False, "ok": False, "reason": reason}
     result = buy_fn(token, usd_amount)
     if result.ok:
         position_state.record_fill(chain, token, result.filled_amount_tokens, tx_signature=result.tx_signature)
@@ -81,13 +84,15 @@ def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float, stag
 def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
                              deployer_tier: Optional[str], convergence_count: int,
                              entry_mcap: Optional[float], insider_ratio: Optional[float] = None,
-                             has_news_catalyst: bool = False) -> dict:
+                             has_news_catalyst: bool = False,
+                             signal_coverage: Optional[float] = None) -> dict:
     """Evaluates the Stage 1 trigger and, if it fires, records the position
     and locks in its moonbag ladder in the same step. entry_mcap is the
     launchpad-level mcap at the moment of firing -- the caller (a future
     scheduler integration) already has this from Layer 0/0b's own scan, so
     it isn't re-fetched here."""
-    decision = triggers.evaluate_stage1(chain, token, score_band, deployer_tier, convergence_count)
+    decision = triggers.evaluate_stage1(chain, token, score_band, deployer_tier, convergence_count,
+                                        signal_coverage=signal_coverage)
     if not decision.should_fire:
         return {"fired": False, "stage": "stage1", "reason": decision.reason}
 

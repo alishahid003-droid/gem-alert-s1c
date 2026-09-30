@@ -49,6 +49,50 @@ GRADUATED_VENUE_BY_CHAIN = {
 }
 
 
+# Chains swap_executor actually has a buy path for (execute_buy_solana/
+# execute_buy_bsc/execute_buy_robinhood_chain). Real bug fixed Sept 30 2026:
+# Base alerts (Layer 0b re-enabled Base on Sept 24) reached evaluate_stage1,
+# "fired", and got a position recorded -- but entrypoint has no Base buy
+# function, so nothing was ever bought AND the stage was never marked
+# failed, so its budget stayed committed forever. A chain with no buy
+# path must be refused here, before anything is recorded.
+EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
+
+# Minimum share of the structural score's weight that must come from REAL
+# data (not a "-- scored neutral" default) before a score-band-only fire
+# may spend money (Sept 30 2026). Most Base/BSC band-B alerts on the
+# dashboard land at exactly 50/100 with ~65% of the score's weight unknown
+# and filled with neutral partial credit -- that's "passed a honeypot
+# check", not a structurally confirmed coin. Does not gate deployer-tier or
+# convergence fires (those are independent real signals), and None
+# (caller didn't pass coverage) skips the gate for backward compatibility.
+STAGE1_MIN_SIGNAL_COVERAGE = 0.5
+
+
+def open_position_count() -> int:
+    """Open positions that actually hold (or are trying to hold) money --
+    positions whose every stage buy failed don't count, same rule
+    stage_committed_usd uses for budget."""
+    n = 0
+    for pos in position_state.list_open_positions():
+        stages = pos.get("stages", {}) or {}
+        if any(st.get("buy_status") != "failed" for st in stages.values()):
+            n += 1
+    return n
+
+
+def _concurrency_block() -> Optional[str]:
+    info = getattr(EXECUTOR_CONFIG, "bankroll_tier_info", None) or {}
+    cap = info.get("max_concurrent")
+    if not cap:
+        return None
+    n = open_position_count()
+    if n >= cap:
+        return (f"max concurrent positions reached ({n}/{cap} for the "
+                f"{info.get('tier')} bankroll tier)")
+    return None
+
+
 @dataclass
 class TriggerDecision:
     should_fire: bool
@@ -58,16 +102,32 @@ class TriggerDecision:
 
 
 def evaluate_stage1(chain: str, token: str, score_band: Optional[str],
-                     deployer_tier: Optional[str], convergence_count: int) -> TriggerDecision:
+                     deployer_tier: Optional[str], convergence_count: int,
+                     signal_coverage: Optional[float] = None) -> TriggerDecision:
     """Fires on: score A/B, OR a known-good/elite deployer, OR 2+ tracked
     wallets converging on the same coin. Any one of the three is sufficient,
     matching the alert-layer logic these mirror (Layers 0/0b, 1, 2)."""
+    if chain not in EXECUTABLE_CHAINS:
+        return TriggerDecision(False, None, f"chain '{chain}' has no auto-buy path (alert only)")
     breaker = circuit_breaker.is_tripped()
     if breaker["tripped"]:
         return TriggerDecision(False, None, f"circuit breaker tripped: {breaker['reason']}")
 
     if position_state.has_stage(chain, token, "stage1"):
         return TriggerDecision(False, None, "stage1 already fired for this token")
+
+    score_fire = score_band in ("A", "B")
+    other_fire = deployer_tier in ("elite", "good") or convergence_count >= 2
+    if (score_fire and not other_fire and signal_coverage is not None
+            and signal_coverage < STAGE1_MIN_SIGNAL_COVERAGE):
+        return TriggerDecision(
+            False, None,
+            f"band {score_band} but only {signal_coverage*100:.0f}% of score backed by real data "
+            f"(need {STAGE1_MIN_SIGNAL_COVERAGE*100:.0f}%) -- too many unknowns to spend money on")
+
+    blocked = _concurrency_block()
+    if blocked:
+        return TriggerDecision(False, None, blocked)
 
     position_usd = stage1_position_usd_for_band(score_band)
     committed = position_state.stage_committed_usd("stage1")
@@ -98,12 +158,21 @@ def evaluate_stage2(chain: str, token: str, current_mcap_usd: Optional[float],
     has graduated to real pool liquidity AND cleared the mcap floor. Does
     NOT require Stage 1 to have fired first -- an independent late
     confirmation is still a valid entry per Ali's direction."""
+    if chain not in EXECUTABLE_CHAINS:
+        return TriggerDecision(False, None, f"chain '{chain}' has no auto-buy path (alert only)")
     breaker = circuit_breaker.is_tripped()
     if breaker["tripped"]:
         return TriggerDecision(False, None, f"circuit breaker tripped: {breaker['reason']}")
 
     if position_state.has_stage(chain, token, "stage2"):
         return TriggerDecision(False, None, "stage2 already fired for this token")
+
+    # A Stage 2 add onto a position Stage 1 already holds isn't a NEW
+    # concurrent position, so only gate fresh entries.
+    if not position_state.has_stage(chain, token, "stage1"):
+        blocked = _concurrency_block()
+        if blocked:
+            return TriggerDecision(False, None, blocked)
 
     committed = position_state.stage_committed_usd("stage2")
     budget = EXECUTOR_CONFIG.stage2_budget_usd()

@@ -68,6 +68,11 @@ class ScoreResult:
     band: str             # A/B/C/D
     liquidity_flag: str   # "thin" | "moderate" | "deep" | "unknown"
     reasons: list
+    # Share (0-1) of the score's total weight that came from REAL data
+    # rather than an "unknown -- scored neutral" default. Used by
+    # executor.triggers to refuse spending money on a band earned mostly
+    # from neutral defaults. None = not computed (older callers/fixtures).
+    signal_coverage: Optional[float] = None
 
 
 # A typical position size Ali would actually try to enter with -- used only
@@ -85,13 +90,16 @@ def score_token(sig: RawSignals) -> ScoreResult:
     reasons = []
     points = 0
     max_points = 0
+    known_weight = 0
 
     def add(weight, condition_points, reason=None):
-        nonlocal points, max_points
+        nonlocal points, max_points, known_weight
         max_points += weight
         points += condition_points
         if reason:
             reasons.append(reason)
+            if "unknown" not in reason:
+                known_weight += weight
 
     # Reweighted Sept 25 2026 -- caught live: once bug #5's field-name fix
     # (and its own correction) started reading REAL renounced/isProxy data,
@@ -323,7 +331,9 @@ def score_token(sig: RawSignals) -> ScoreResult:
     else:
         liq_flag = "deep"
 
-    return ScoreResult(score=score, band=band, liquidity_flag=liq_flag, reasons=reasons)
+    coverage = round(known_weight / max_points, 3) if max_points else 0.0
+    return ScoreResult(score=score, band=band, liquidity_flag=liq_flag, reasons=reasons,
+                       signal_coverage=coverage)
 
 
 # ---------------------------------------------------------------------------

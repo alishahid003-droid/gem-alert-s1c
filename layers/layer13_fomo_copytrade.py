@@ -63,23 +63,143 @@ from layers.layer0_scoring import score_solana_mint
 # but score/band stay None with a plain reason, never a guessed number.
 SCORABLE_CHAINS = {"solana"}
 
-_ROSTER_LOOKUP = {name.strip().lower(): name for name in SELL_WATCH_ROSTER}
+# fomoapi.io chain name -> this codebase's chain id. Anything not listed is
+# passed through lowercased (still recorded to the dashboard either way).
+FOMO_CHAIN_ALIASES = {
+    "sol": "solana", "solana": "solana",
+    "bsc": "bsc", "bnb": "bsc", "binance": "bsc",
+    "base": "base",
+    "robinhood": "robinhood_chain", "robinhood_chain": "robinhood_chain", "rhc": "robinhood_chain",
+    "eth": "ethereum", "ethereum": "ethereum",
+}
+
+# Roster-buy convergence window for Stage 2 -- same 1h window Layer 2's
+# MadeOnSol convergence uses (layers/layer2_convergence.CONVERGENCE_WINDOW).
+FOMO_CONVERGENCE_WINDOW_SECONDS = 3600
 
 
-def _match_roster(handle: Optional[str], display_name: Optional[str] = None) -> Optional[str]:
-    """Returns the canonical roster.py name if `handle` or `display_name`
-    matches (case-insensitive, whitespace-trimmed) a tracked trader, else
-    None. Checks both fields because fomoapi.io alerts carry only a bare
-    `trader` handle string while leaderboard/thesis rows carry both a
-    handle and a displayName, and roster.py's names were transcribed by
-    hand from Ali's screenshots so either could be the literal match."""
+def _normalize(name: Optional[str]) -> str:
+    """Case/spacing/punctuation-insensitive key. Real reason (Sept 30 2026):
+    roster.py was hand-transcribed from Fomo screenshots, which show
+    DISPLAY names ("point farm capital", "Logan Lim", "Old Man Pervert"),
+    while fomoapi.io /v2/alerts rows carry only the bare `trader` HANDLE
+    (no spaces, often different casing/underscores). An exact-string match
+    silently dropped every roster member whose handle isn't byte-identical
+    to their display name -- the likely cause of zero roster buys."""
+    if not name:
+        return ""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+_ROSTER_LOOKUP = {_normalize(name): name for name in SELL_WATCH_ROSTER}
+
+
+def normalize_chain(chain: Optional[str]) -> str:
+    c = (chain or "solana").strip().lower()
+    return FOMO_CHAIN_ALIASES.get(c, c)
+
+
+def _match_roster(handle: Optional[str], display_name: Optional[str] = None,
+                  learned: Optional[dict] = None, promoted: Optional[dict] = None) -> Optional[str]:
+    """Returns the canonical roster name if `handle` or `display_name`
+    matches a tracked trader, else None. Checks, in order: the static
+    roster (normalized), handles learned from the leaderboard (handle ->
+    display name that IS on the roster, see learn_handles_from_leaderboard),
+    and traders auto-promoted from the candidate list (see
+    maybe_auto_promote)."""
+    learned = state.get_fomo_handle_map() if learned is None else learned
+    promoted = state.get_fomo_promoted() if promoted is None else promoted
     for candidate in (handle, display_name):
-        if not candidate:
+        key = _normalize(candidate)
+        if not key:
             continue
-        hit = _ROSTER_LOOKUP.get(candidate.strip().lower())
-        if hit:
-            return hit
+        if key in _ROSTER_LOOKUP:
+            return _ROSTER_LOOKUP[key]
+        if key in learned:
+            return learned[key]
+        if key in promoted:
+            return promoted[key].get("display_name") or candidate
     return None
+
+
+def tier_for(roster_name: str, promoted: Optional[dict] = None) -> str:
+    t = tier_of(roster_name)
+    if t != "untracked":
+        return t
+    promoted = state.get_fomo_promoted() if promoted is None else promoted
+    key = _normalize(roster_name)
+    if key in promoted or key in {_normalize(p.get("display_name")) for p in promoted.values()}:
+        return "auto-promoted"
+    return t
+
+
+def learn_handles_from_leaderboard(traders: List[dict]) -> int:
+    """Leaderboard rows carry BOTH handle and displayName. Whenever a
+    displayName matches a roster name but the handle doesn't, remember
+    handle -> roster name so bare-handle /v2/alerts rows match next time.
+    Returns how many new mappings were learned."""
+    learned = state.get_fomo_handle_map()
+    added = 0
+    for row in traders or []:
+        handle_key = _normalize(row.get("handle"))
+        if not handle_key or handle_key in _ROSTER_LOOKUP or handle_key in learned:
+            continue
+        hit = _ROSTER_LOOKUP.get(_normalize(row.get("displayName")))
+        if hit:
+            learned[handle_key] = hit
+            added += 1
+    if added:
+        state.set_fomo_handle_map(learned)
+    return added
+
+
+def _alert_display_name(a: dict) -> Optional[str]:
+    for key in ("displayName", "traderDisplayName", "traderName", "name"):
+        if a.get(key):
+            return a[key]
+    user = a.get("user") or a.get("traderInfo")
+    if isinstance(user, dict):
+        return user.get("displayName") or user.get("name")
+    return None
+
+
+def alert_ts_seconds(a: dict) -> Optional[float]:
+    """fomoapi.io's timestamp field/unit isn't pinned down live yet -- the
+    old cursor code assumed `ts` in milliseconds on alerts[0] only, so any
+    other shape meant the cursor NEVER advanced (re-reading the same 100
+    alerts every cycle, duplicating dashboard rows). Accepts ts/timestamp/
+    createdAt/time as epoch s or ms, or an ISO-8601 string."""
+    import datetime
+    for key in ("ts", "timestamp", "createdAt", "created_at", "time"):
+        v = a.get(key)
+        if v is None:
+            continue
+        if isinstance(v, (int, float)):
+            return float(v) / 1000.0 if v > 1e11 else float(v)
+        if isinstance(v, str):
+            try:
+                return datetime.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                try:
+                    f = float(v)
+                    return f / 1000.0 if f > 1e11 else f
+                except ValueError:
+                    continue
+    return None
+
+
+def newest_alert_iso(alerts: List[dict]) -> Optional[str]:
+    import datetime
+    stamps = [t for t in (alert_ts_seconds(a) for a in alerts or []) if t is not None]
+    if not stamps:
+        return None
+    return datetime.datetime.fromtimestamp(max(stamps), tz=datetime.timezone.utc).isoformat()
+
+
+def _signal_id(a: dict, kind: str, handle: Optional[str], mint: Optional[str]) -> str:
+    if a.get("id") is not None:
+        return f"fomo:{a['id']}"
+    return f"fomo:{kind}:{_normalize(handle)}:{mint or ''}:{alert_ts_seconds(a) or ''}"
 
 
 def _headers() -> dict:
@@ -193,7 +313,7 @@ def fetch_trader_pnl(handle: str) -> dict:
     return out
 
 
-def _score_if_solana(chain: str, mint: str) -> dict:
+def _score_if_solana(chain: str, mint: str, allow_paid: bool = True) -> dict:
     """Runs the coin through the SAME Layer 0 structural scoring every
     other alert in this system uses -- never a Fomo-specific score. See
     module docstring's DESIGN RULE. chain names here are fomoapi.io's own
@@ -201,6 +321,9 @@ def _score_if_solana(chain: str, mint: str) -> dict:
     unscored reason rather than guessing."""
     if chain not in SCORABLE_CHAINS:
         return {"score": None, "band": None, "reason": f"chain '{chain}' not scored by this system yet"}
+    if not allow_paid:
+        return {"score": None, "band": None,
+                "reason": "not scored on the GitHub Actions run (MadeOnSol budget is reserved for the PC run)"}
     result = score_solana_mint(mint, "solana", is_pregraduation=False)
     if result.get("error"):
         return {"score": None, "band": None, "reason": result["error"]}
@@ -208,50 +331,82 @@ def _score_if_solana(chain: str, mint: str) -> dict:
     return {"score": sr.score, "band": sr.band, "reason": None}
 
 
-def detect_roster_buys_and_theses(alerts: List[dict]) -> dict:
-    """Pure-ish function (no network beyond the scoring call): walks a
-    batch of fomoapi.io /v2/alerts rows, matches each against Ali's
-    roster, scores the coin, and records a dashboard signal for every
-    match. Returns counts for the cycle summary. `alerts` rows use
-    fomoapi.io's documented shape -- alertType (buy/sell/thesis/...),
-    trader (handle), token, tokenAddress, chain, usdValue, text."""
+def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool = True) -> dict:
+    """Walks a batch of fomoapi.io /v2/alerts rows, matches each against
+    Ali's roster (see _match_roster), scores the coin, and records a
+    dashboard signal for every match. Duplicates (same alert seen on an
+    overlapping cursor or by both the PC and GitHub Actions runs) are
+    skipped by state.record_fomo_signal's signal_id dedupe.
+
+    Also returns:
+      - unmatched: {handle: count} of buy/thesis traders NOT on the roster
+        (what diag_fomo_roster.py and the dashboard show, so a transcription
+        mismatch is visible instead of silently producing zero rows);
+      - convergence: [{chain, mint, count, traders}] -- tokens where 2+
+        distinct roster traders bought inside FOMO_CONVERGENCE_WINDOW_SECONDS,
+        which scheduler.py feeds to executor Stage 2;
+      - buyers_by_handle: {handle: [(chain, mint), ...]} for every buy
+        (roster or not), used by the candidate insider check."""
     buys_recorded = 0
     theses_recorded = 0
+    unmatched = {}
+    convergence = {}
+    buyers_by_handle = {}
+    learned = state.get_fomo_handle_map()
+    promoted = state.get_fomo_promoted()
+    seen = state.fomo_signal_ids()
     for a in alerts:
-        alert_type = a.get("alertType")
+        alert_type = (a.get("alertType") or a.get("type") or "").lower()
         if alert_type not in ("buy", "thesis"):
             continue
-        handle = a.get("trader")
-        roster_name = _match_roster(handle)
+        handle = a.get("trader") or a.get("handle")
+        display = _alert_display_name(a)
+        chain = normalize_chain(a.get("chain") or a.get("network"))
+        mint = a.get("tokenAddress") or a.get("address") or a.get("mint")
+        if alert_type == "buy" and handle and mint:
+            buyers_by_handle.setdefault(handle, []).append((chain, mint))
+        roster_name = _match_roster(handle, display, learned=learned, promoted=promoted)
         if not roster_name:
-            continue  # not one of Ali's tracked traders -- ignore, same as Layer 12's channel gate
-        chain = a.get("chain") or "solana"
-        mint = a.get("tokenAddress")
-        symbol = a.get("token") or (mint[:8] if mint else "?")
-        scored = _score_if_solana(chain, mint) if mint else {"score": None, "band": None,
-                                                               "reason": "no tokenAddress on this alert"}
+            label = handle or display or "?"
+            unmatched[label] = unmatched.get(label, 0) + 1
+            continue
+        symbol = a.get("token") or a.get("symbol") or (mint[:8] if mint else "?")
+        sid = _signal_id(a, alert_type, handle, mint)
+        if sid in seen:
+            continue
+        seen.add(sid)
+        scored = (_score_if_solana(chain, mint, allow_paid=allow_paid_scoring) if mint
+                  else {"score": None, "band": None, "reason": "no tokenAddress on this alert"})
         trader_pnl = fetch_trader_pnl(handle) if handle else {"pnl_24h": None, "pnl_7d": None, "pnl_30d": None}
+        ts = alert_ts_seconds(a)
+        common = dict(trader=roster_name, tier=tier_for(roster_name, promoted),
+                      token_symbol=symbol, token_address=mint or "", chain=chain,
+                      score=scored["score"], band=scored["band"],
+                      pnl_24h=trader_pnl["pnl_24h"], pnl_7d=trader_pnl["pnl_7d"],
+                      pnl_30d=trader_pnl["pnl_30d"], signal_id=sid, ts=ts)
         if alert_type == "buy":
-            state.record_fomo_signal(
-                kind="buy", trader=roster_name, tier=tier_of(roster_name),
-                token_symbol=symbol, token_address=mint or "", chain=chain,
-                detail=a.get("text") or f"{roster_name} bought {symbol}",
-                score=scored["score"], band=scored["band"],
-                pnl_24h=trader_pnl["pnl_24h"], pnl_7d=trader_pnl["pnl_7d"], pnl_30d=trader_pnl["pnl_30d"],
-            )
+            state.record_fomo_signal(kind="buy", detail=a.get("text") or f"{roster_name} bought {symbol}",
+                                     **common)
             buys_recorded += 1
-        else:  # thesis
+            if mint:
+                count, traders = state.record_fomo_roster_buy(
+                    chain, mint, roster_name, ts=ts, window_seconds=FOMO_CONVERGENCE_WINDOW_SECONDS)
+                if count >= 2:
+                    convergence[(chain, mint)] = {"chain": chain, "mint": mint, "count": count,
+                                                  "traders": traders}
+        else:
+            links = a.get("links") or []
             state.record_fomo_signal(
-                kind="thesis", trader=roster_name, tier=tier_of(roster_name),
-                token_symbol=symbol, token_address=mint or "", chain=chain,
-                detail=a.get("text") or f"{roster_name} posted a thesis on {symbol}",
-                score=scored["score"], band=scored["band"],
+                kind="thesis", detail=a.get("text") or f"{roster_name} posted a thesis on {symbol}",
                 thesis_text=a.get("text"),
-                thesis_link=(a.get("links") or [{}])[0].get("link") if a.get("links") else None,
-                pnl_24h=trader_pnl["pnl_24h"], pnl_7d=trader_pnl["pnl_7d"], pnl_30d=trader_pnl["pnl_30d"],
-            )
+                thesis_link=(links[0] or {}).get("link") if links and isinstance(links[0], dict) else None,
+                **common)
             theses_recorded += 1
-    return {"buys_recorded": buys_recorded, "theses_recorded": theses_recorded}
+    if unmatched:
+        state.note_fomo_unmatched_handles(unmatched)
+    return {"buys_recorded": buys_recorded, "theses_recorded": theses_recorded,
+            "unmatched": unmatched, "convergence": list(convergence.values()),
+            "buyers_by_handle": buyers_by_handle}
 
 
 def find_new_trader_candidates(leaderboard_traders: List[dict], min_balance_usd: float = 5000.0,

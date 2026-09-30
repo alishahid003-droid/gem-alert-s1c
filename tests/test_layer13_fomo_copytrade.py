@@ -12,6 +12,18 @@ import config as config_module
 from config import Config
 import layers.layer13_fomo_copytrade as mod
 from layers.roster import SELL_WATCH_ROSTER
+import state
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
+    monkeypatch.setattr(mod, "fetch_trader_pnl", lambda handle: {"pnl_24h": None, "pnl_7d": None, "pnl_30d": None})
+    yield
+
+
+def _counts(result):
+    return {"buys_recorded": result["buys_recorded"], "theses_recorded": result["theses_recorded"]}
 
 
 def _cfg(api_key=None):
@@ -75,23 +87,23 @@ def test_fetch_alerts_handles_http_failure(monkeypatch):
 # --- detect_roster_buys_and_theses: the real detection logic ---
 
 def test_detect_ignores_non_roster_traders(monkeypatch):
-    monkeypatch.setattr(mod, "_score_if_solana", lambda chain, mint: {"score": 90, "band": "A", "reason": None})
+    monkeypatch.setattr(mod, "_score_if_solana", lambda chain, mint, allow_paid=True: {"score": 90, "band": "A", "reason": None})
     alerts = [{"alertType": "buy", "trader": "totally_unknown_person", "chain": "solana",
                "tokenAddress": "Mint111", "token": "TEST"}]
     result = mod.detect_roster_buys_and_theses(alerts)
-    assert result == {"buys_recorded": 0, "theses_recorded": 0}
+    assert _counts(result) == {"buys_recorded": 0, "theses_recorded": 0}
 
 
 def test_detect_records_roster_buy_with_score(monkeypatch):
     tracked = next(iter(SELL_WATCH_ROSTER))
-    monkeypatch.setattr(mod, "_score_if_solana", lambda chain, mint: {"score": 72, "band": "B", "reason": None})
+    monkeypatch.setattr(mod, "_score_if_solana", lambda chain, mint, allow_paid=True: {"score": 72, "band": "B", "reason": None})
     recorded = []
     monkeypatch.setattr(mod.state, "record_fomo_signal", lambda **kw: recorded.append(kw))
     alerts = [{"alertType": "buy", "trader": tracked, "chain": "solana",
                "tokenAddress": "Mint111", "token": "TEST", "usdValue": 5000,
                "text": f"{tracked} bought $TEST"}]
     result = mod.detect_roster_buys_and_theses(alerts)
-    assert result == {"buys_recorded": 1, "theses_recorded": 0}
+    assert _counts(result) == {"buys_recorded": 1, "theses_recorded": 0}
     assert len(recorded) == 1
     assert recorded[0]["kind"] == "buy"
     assert recorded[0]["trader"] == tracked
@@ -101,14 +113,14 @@ def test_detect_records_roster_buy_with_score(monkeypatch):
 
 def test_detect_records_roster_thesis_with_link(monkeypatch):
     tracked = next(iter(SELL_WATCH_ROSTER))
-    monkeypatch.setattr(mod, "_score_if_solana", lambda chain, mint: {"score": None, "band": None, "reason": "x"})
+    monkeypatch.setattr(mod, "_score_if_solana", lambda chain, mint, allow_paid=True: {"score": None, "band": None, "reason": "x"})
     recorded = []
     monkeypatch.setattr(mod.state, "record_fomo_signal", lambda **kw: recorded.append(kw))
     alerts = [{"alertType": "thesis", "trader": tracked, "chain": "solana",
                "tokenAddress": "Mint222", "token": "PI", "text": "Dexscreener banner looks pretty lit",
                "links": [{"text": "dexscreener", "link": "https://dexscreener.com/solana/Mint222"}]}]
     result = mod.detect_roster_buys_and_theses(alerts)
-    assert result == {"buys_recorded": 0, "theses_recorded": 1}
+    assert _counts(result) == {"buys_recorded": 0, "theses_recorded": 1}
     assert recorded[0]["kind"] == "thesis"
     assert recorded[0]["thesis_link"] == "https://dexscreener.com/solana/Mint222"
     assert recorded[0]["score"] is None  # unscored, never guessed
@@ -131,7 +143,7 @@ def test_detect_ignores_sell_and_other_alert_types(monkeypatch):
     alerts = [{"alertType": "sell", "trader": tracked, "chain": "solana", "tokenAddress": "Mint1"},
               {"alertType": "listing", "trader": tracked, "chain": "solana", "tokenAddress": "Mint2"}]
     result = mod.detect_roster_buys_and_theses(alerts)
-    assert result == {"buys_recorded": 0, "theses_recorded": 0}
+    assert _counts(result) == {"buys_recorded": 0, "theses_recorded": 0}
 
 
 # --- find_new_trader_candidates ---

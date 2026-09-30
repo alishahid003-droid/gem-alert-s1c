@@ -575,7 +575,13 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             stage1 = handle_stage1_candidate(
                 chain, mint, score_band=sr.band, deployer_tier=effective_deployer_tier,
                 convergence_count=0, entry_mcap=mc,
+                signal_coverage=getattr(sr, "signal_coverage", None),
             )
+        # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
+        # 2026, Ali: "would these trades have been executed?") -- the real
+        # trigger decision, recorded whether it fired or not.
+        if sr.band in ("A", "B") or stage1.get("fired"):
+            state.record_autobuy_verdict(mint, chain, stage1)
         if stage1["fired"]:
             print(f"[layer0/8:{chain}] STAGE1 FIRED for {mint[:8]} -- "
                   f"${stage1['position_usd']:.2f}, conviction {stage1['conviction_score']}, "
@@ -1894,27 +1900,12 @@ def _run_fomo_cycle(report, _summary_path=None):
                 if _stats():
                     _stats().note_copytrade(f"Fomo CONVERGENCE: {ev['count']} wallet(s) on {ev['token'][:8]} [{chain}]")
                     _stats().moonshots.append(f"{ev['token'][:8]} [{chain}] {ev['count']}-wallet Fomo convergence")
-
-            # Large buy from an UNTRACKED name (Ali, Sept 24 2026 -- "a new
-            # person...good cash balance...maybe he can be an insider
-            # entering"). Not a track-record promotion, just a surfaced
-            # signal -- see large_untracked_buys' docstring for the
-            # first-pass threshold.
-            for ev in result.get("large_untracked_events", []):
-                token = ev["token"]
-                alert = Alert(token[:8], token, chain,
-                               f"Large buy ({ev['sol_amount']:.1f} SOL) from untracked wallet")
-                alert.set_tag("Chain", chain)
-                alert.set_tag("Possible insider", f"{ev['name']} ({ev['sol_amount']:.1f} SOL, not on your tracked list)")
-                send_res = _alert(alert, "layer2_untracked_large")
-                print(f"[layer2:{chain}] {token[:8]} large untracked buy by {ev['name']} "
-                      f"({ev['sol_amount']:.1f} SOL) -> {send_res}")
-                if send_res.get("sent"):
-                    alerts_sent += 1
-                if _stats():
-                    _stats().note_copytrade(f"Fomo large untracked buy: {ev['name']} "
-                                             f"{ev['sol_amount']:.1f} SOL on {token[:8]} [{chain}]")
-
+                # FIXED Sept 30 2026: this Stage 2 block used to sit inside the
+                # large-untracked-buy loop below instead of this convergence
+                # loop -- so a real 2+-trader convergence NEVER reached Stage
+                # 2, and any large untracked buy crashed the whole cycle
+                # (KeyError on ev["count"], which untracked events don't
+                # carry), taking Layer 9's sell mirror down with it.
                 # -- Shared execution core (Ali, Sept 23 2026: "point 5 ...
                 # should cover all 3 platforms" -- decided: Pump.fun/Fomo
                 # convergence feeds the SAME executor.entrypoint used by
@@ -1949,6 +1940,28 @@ def _run_fomo_cycle(report, _summary_path=None):
                         _stats().note_execution(2, chain, ev["token"], stage2["position_usd"], stage2["conviction_score"])
                 else:
                     print(f"[layer2:{chain}] stage2 not fired for {ev['token'][:8]}: {stage2['reason']}")
+                state.record_autobuy_verdict(ev["token"], chain, stage2)
+
+
+            # Large buy from an UNTRACKED name (Ali, Sept 24 2026 -- "a new
+            # person...good cash balance...maybe he can be an insider
+            # entering"). Not a track-record promotion, just a surfaced
+            # signal -- see large_untracked_buys' docstring for the
+            # first-pass threshold.
+            for ev in result.get("large_untracked_events", []):
+                token = ev["token"]
+                alert = Alert(token[:8], token, chain,
+                               f"Large buy ({ev['sol_amount']:.1f} SOL) from untracked wallet")
+                alert.set_tag("Chain", chain)
+                alert.set_tag("Possible insider", f"{ev['name']} ({ev['sol_amount']:.1f} SOL, not on your tracked list)")
+                send_res = _alert(alert, "layer2_untracked_large")
+                print(f"[layer2:{chain}] {token[:8]} large untracked buy by {ev['name']} "
+                      f"({ev['sol_amount']:.1f} SOL) -> {send_res}")
+                if send_res.get("sent"):
+                    alerts_sent += 1
+                if _stats():
+                    _stats().note_copytrade(f"Fomo large untracked buy: {ev['name']} "
+                                             f"{ev['sol_amount']:.1f} SOL on {token[:8]} [{chain}]")
 
             for token, mc, ts in result.get("mc_points", []):
                 state.record_mc_point(token, mc, ts)
