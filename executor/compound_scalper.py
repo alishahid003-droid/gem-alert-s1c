@@ -124,7 +124,12 @@ class CompoundScalperConfig:
     # estimate_round_trip_cost_pct -- commonly 5-10% on Solana, more on a
     # thin pool), a gross 2.0x nets meaningfully less than 2x; 2.5x leaves
     # real margin over that friction rather than just clearing it.
-    take_profit_multiple: float = field(default_factory=lambda: _env_float("COMPOUND_TAKE_PROFIT_MULTIPLE", 2.5))
+    # Sept 30 2026 retune from backtest_trades.py's scalper grid (72 simulated
+    # trades on the labeled coins): stop 55% / take-profit 1.5x / 3 h time
+    # stop / 35% trail = 71% wins, +$648 vs 32% wins, -$44 for the original
+    # 30% / 2.5x / 20 min / 20% -- the tight stop and 20-min clock cut coins
+    # before their move. Paper ledger confirms live (checklist 2.8).
+    take_profit_multiple: float = field(default_factory=lambda: _env_float("COMPOUND_TAKE_PROFIT_MULTIPLE", 1.5))
 
     # Fraction of the ORIGINAL position sold at the take-profit trigger --
     # the rest keeps riding under the trailing stop below, so a token that
@@ -138,7 +143,7 @@ class CompoundScalperConfig:
     # fully if price pulls back this fraction from its own peak multiple --
     # protects the post-target remainder from giving back the gain the
     # partial sale already locked in.
-    trail_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_TRAIL_STOP_PCT", 0.20))
+    trail_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_TRAIL_STOP_PCT", 0.35))
 
     # Hard stop-loss, as a fraction BELOW entry mcap, before any take-profit
     # has fired -- cuts a loser fast rather than let it sit hoping for a
@@ -147,7 +152,7 @@ class CompoundScalperConfig:
     # is subtracted, which is the honest reason this stays relatively tight
     # (30%, not 50%+): waiting longer for a bigger stop just compounds the
     # cost problem on a loser.
-    hard_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_HARD_STOP_PCT", 0.30))
+    hard_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_HARD_STOP_PCT", 0.55))
 
     # If neither the hard stop nor the take-profit has fired within this
     # many minutes, exit fully regardless -- the momentum thesis this
@@ -155,7 +160,7 @@ class CompoundScalperConfig:
     # this long is a stalled entry, not a slow-building one, and capital
     # sitting idle in it is capital not compounding. Tight on purpose, to
     # fit "tens to hundreds of transactions" inside a 24-48h window.
-    time_stop_minutes: float = field(default_factory=lambda: _env_float("COMPOUND_TIME_STOP_MINUTES", 20.0))
+    time_stop_minutes: float = field(default_factory=lambda: _env_float("COMPOUND_TIME_STOP_MINUTES", 180.0))
 
     # Entry is refused if estimate_round_trip_cost_pct's HEURISTIC estimate
     # (see that function's own honesty flag) exceeds this -- a real gate
@@ -347,8 +352,20 @@ class ScalpDecision:
     position_usd: float = 0.0
 
 
+MOMENTUM_MIN_SCORE_BAND = os.environ.get("COMPOUND_MOMENTUM_MIN_BAND", "C")
+
+
+def signal_qualifies(score_band: Optional[str], momentum: bool = False) -> bool:
+    """Signal-only half of the entry gate (no pool state) -- also used to
+    paper-trade scalper candidates while the pool is off. A Layer 14
+    momentum revival may enter one band lower (default C): the momentum IS
+    the thesis, the exits are fast, and hard red flags never get this far."""
+    floor = MOMENTUM_MIN_SCORE_BAND if momentum else SCALPER_CONFIG.min_score_band
+    return BAND_RANK.get(score_band, -1) >= BAND_RANK.get(floor, 2)
+
+
 def entry_gate(chain: str, token: str, score_band: Optional[str],
-                liquidity_usd: Optional[float] = None) -> ScalpDecision:
+               liquidity_usd: Optional[float] = None, momentum: bool = False) -> ScalpDecision:
     """Pure decision logic, no network -- same should-vs-how split as
     executor/triggers.py. Call once per poll cycle per freshly-scored
     candidate."""
@@ -376,9 +393,9 @@ def entry_gate(chain: str, token: str, score_band: Optional[str],
     if pool.get("open_position") is not None:
         return ScalpDecision(False, "a position is already open -- sequential mode, one at a time")
 
-    if BAND_RANK.get(score_band, -1) < BAND_RANK.get(SCALPER_CONFIG.min_score_band, 2):
+    if not signal_qualifies(score_band, momentum):
         return ScalpDecision(False, f"band {score_band or '?'} below minimum "
-                                     f"({SCALPER_CONFIG.min_score_band}) for this mode")
+                                     f"({MOMENTUM_MIN_SCORE_BAND if momentum else SCALPER_CONFIG.min_score_band}) for this mode")
 
     position_usd = round(balance * SCALPER_CONFIG.risk_pct, 2)
     if position_usd <= 0:
@@ -456,18 +473,23 @@ def evaluate_exit(current_mcap_usd: Optional[float]) -> ExitDecision:
     mult = current_mcap_usd / entry_mcap
     peak = max(pos.get("peak_multiple", 1.0), mult)
     elapsed_min = (time.time() - pos.get("opened_ts", time.time())) / 60.0
+    return scalp_exit_decision(mult, peak, elapsed_min, bool(pos.get("partial_tp_done")))
 
-    if not pos.get("partial_tp_done") and mult <= (1 - SCALPER_CONFIG.hard_stop_pct):
+
+def scalp_exit_decision(mult: float, peak: float, elapsed_min: float, partial_tp_done: bool) -> ExitDecision:
+    """PURE scalper exit rules (split out Sept 30 2026 so the paper ledger
+    and backtest_trades run exactly the same logic as the live pool)."""
+    if not partial_tp_done and mult <= (1 - SCALPER_CONFIG.hard_stop_pct):
         return ExitDecision(True, f"{mult:.2f}x hit hard stop "
                                     f"({SCALPER_CONFIG.hard_stop_pct*100:.0f}% below entry)",
                              pct_to_sell=1.0, exit_type="hard_stop")
 
-    if not pos.get("partial_tp_done") and mult >= SCALPER_CONFIG.take_profit_multiple:
+    if not partial_tp_done and mult >= SCALPER_CONFIG.take_profit_multiple:
         return ExitDecision(True, f"{mult:.2f}x reached take-profit target "
                                     f"({SCALPER_CONFIG.take_profit_multiple}x)",
                              pct_to_sell=SCALPER_CONFIG.partial_tp_pct, exit_type="take_profit_partial")
 
-    if pos.get("partial_tp_done"):
+    if partial_tp_done:
         pullback = (peak - mult) / peak if peak > 0 else 0.0
         if pullback >= SCALPER_CONFIG.trail_stop_pct:
             return ExitDecision(True, f"{mult:.2f}x pulled back {pullback*100:.0f}% from peak "

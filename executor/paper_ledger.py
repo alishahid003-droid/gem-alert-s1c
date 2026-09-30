@@ -35,9 +35,11 @@ OPEN_KEY = "paper_open_positions"
 CLOSED_KEY = "paper_closed_positions"
 MAX_OPEN = 80                      # bounds DexScreener calls per cycle
 MAX_CLOSED_KEPT = 3000
-UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3
+UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3      # AND at least UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF
+UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = 30.0  # time-based: the fast watcher ticks every 20 s
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
+PAPER_SCALP_USD = 25.0   # compound-scalper paper size (the pool's seed scale)
 
 
 def _cost_pct(chain: str, usd: float, liquidity_usd: Optional[float]) -> float:
@@ -75,7 +77,7 @@ def _closed() -> list:
 def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
                entry_mcap: Optional[float], band: Optional[str] = None,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
-               now: Optional[float] = None) -> Optional[dict]:
+               now: Optional[float] = None, strategy: str = "stage") -> Optional[dict]:
     """Opens one paper position; no-op if the same (chain, token, source) is
     already open, the chain has no buy path, or the price is unknown."""
     if chain not in EXECUTABLE_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
@@ -90,7 +92,7 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
-           "unpriced_cycles": 0, "events": []}
+           "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False}
     book[pid] = pos
     state.set_value(OPEN_KEY, book)
     return pos
@@ -118,28 +120,76 @@ def _close(pos: dict, exit_type: str, reason: str, now: float) -> dict:
     return pos
 
 
-def manage(snapshot_fn: Callable[[str, str], Optional[dict]], now: Optional[float] = None) -> dict:
-    """Re-price every open paper position and apply exits. snapshot_fn is
-    layers.layer0_scoring.fetch_dexscreener_snapshot (injected for tests)."""
+def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
+    """Compound-scalper exits (executor.compound_scalper.scalp_exit_decision)
+    on a paper position. Returns True when the position closed."""
+    from executor.compound_scalper import scalp_exit_decision
+    mult = mcap / pos["entry_mcap"]
+    peak = pos["peak_mcap"] / pos["entry_mcap"]
+    d = scalp_exit_decision(mult, peak, (now - pos["opened_ts"]) / 60.0, pos.get("tp_done", False))
+    if not d.should_exit:
+        return False
+    if d.exit_type == "take_profit_partial":
+        _sell(pos, d.pct_to_sell, mcap, d.exit_type, now)
+        pos["tp_done"] = True
+        return False
+    _sell(pos, pos["remaining"], mcap, d.exit_type, now)
+    _close(pos, d.exit_type, d.reason, now)
+    return True
+
+
+def _batch_snapshots(book: dict, batch_fn) -> dict:
+    """{(chain, token): snapshot} via ONE DexScreener batch call per chain
+    per 30 tokens (Sept 30 2026: the 20-second fast watcher would otherwise
+    make one call per paper position -- up to ~240/min, near DexScreener's
+    limit)."""
+    by_chain = {}
+    for pos in book.values():
+        by_chain.setdefault(pos["chain"], []).append(pos["token"])
+    out = {}
+    for chain, tokens in by_chain.items():
+        try:
+            pairs = batch_fn(chain, list(dict.fromkeys(tokens))) or {}
+        except Exception:
+            pairs = {}
+        for tok, pair in pairs.items():
+            mcap = pair.get("marketCap") or pair.get("fdv")
+            out[(chain, tok)] = {"mcap_usd": float(mcap) if mcap else None,
+                                 "liquidity_usd": (pair.get("liquidity") or {}).get("usd")}
+    return out
+
+
+def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, now: Optional[float] = None,
+           batch_fn: Optional[Callable] = None) -> dict:
+    """Re-price every open paper position and apply exits. Pass batch_fn
+    (layers.layer14_revival.fetch_dexscreener_batch) in production; the
+    per-token snapshot_fn is kept for tests and as a fallback."""
     now = now if now is not None else time.time()
     book = _open()
     if not book:
         return {"open": 0, "closed_now": 0}
+    batched = _batch_snapshots(book, batch_fn) if batch_fn else None
     closed_now = []
     for pid, pos in list(book.items()):
-        try:
-            snap = snapshot_fn(pos["chain"], pos["token"])
-        except Exception:
-            snap = None
+        if batched is not None:
+            snap = batched.get((pos["chain"], pos["token"]))
+        else:
+            try:
+                snap = snapshot_fn(pos["chain"], pos["token"])
+            except Exception:
+                snap = None
         mcap = (snap or {}).get("mcap_usd")
         liq = (snap or {}).get("liquidity_usd")
         if mcap is None:
             pos["unpriced_cycles"] = pos.get("unpriced_cycles", 0) + 1
-            if pos["unpriced_cycles"] >= UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF:
+            pos.setdefault("unpriced_since", now)
+            if (pos["unpriced_cycles"] >= UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF
+                    and now - pos["unpriced_since"] >= UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF * 60):
                 closed_now.append(_close(pos, "written_off", "no longer priceable (delisted/rugged)", now))
                 del book[pid]
             continue
         pos["unpriced_cycles"] = 0
+        pos.pop("unpriced_since", None)
         pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
         if liq is not None and liq < DEAD_LIQUIDITY_USD:
             _sell(pos, pos["remaining"], mcap, "liquidity collapsed", now)
@@ -147,6 +197,11 @@ def manage(snapshot_fn: Callable[[str, str], Optional[dict]], now: Optional[floa
             del book[pid]
             continue
 
+        if pos.get("strategy") == "scalper":
+            if _manage_scalper(pos, mcap, now):
+                closed_now.append(pos)
+                del book[pid]
+            continue
         d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
                                      pos["remaining"], pos["breakeven_locked"], pos["cost_pct"])
         if d.action == "exit_all":

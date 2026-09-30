@@ -313,3 +313,13 @@ def test_init_pool_is_idempotent_without_force():
     second_pool = compound_scalper._get_pool()
     assert second_pool["session_start_ts"] == first
     assert second_pool["seed_usd"] == 30.0
+
+
+def test_scalper_defaults_are_the_backtested_settings():
+    from executor.compound_scalper import CompoundScalperConfig as ScalperConfig
+    import os
+    for k in ("COMPOUND_TAKE_PROFIT_MULTIPLE", "COMPOUND_TRAIL_STOP_PCT",
+              "COMPOUND_HARD_STOP_PCT", "COMPOUND_TIME_STOP_MINUTES"):
+        os.environ.pop(k, None)
+    c = ScalperConfig()
+    assert (c.hard_stop_pct, c.take_profit_multiple, c.time_stop_minutes, c.trail_stop_pct) == (0.55, 1.5, 180.0, 0.35)

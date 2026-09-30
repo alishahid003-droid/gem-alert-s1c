@@ -133,6 +133,7 @@ import executor.moonbag as moonbag
 import executor.defensive_sell as defensive_sell
 import executor.exit_rules as exit_rules
 import executor.paper_ledger as paper_ledger
+import layers.layer14_revival as layer14
 import executor.campaign_milestones as campaign_milestones
 from layers.layer0_scoring import RawSignals, fetch_dexscreener_snapshot
 from layers.layer3_backing_check import check_backing_spike
@@ -506,6 +507,12 @@ def _alert(alert: Alert, layer: str) -> dict:
     return send_res
 
 
+def _hard_fail(sr) -> bool:
+    """Structural red flags no later momentum can fix (mint/freeze authority
+    still live, honeypot/blacklist) -- never watched for a revival."""
+    return any("authority revoked: 0/" in r for r in (sr.reasons or []))
+
+
 def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, board: dict = None,
                     is_pregraduation: bool = None) -> bool:
     """Sends an alert for one scored token if appropriate, and records the
@@ -742,8 +749,11 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             # free signals are SPL-specific -- see
             # free_recheck_solana_signals -- RHC uses a different token
             # standard and isn't covered by them).
-            if mint and chain == "solana":
-                state.watch_add(mint, chain, bool(is_pregraduation), sr.score, sr.reasons)
+            # Layer 14 (Sept 30 2026): every chain now -- revival is
+            # re-checked via free DexScreener data, not SPL-only RPC.
+            if mint and not _hard_fail(sr):
+                state.watch_add(mint, chain, bool(is_pregraduation), sr.score, sr.reasons,
+                                baseline_liq=(scored.get("raw") or {}).get("liquidity_usd"), band="D")
             return False  # fails safety score, no momentum yet -- suppressed, per spec
         alert = Alert((mint or "?")[:8], mint, chain, "HIGH-RISK MOMENTUM override")
         alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band D)")
@@ -755,7 +765,12 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
         # case Ali described, now actually alerting instead of being stuck
         # silently rejected forever.
         if mint:
-            state.watch_remove(mint)
+            if sr.band == "C" and source != "revival" and not _hard_fail(sr):
+                # Layer 14: "almost" coins get watched for a later revival too
+                state.watch_add(mint, chain, bool(is_pregraduation), sr.score, sr.reasons,
+                                baseline_liq=(scored.get("raw") or {}).get("liquidity_usd"), band="C")
+            elif sr.band in ("A", "B"):
+                state.watch_remove(mint)
         alert = Alert((mint or "?")[:8], mint, chain, f"Layer 0{'b' if source == 'mobula' else ''} structural score")
         alert.set_tag("Chain", chain).set_tag("Score", f"{sr.score}/100 (band {sr.band})")
     if backing_tag:
@@ -891,6 +906,81 @@ def _run_soft_fail_watch_cycle() -> int:
         print(f"[soft-fail-watch] checked {len(to_check)}/{len(watch)} watched token(s), "
               f"{queued} queued for a real re-score (0 MadeOnSol calls spent)")
     return queued
+
+
+FAST_WATCH_OWNERSHIP_SECONDS = 120
+
+
+def fast_watch_owns_management(now: "float | None" = None) -> bool:
+    """True while worker_fast_watch.py (PC) has stamped a heartbeat within
+    FAST_WATCH_OWNERSHIP_SECONDS -- it then owns every position/paper/
+    revival write so the GitHub cycle never races it."""
+    now = now if now is not None else time.time()
+    beat = (state.get_runner_heartbeats() or {}).get("fast-watch") or {}
+    return now - (beat.get("ts") or 0) < FAST_WATCH_OWNERSHIP_SECONDS
+
+
+REVIVAL_MAX_PER_CHAIN_PER_CYCLE = 30      # one DexScreener batch call per chain
+REVIVAL_COOLDOWN_SECONDS = 30 * 60
+
+
+def _run_revival_watch_cycle(board) -> dict:
+    """Layer 14 (Sept 30 2026) -- see layers/layer14_revival.py. Re-checks
+    the watch list (band C/D coins that failed, every chain) with ONE free
+    DexScreener batch call per chain. A coin whose liquidity was added or
+    whose price/buy-flow momentum turned is re-scored with the free Layer 0b
+    scorer and passed to _handle_scored (alert, Stage 1, paper trade), and a
+    momentum revival is offered to the compound scalper's momentum entry
+    (fast in, fast out). Zero MadeOnSol calls."""
+    watch = state.get_soft_fail_watch()
+    if not watch:
+        return {"checked": 0, "revived": 0}
+    now = time.time()
+    by_chain = {}
+    for w in sorted(watch, key=lambda x: x.get("last_checked_ts", 0)):
+        if now - (w.get("revived_ts") or 0) < REVIVAL_COOLDOWN_SECONDS:
+            continue
+        by_chain.setdefault(w.get("chain"), []).append(w)
+    checked = revived = 0
+    for chain, items in by_chain.items():
+        items = items[:REVIVAL_MAX_PER_CHAIN_PER_CYCLE]
+        pairs = _safe(layer14.fetch_dexscreener_batch, chain, [w["token"] for w in items])
+        if not isinstance(pairs, dict):
+            continue
+        state.watch_touch_many([w["token"] for w in items], now)
+        checked += len(items)
+        for w in items:
+            pair = pairs.get(w["token"])
+            if not pair:
+                continue
+            m = layer14.momentum_metrics(pair)
+            ok, reasons, momentum = layer14.is_revived(w.get("baseline_liq"), m)
+            if not ok:
+                continue
+            revived += 1
+            state.watch_mark_revived(w["token"], now)
+            item = layer14.pair_to_gt_item(w["token"], pair)
+            scored_list = _safe(score_geckoterminal_pools, chain, [item])
+            if not isinstance(scored_list, list) or not scored_list:
+                continue
+            scored = scored_list[0]
+            sr = scored["score"]
+            print(f"[layer14:{chain}] REVIVAL {w['token'][:8]} (was band {w.get('band') or '?'}): "
+                  f"{'; '.join(reasons)} -> re-scored {sr.score}/100 band {sr.band}")
+            if _stats():
+                _stats().note_copytrade(f"REVIVAL {w['token'][:8]} [{chain}] {'; '.join(reasons)}")
+            mc = m.get("mcap_usd")
+            _handle_scored(scored, chain, source="revival", mc=mc, board=board)
+            if momentum and not _hard_fail(sr):
+                scalp = handle_compound_scalper_candidate(chain, w["token"], score_band=sr.band,
+                                                          entry_mcap=mc, liquidity_usd=m.get("liquidity_usd"),
+                                                          momentum=True)
+                if scalp.get("fired"):
+                    print(f"[compound-scalper:{chain}] MOMENTUM SCALP {w['token'][:8]} ${scalp['position_usd']:.2f}")
+    if checked:
+        print(f"[layer14] revival watch: checked {checked} coin(s) across {len(by_chain)} chain(s), "
+              f"{revived} revived (0 MadeOnSol calls)")
+    return {"checked": checked, "revived": revived}
 
 
 # Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
@@ -1848,12 +1938,19 @@ def run_poll_fast():
     # defensive rug-exits for every OPEN EXECUTOR POSITION, every fast
     # cycle. See _run_position_management_cycle's docstring for the real
     # gap this closes. ---
-    _safe(_run_position_management_cycle)
+    # Sept 30 2026: when the PC fast watcher (worker_fast_watch.py) is alive
+    # it owns position/scalper/paper/revival management every ~20 s, so this
+    # 10-minute cycle skips them (two writers on the same state would race).
+    fast_owner = fast_watch_owns_management()
+    if fast_owner:
+        print("[fast-watch] PC fast watcher is live -- position/scalper/paper/revival management left to it")
+    else:
+        _safe(_run_position_management_cycle)
 
-    # --- Compound scalper pool management (Ali, Sept 29 2026) -- separate
-    # from the position management pass above on purpose. See
-    # _run_compound_scalper_cycle's docstring. ---
-    _safe(_run_compound_scalper_cycle)
+        # --- Compound scalper pool management (Ali, Sept 29 2026) -- separate
+        # from the position management pass above on purpose. See
+        # _run_compound_scalper_cycle's docstring. ---
+        _safe(_run_compound_scalper_cycle)
 
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "
@@ -1865,12 +1962,17 @@ def run_poll_fast():
                      f"- madeonsol_calls: {madeonsol_calls}\n"
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
 
-    # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
-    # position and apply the same exits real money uses -- the measured win
-    # rate per signal lives here. See executor/paper_ledger.py.
-    paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot)
-    if isinstance(paper, dict) and paper.get("open") is not None:
-        print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
+    # Layer 14 revival watch (Sept 30 2026) -- before paper management so a
+    # revival opened this cycle is priced on the next one.
+    if not fast_owner:
+        _safe(_run_revival_watch_cycle, board)
+
+        # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
+        # position and apply the same exits real money uses -- the measured win
+        # rate per signal lives here. See executor/paper_ledger.py.
+        paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot, batch_fn=layer14.fetch_dexscreener_batch)
+        if isinstance(paper, dict) and paper.get("open") is not None:
+            print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
 
     # Layer 13 (Fomo) also runs here since Sept 30 2026 -- it was PC-only,
     # so it silently never ran whenever the PC job wasn't scheduled. Shared

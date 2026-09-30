@@ -8,6 +8,10 @@ import backtest_trades as bt
 def _pin_rules(monkeypatch):
     monkeypatch.setenv("STOP_LOSS_PCT", "0.25")
     monkeypatch.setenv("TRAIL_GIVEBACK_PCT", "0.35")
+    cfg = bt.SCALPER_CONFIG   # pin the scalper values these mechanics tests were written for
+    for k, v in (("hard_stop_pct", 0.30), ("take_profit_multiple", 2.5),
+                 ("time_stop_minutes", 20.0), ("trail_stop_pct", 0.20)):
+        monkeypatch.setattr(cfg, k, v)
 
 
 def mk(prices, step=300):

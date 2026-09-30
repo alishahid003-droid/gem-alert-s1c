@@ -839,7 +839,7 @@ SOFT_FAIL_WATCH_MAX_ITEMS = 300
 
 
 def watch_add(token: str, chain: str, is_pregraduation: bool, score: int, reasons: list,
-              ts: Optional[float] = None):
+              ts: Optional[float] = None, baseline_liq: Optional[float] = None, band: Optional[str] = None):
     """Adds a D-band token to the soft-fail watch list, deduped by token --
     an already-watched token keeps its original first_seen_ts (the age
     window is measured from when it FIRST failed, not refreshed on a repeat
@@ -855,6 +855,9 @@ def watch_add(token: str, chain: str, is_pregraduation: bool, score: int, reason
             "token": token, "chain": chain, "is_pregraduation": is_pregraduation,
             "first_seen_ts": ts, "last_checked_ts": ts,
             "last_score": score, "last_reasons": reasons, "free_checks_done": 0,
+            # Layer 14 (Sept 30 2026): liquidity when it failed, so a later
+            # liquidity add is measurable; band so C and D are told apart.
+            "baseline_liq": baseline_liq, "band": band,
         })
     cutoff = ts - SOFT_FAIL_WATCH_MAX_AGE_SECONDS
     watch = [w for w in watch if w.get("first_seen_ts", 0) >= cutoff][-SOFT_FAIL_WATCH_MAX_ITEMS:]
@@ -1282,3 +1285,23 @@ def get_fomo_credit_state() -> dict:
 
 def set_fomo_credit_state(v: dict):
     set_value(FOMO_CREDIT_STATE_KEY, v)
+
+
+def watch_mark_revived(token: str, ts: Optional[float] = None):
+    """Layer 14: a revived coin is re-scored once, then left alone for
+    REVIVAL_COOLDOWN_SECONDS so the same move isn't re-fired every cycle."""
+    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
+    for w in watch:
+        if w.get("token") == token:
+            w["revived_ts"] = ts if ts is not None else time.time()
+    set_value(SOFT_FAIL_WATCH_KEY, watch)
+
+
+def watch_touch_many(tokens: list, ts: Optional[float] = None):
+    ts = ts if ts is not None else time.time()
+    want = set(tokens)
+    watch = get_value(SOFT_FAIL_WATCH_KEY) or []
+    for w in watch:
+        if w.get("token") in want:
+            w["last_checked_ts"] = ts
+    set_value(SOFT_FAIL_WATCH_KEY, watch)

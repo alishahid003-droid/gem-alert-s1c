@@ -43,19 +43,19 @@ def test_band_d_solana_with_no_momentum_gets_added_to_watch_list():
     assert watch[0]["last_score"] == 35
 
 
-def test_band_d_robinhood_chain_not_added_to_watch_list():
-    # Free RPC signals are SPL-specific -- RHC uses a different token
-    # standard, so watching it would just burn RPC calls for nothing.
+def test_band_d_robinhood_chain_now_watched_for_revival():
+    # Changed Sept 30 2026 (Layer 14, Ali's ask): revival is re-checked with
+    # free DexScreener data, which covers every chain -- not SPL-only RPC.
     scored = _scored("token-d-rhc", "D", score=35)
     scheduler._handle_scored(scored, "robinhood_chain", source="test", mc=None,
                               is_pregraduation=False)
-    assert state.get_soft_fail_watch() == []
+    assert [w["chain"] for w in state.get_soft_fail_watch()] == ["robinhood_chain"]
 
 
-def test_band_d_bsc_not_added_to_watch_list():
+def test_band_d_bsc_now_watched_for_revival():
     scored = _scored("token-d-bsc", "D", score=35)
     scheduler._handle_scored(scored, "bsc", source="test", mc=None)
-    assert state.get_soft_fail_watch() == []
+    assert [w["token"] for w in state.get_soft_fail_watch()] == ["token-d-bsc"]
 
 
 def test_band_d_with_momentum_override_does_not_add_to_watch_list(monkeypatch):

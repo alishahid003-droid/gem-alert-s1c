@@ -57,6 +57,8 @@ def test_rug_written_off_as_full_loss():
     pl.open_paper("solana", "M", "stage1", "score_band_A", 30, 100_000, now=T0)
     for i in range(pl.UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF):
         pl.manage(lambda c, t: None, now=T0 + 60 * (i + 1))
+    assert pl.scoreboard()["open_count"] == 1          # 3 misses in 3 min is a hiccup, not a rug
+    pl.manage(lambda c, t: None, now=T0 + 60 + 31 * 60)
     r = pl.scoreboard()["recent"][0]
     assert r["exit_type"] == "written_off" and r["pnl_pct"] == -100.0
 
@@ -93,3 +95,16 @@ def test_entrypoint_gate_blocks_real_but_keeps_paper(monkeypatch):
     r = entrypoint.handle_stage1_candidate("solana", "PG", "A", None, 0, 100_000, signal_coverage=0.9)
     assert r["fired"] is False and "paper-record gate" in r["reason"]
     assert pl.scoreboard()["open_count"] == 1
+
+
+def test_batch_pricing_one_call_per_chain():
+    for i in range(5):
+        pl.open_paper("solana", f"B{i}", "stage1", "score_band_A", 30, 100_000, now=T0)
+    calls = []
+
+    def batch(chain, tokens):
+        calls.append((chain, len(tokens)))
+        return {t: {"marketCap": 40_000, "liquidity": {"usd": 50_000}} for t in tokens}
+    pl.manage(now=T0 + 60, batch_fn=batch)
+    assert calls == [("solana", 5)]
+    assert pl.scoreboard()["overall"]["n"] == 5        # all stopped out at -60%

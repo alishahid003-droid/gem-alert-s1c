@@ -275,7 +275,7 @@ def _health() -> dict:
     now = time.time()
     beats = state.get_runner_heartbeats()
     runners = []
-    for name, expect_min in (("poll-fast", 30), ("poll-slow", 60), ("poll-madeonsol", 45)):
+    for name, expect_min in (("poll-fast", 30), ("poll-slow", 60), ("poll-madeonsol", 45), ("fast-watch", 3)):
         b = beats.get(name) or {}
         ts = b.get("ts")
         age_min = (now - ts) / 60 if ts else None
