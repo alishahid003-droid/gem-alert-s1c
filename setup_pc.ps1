@@ -94,11 +94,18 @@ Ok "first run started now (log: $PSScriptRoot\logs\poll_madeonsol.log)"
 # ---- 6. Fast watcher (checklist 5.1) ----------------------------------------
 Step "Registering 'GemAlert FastWatch' (20-second position/scalper watcher, starts at logon)"
 $fw = Join-Path $PSScriptRoot "run_fast_watch.bat"
-schtasks /create /tn "GemAlert FastWatch" /sc onlogon /f /tr "cmd /c `"$fw`"" | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Warn "Could not register the logon task (needs 'Run as administrator'). Starting it for this session only."
+# A logon task needs admin rights, so start-at-login goes through the user's
+# own Startup folder instead (no admin needed): a tiny launcher that starts
+# run_fast_watch.bat minimized. Sept 30 2026 -- the logon-task attempt failed
+# with "Access is denied" on Ali's PC.
+$startup = [Environment]::GetFolderPath("Startup")
+if ($startup -and (Test-Path $startup)) {
+    $launcher = Join-Path $startup "GemAlert FastWatch.cmd"
+    $content = "@echo off`r`nstart `"GemAlert FastWatch`" /min cmd /c `"$fw`"`r`n"
+    [System.IO.File]::WriteAllText($launcher, $content, (New-Object System.Text.ASCIIEncoding))
+    Ok "auto-start at login set up (Startup folder: $launcher)"
 } else {
-    Ok "registered (starts automatically every time you log in)"
+    Warn "Startup folder not found -- the fast watcher will run for this session only."
 }
 $running = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match 'worker_fast_watch' }
