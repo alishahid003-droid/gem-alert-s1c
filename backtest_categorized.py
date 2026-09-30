@@ -253,6 +253,45 @@ SOLANA_LABELED = [
     # near-$0 like AROS/JEANCOIN/etc above. Worth re-checking in a future
     # session -- if liquidity keeps falling toward $0 it should move to
     # the rug bucket instead.
+    #
+    # 3 more real rug examples -- added Sept 30 2026, task #31 continued
+    # sourcing. Sourced from DexScreener Solana pairs sorted by 24h price
+    # change ascending with minLiq=1000/maxLiq=8000/minVol=100000 (a
+    # bounded low-liquidity range to target near-total collapses, same
+    # method as the earlier 5-rug batch above). This sort surfaced a
+    # large cluster of ~10 differently-named tokens (NTDA, USDF, VSOF,
+    # DOTF, WSOS, ECTF, UDR, WOTF, XBC, AROS's own price neighborhood)
+    # all sharing a near-identical residual price (~$0.0521) -- almost
+    # certainly a templated/clone scam-factory family sharing the same
+    # bonding-curve starting reserves, not independent real rugs.
+    # Deliberately NOT added, per the SPCX/stale-data discipline in the
+    # module docstring above (identical figures across unrelated tokens =
+    # suspicious, not verified). These 3 are the distinct, non-clustered
+    # candidates from that same sort, each independently verified via
+    # DexScreener's public API (api.dexscreener.com/latest/dex/search),
+    # picking the correct (highest-liquidity/most-active) pair among
+    # several same-named pump.fun clones that exist for each of these
+    # names too -- real trading volume, differentiated timeframe data,
+    # liquidity present but collapsed almost to zero:
+    ("HOOKEDCAT", "solana", "8n1Qyjo7LrQMFaZsTJ3K1qPkNRMxDmS6R4eDjkvjpump", "rug", False),
+    # Hooked Cat / HOOKEDCAT, PumpSwap pair
+    # CSNs4q1tN3gUDEKgXKUZPAFZdZncUJvPffh2ZzydH5g5: $4.3K liquidity, $3.8K
+    # mcap, 24h -99.73%, 52,135 total 24h txns (24,804 buys/27,331
+    # sells), $1.29M 24h volume -- huge real trading activity followed by
+    # near-total liquidity collapse. Several other HOOKEDCAT-named
+    # pump.fun pairs exist with near-zero liquidity/volume (unrelated
+    # copy-name clones); this is the one real, actively-traded pair.
+    ("INUINK", "solana", "9k7NgXqiJ7tvLtiB6HXdJHnKZZynFz46AB6Eg4Uwpump", "rug", False),
+    # Inuink / INUINK, PumpSwap pair
+    # E2549WVzvMXBSknhM4nEbMVW1QoqEULoLWKwWGngg8sj: $4.1K liquidity, $3.3K
+    # mcap, 24h -99.68%, 82,421 total 24h txns (51,115 buys/31,306
+    # sells), $3.58M 24h volume -- same pattern, real large-scale trading
+    # then near-total collapse.
+    ("SITRUMP", "solana", "4tvcXSyhPfb1vQQWunMmMzmVNCJGMYrXgtv3bEbSpump", "rug", False),
+    # Super Intelligence Trump / SITRUMP, PumpSwap pair
+    # HhnhZTbXzzEmYLNNzyQSBXWD5s4AEQptqJkBC8N5SGCZ: $7.3K liquidity, $9.1K
+    # mcap, 24h -96.3%, 24,775 total 24h txns (9,635 buys/15,140 sells),
+    # $645K 24h volume.
 ]
 
 # See module docstring, limitation #1 -- left empty on purpose, not padded
