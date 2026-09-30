@@ -137,6 +137,7 @@ from layers.layer3_backing_check import check_backing_spike
 from layers.layer11_social_buzz import fetch_boost_board, check_buzz
 from layers.layer12_caller_channels import fetch_caller_channel_posts, extract_token_addresses
 from layers.layer13_fomo_copytrade import (
+    fetch_new_alerts, newest_alert_iso, learn_handles_from_leaderboard,
     fetch_fomo_alerts, fetch_leaderboard, detect_roster_buys_and_theses,
     find_new_trader_candidates,
 )
@@ -1152,52 +1153,97 @@ def poll_layer12_caller_channels() -> dict:
     return {"ok": True, "posts_checked": len(posts), "addresses_recorded": recorded}
 
 
+FOMO_ALERTS_MIN_INTERVAL_SECONDS = int(os.environ.get("FOMO_ALERTS_MIN_INTERVAL_SECONDS", "1800"))
+FOMO_LEADERBOARD_INTERVAL_SECONDS = int(os.environ.get("FOMO_LEADERBOARD_INTERVAL_SECONDS", str(24 * 3600)))
+
+
 def poll_layer13_fomo_copytrade() -> dict:
     """Fomo copy-trading + thesis detection (Ali, Sept 30 2026 -- see
-    layers/layer13_fomo_copytrade.py's module docstring for the full
-    design). No-ops cleanly if CONFIG.fomoapi_ready() is False. Two parts
-    per cycle:
-      1. Pull recent /v2/alerts since the last cursor, match against the
-         roster, score every hit's coin, record to the dashboard feed.
-      2. Every FOMO_CANDIDATE_CHECK_EVERY_N_CYCLES-th call, also pull the
-         24h leaderboard and check for new >=$5k-balance candidates NOT on
-         the roster -- gated to not every cycle since it spends
-         fomoapi.io balance-check credits per candidate (see
-         find_new_trader_candidates's docstring) and Ali only needs to see
-         new candidates periodically, not every 15 minutes."""
+    layers/layer13_fomo_copytrade.py's module docstring).
+
+    Rebuilt Sept 30 after the live diagnostic showed fomoapi.io returning
+    402 credits_exhausted (0 of 250,000 left) within hours of the first
+    build going live. Now credit-budgeted end to end:
+      - Runs from BOTH GitHub Actions poll-fast and the PC --poll-madeonsol
+        job, but shared state timestamps gate it so whichever runs first in
+        a window does the work and the other skips -- no double spend, and
+        Layer 13 no longer dies silently when the PC job isn't running.
+      - Alerts are polled at most every FOMO_ALERTS_MIN_INTERVAL_SECONDS
+        (default 30 min, ~48 calls/day x 125 credits), paging back to the
+        cursor so a busy feed doesn't drop older roster buys.
+      - Coin scoring (MadeOnSol budget) only on the PC run; GitHub Actions
+        records the signal unscored rather than spending MadeOnSol calls
+        from a shared IP.
+      - 2+ roster traders buying the same coin within 1h feeds executor
+        Stage 2 -- the same entry path Layer 2's MadeOnSol convergence uses.
+      - Leaderboard (handle learning + new-trader candidates with insider
+        check and auto-promotion) at most every
+        FOMO_LEADERBOARD_INTERVAL_SECONDS (default daily)."""
     if not CONFIG.fomoapi_ready():
         return {"ok": False, "reason": "Layer 13 not configured (FOMOAPI_API_KEY)"}
+    now = time.time()
+    sched = state.get_value("fomo_layer13_schedule") or {}
+    out = {"ok": True, "where": _runner_where()}
 
-    since = state.get_fomo_alerts_since()
-    alerts_result = _safe(fetch_fomo_alerts, since_iso=since, limit=100)
-    if not (isinstance(alerts_result, dict) and alerts_result.get("ok")):
-        reason = alerts_result.get("reason") if isinstance(alerts_result, dict) else str(alerts_result)
-        print(f"[layer13] fomoapi.io /v2/alerts fetch failed this cycle: {reason}")
-        return {"ok": False, "reason": reason}
-    alerts = alerts_result.get("alerts") or []
-    detected = detect_roster_buys_and_theses(alerts)
-    if alerts:
-        newest_ts = alerts[0].get("ts")
-        if isinstance(newest_ts, (int, float)):
-            import datetime
-            iso = datetime.datetime.fromtimestamp(newest_ts / 1000, tz=datetime.timezone.utc).isoformat()
-            state.set_fomo_alerts_since(iso)
-    if detected["buys_recorded"] or detected["theses_recorded"]:
-        print(f"[layer13] {detected['buys_recorded']} roster buy(s), "
-              f"{detected['theses_recorded']} thesis/theses recorded this cycle")
-
-    candidates_result = {"checked": 0, "candidates_found": 0}
-    lb = _safe(fetch_leaderboard, window="24h", limit=100)
-    if isinstance(lb, dict) and lb.get("ok"):
-        candidates_result = find_new_trader_candidates(lb.get("traders") or [], min_balance_usd=5000.0)
-        if candidates_result["candidates_found"]:
-            print(f"[layer13] {candidates_result['candidates_found']} new-trader candidate(s) "
-                  f">= $5k balance found this cycle (checked {candidates_result['checked']})")
+    if now - sched.get("alerts_ts", 0) >= FOMO_ALERTS_MIN_INTERVAL_SECONDS:
+        sched["alerts_ts"] = now
+        state.set_value("fomo_layer13_schedule", sched)
+        since = state.get_fomo_alerts_since()
+        fetched = _safe(fetch_new_alerts, since, max_pages=2)
+        if not (isinstance(fetched, dict) and fetched.get("ok")):
+            reason = fetched.get("reason") if isinstance(fetched, dict) else str(fetched)
+            print(f"[layer13] fomoapi.io alerts fetch failed: {reason}")
+            out.update({"ok": False, "reason": reason})
+        else:
+            alerts = fetched.get("alerts") or []
+            detected = detect_roster_buys_and_theses(alerts, allow_paid_scoring=not IS_GITHUB_ACTIONS)
+            newest = newest_alert_iso(alerts)
+            if newest:
+                state.set_fomo_alerts_since(newest)
+            out.update({"alerts": len(alerts), "pages": fetched.get("pages"), "gap": fetched.get("gap"),
+                        "buys_recorded": detected["buys_recorded"],
+                        "theses_recorded": detected["theses_recorded"],
+                        "unmatched_traders": len(detected["unmatched"])})
+            print(f"[layer13] {len(alerts)} alert(s) over {fetched.get('pages')} page(s) "
+                  f"(gap={fetched.get('gap')}): {detected['buys_recorded']} roster buy(s), "
+                  f"{detected['theses_recorded']} thesis/theses, {len(detected['unmatched'])} unmatched trader(s)")
+            out["buyers_by_handle"] = detected["buyers_by_handle"]
+            for ev in detected["convergence"]:
+                if ev["chain"] not in ("solana", "bsc", "robinhood_chain"):
+                    continue
+                snap = _safe(fetch_dexscreener_snapshot, ev["chain"], ev["mint"])
+                mcap = snap.get("mcap_usd") if isinstance(snap, dict) else None
+                stage2 = handle_stage2_candidate(ev["chain"], ev["mint"], current_mcap_usd=mcap,
+                                                 fomo_convergence_count=ev["count"], graduated=True)
+                state.record_autobuy_verdict(ev["mint"], ev["chain"], stage2)
+                print(f"[layer13] {ev['count']} roster traders ({', '.join(ev['traders'])}) bought "
+                      f"{ev['mint'][:8]} [{ev['chain']}] -> stage2 fired={stage2['fired']} ({stage2['reason']})")
+                if stage2["fired"] and _stats():
+                    _stats().note_execution(2, ev["chain"], ev["mint"], stage2["position_usd"],
+                                            stage2["conviction_score"])
     else:
-        reason = lb.get("reason") if isinstance(lb, dict) else str(lb)
-        print(f"[layer13] leaderboard fetch failed this cycle (candidate discovery skipped): {reason}")
+        out["alerts_skipped"] = "polled recently by another runner/cycle"
 
-    return {"ok": True, **detected, **{f"candidate_{k}": v for k, v in candidates_result.items()}}
+    if now - sched.get("leaderboard_ts", 0) >= FOMO_LEADERBOARD_INTERVAL_SECONDS:
+        sched["leaderboard_ts"] = now
+        state.set_value("fomo_layer13_schedule", sched)
+        lb = _safe(fetch_leaderboard, window="7d", limit=150)
+        if isinstance(lb, dict) and lb.get("ok"):
+            traders = lb.get("traders") or []
+            learned = learn_handles_from_leaderboard(traders)
+            cands = find_new_trader_candidates(traders, min_balance_usd=5000.0, max_checked=10,
+                                               buyers_by_handle=out.get("buyers_by_handle"))
+            out.update({"handles_learned": learned, "candidates_checked": cands["checked"],
+                        "candidates_found": cands["candidates_found"], "promoted": cands["promoted"]})
+            print(f"[layer13] leaderboard: learned {learned} roster handle(s), "
+                  f"{cands['candidates_found']} candidate(s) >= $5k, auto-promoted {cands['promoted']}")
+        else:
+            reason = lb.get("reason") if isinstance(lb, dict) else str(lb)
+            print(f"[layer13] leaderboard fetch failed (candidate discovery skipped): {reason}")
+    out.pop("buyers_by_handle", None)
+    out["credits"] = state.get_fomo_credit_state()
+    state.set_fomo_last_run(out)
+    return out
 
 
 LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
@@ -1402,6 +1448,10 @@ def run_poll_fast():
     MadeOnSol scoring here -- meant to run every 10 min, unchanged, because
     speed on brand-new token discovery is the single most valuable thing in
     this system. See module docstring."""
+    repaired = _safe(position_state.reconcile_orphan_stages)
+    if isinstance(repaired, list) and repaired:
+        print(f"[executor] auto-repaired {len(repaired)} orphan stage record(s) that were "
+              f"blocking budget/concurrency: {repaired}")
     # Pump.fun manual wallet seeding (Ali, Sept 24 2026), run from HERE
     # rather than its own workflow file or an edit to an existing one:
     # GitHub blocks Ali's saved token from pushing ANY change to a workflow
@@ -1778,6 +1828,13 @@ def run_poll_fast():
                      f"- madeonsol_calls: {madeonsol_calls}\n"
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
 
+    # Layer 13 (Fomo) also runs here since Sept 30 2026 -- it was PC-only,
+    # so it silently never ran whenever the PC job wasn't scheduled. Shared
+    # state gating inside poll_layer13_fomo_copytrade keeps GitHub Actions
+    # and the PC from both spending credits on the same window.
+    l13 = _safe(poll_layer13_fomo_copytrade)
+    if isinstance(l13, dict) and not l13.get("ok"):
+        print(f"[layer13] {l13.get('reason')}")
     _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(), f"alerts={alerts_sent}")
     if _stats():
         _print_cycle_summary(_stats())

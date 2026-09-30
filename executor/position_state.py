@@ -322,3 +322,39 @@ def stage_committed_usd(stage: str) -> float:
         remaining = remaining_pct(pos["chain"], pos["token"])
         total += entry["usd_amount"] * remaining
     return total
+
+
+ORPHAN_STAGE_MIN_AGE_SECONDS = 3600
+
+
+def reconcile_orphan_stages(now: Optional[float] = None,
+                            min_age_seconds: float = ORPHAN_STAGE_MIN_AGE_SECONDS) -> list:
+    """Self-healing repair (Sept 30 2026, found via the live diagnostic):
+    two BSC stage1 records from Sept 24 20:37 UTC -- written before
+    entrypoint.py called any real buy (Sept 25) and before failed buys got
+    tagged (Sept 28) -- had no buy_status, no fill and no tx. They counted
+    as $30 committed against a $30 Stage 1 budget, so EVERY band A/B alert
+    since Sept 24 was rejected as "budget exhausted".
+
+    A stage entry is recorded and its buy attempted in the same call, so a
+    stage still carrying no buy_status after an hour, on a position with no
+    token fill and no transaction of any kind, never had money behind it.
+    Those stages are tagged failed (same mark_stage_buy_failed path a
+    refused buy uses), which frees their budget and concurrency slot. The
+    position is NOT closed -- closing would feed a fake loss into the
+    deployer track record. Idempotent; returns what it repaired."""
+    now = now if now is not None else time.time()
+    repaired = []
+    for pos in list_open_positions():
+        if pos.get("amount_tokens") or pos.get("tx_signature") or pos.get("unconfirmed_fills") \
+                or pos.get("fill_status"):
+            continue
+        for stage, entry in (pos.get("stages") or {}).items():
+            if entry.get("buy_status") is not None:
+                continue
+            if now - float(entry.get("ts") or pos.get("opened_ts") or now) < min_age_seconds:
+                continue
+            mark_stage_buy_failed(pos["chain"], pos["token"], stage,
+                                  reason="orphan record: no buy was ever attempted/filled (auto-repaired)")
+            repaired.append((pos["chain"], pos["token"], stage))
+    return repaired

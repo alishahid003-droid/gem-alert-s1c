@@ -1436,6 +1436,19 @@ def _gt_float(val):
         return None
 
 
+def _gt_txn_total(attrs: dict, window: str) -> Optional[int]:
+    """buys+sells for one window from GeckoTerminal's `transactions` block
+    (free, already in the new_pools response -- previously unused)."""
+    t = ((attrs.get("transactions") or {}).get(window)) or {}
+    b, s_ = t.get("buys"), t.get("sells")
+    if b is None and s_ is None:
+        return None
+    try:
+        return int(b or 0) + int(s_ or 0)
+    except (TypeError, ValueError):
+        return None
+
+
 def flatten_geckoterminal_pools(gt_json) -> list:
     """GeckoTerminal's JSON:API-style response nests every real field inside
     data[i]["attributes"], and the base token's contract address lives in
@@ -1465,12 +1478,16 @@ def flatten_geckoterminal_pools(gt_json) -> list:
             "volume_24h_usd": _gt_float((attrs.get("volume_usd") or {}).get("h24")),
             "liquidity_usd": _gt_float(attrs.get("reserve_in_usd")),
             "pool_created_at": attrs.get("pool_created_at"),
+            "txns_h1_total": _gt_txn_total(attrs, "h1"),
+            "txns_h24_total": _gt_txn_total(attrs, "h24"),
         })
     return out
 
 
 def signals_from_geckoterminal_pool(item: dict, chain: str,
-                                     holder_growth_rate_per_hr: Optional[float] = None) -> RawSignals:
+                                     holder_growth_rate_per_hr: Optional[float] = None,
+                                     price_drawdown_from_peak_pct: Optional[float] = None,
+                                     goplus_data: Optional[dict] = None) -> RawSignals:
     """Builds RawSignals for one flattened GeckoTerminal pool. vol/liq and
     liquidity come straight from GeckoTerminal's own real figures; every
     security-shaped signal (top10 concentration, LP-lock health, mint/
@@ -1486,7 +1503,7 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
     lp_locked = mint_revoked = freeze_revoked = top10_pct = None
     address = item.get("address")
     if address:
-        gp = fetch_goplus_security(chain, address)
+        gp = {"ok": True, "data": goplus_data} if goplus_data is not None else fetch_goplus_security(chain, address)
         if gp.get("ok"):
             d = gp["data"]
             lp_holders = d.get("lp_holders") or []
@@ -1524,7 +1541,50 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
         bundler_sniper_pct=None,  # no sniper/bundler-wallet signal in either GeckoTerminal or GoPlus
         liquidity_usd=item.get("liquidity_usd"),
         is_pregraduation_solana=False,
+        price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
+        txn_activity_decay_ratio=compute_activity_decay_ratio(item.get("txns_h1_total"),
+                                                              item.get("txns_h24_total")),
     )
+
+
+BIRDEYE_EVM_DAILY_CAP_DEFAULT = 40
+
+
+def _birdeye_evm_allowance() -> bool:
+    """Daily cap on Birdeye calls from the Base/BSC path (Sept 30 2026) --
+    Birdeye's free tier is small and the Solana deep-score path shares it,
+    so this can never drain it the way Layer 13 drained fomoapi.io."""
+    import os
+    try:
+        cap = int(os.environ.get("BIRDEYE_EVM_DAILY_CAP", str(BIRDEYE_EVM_DAILY_CAP_DEFAULT)))
+    except ValueError:
+        cap = BIRDEYE_EVM_DAILY_CAP_DEFAULT
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    rec = state.get_value("birdeye_evm_usage") or {}
+    used = rec.get("used", 0) if rec.get("day") == day else 0
+    if used >= cap:
+        return False
+    state.set_value("birdeye_evm_usage", {"day": day, "used": used + 1})
+    return True
+
+
+def _evm_launch_drawdown(chain: str, item: dict) -> Optional[float]:
+    import datetime
+    created = item.get("pool_created_at")
+    if not created or not item.get("address"):
+        return None
+    try:
+        start_ts = int(datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return None
+    end_ts = int(time.time())
+    if end_ts - start_ts < 15 * 60 or not _birdeye_evm_allowance():
+        return None
+    ohlcv = fetch_birdeye_ohlcv(chain, item["address"], start_ts, end_ts, interval="15m")
+    if not ohlcv.get("ok"):
+        return None
+    summary = summarize_launch_window(ohlcv.get("candles") or [])
+    return summary["drawdown_from_peak_pct"] if summary.get("ok") else None
 
 
 def score_geckoterminal_pools(chain: str, items: list) -> list:
@@ -1533,15 +1593,44 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
     consume either source's output identically -- capped to
     GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE items (newest first, GeckoTerminal's
     new_pools is already sorted that way) since every item here costs one
-    real GoPlus call, unlike Mobula's single-call-covers-everything shape."""
+    real GoPlus call, unlike Mobula's single-call-covers-everything shape.
+
+    Sept 30 2026 -- the live diagnostic showed every Base/BSC alert on the
+    dashboard sitting at 50-56/100 with ~65% of the score being neutral
+    filler. Three free/cheap signals now fill that in:
+      - GoPlus's own holder_count feeds real holder-growth history (the
+        same state.record_holder_point path Mobula/Solana use; weight 20);
+      - GeckoTerminal's own h1/h24 transaction counts feed the existing
+        activity-collapse override (pump-dump detection);
+      - for tokens that would reach band A/B anyway, Birdeye's launch-window
+        drawdown -- the backtest's strongest signal (7/7 settled) -- on a
+        daily-capped budget, then the token is re-scored with it."""
     results = []
     for item in items[:GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE]:
         address = item.get("address")
-        sig = signals_from_geckoterminal_pool(item, chain)
+        gp = fetch_goplus_security(chain, address) if address else {"ok": False}
+        gp_data = gp["data"] if gp.get("ok") else {}
+        growth = None
+        try:
+            holder_count = int(gp_data.get("holder_count")) if gp_data.get("holder_count") is not None else None
+        except (TypeError, ValueError):
+            holder_count = None
+        if address and holder_count is not None:
+            state.record_holder_point(address, holder_count)
+            growth = compute_holder_growth_rate_per_hr(state.get_holder_history(address))
+        sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
+                                              goplus_data=gp_data)
+        sr = score_token(sig)
+        if sr.band in ("A", "B") and chain in ("bsc", "base"):
+            dd = _evm_launch_drawdown(chain, item)
+            if dd is not None:
+                sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
+                                                      price_drawdown_from_peak_pct=dd, goplus_data=gp_data)
+                sr = score_token(sig)
         results.append({
             "chain": chain,
             "address": address,
-            "score": score_token(sig),
+            "score": sr,
             "raw": item,
         })
     return results

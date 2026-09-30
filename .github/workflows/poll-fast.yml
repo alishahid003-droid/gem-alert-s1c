@@ -56,6 +56,8 @@ jobs:
       - name: Run one fast poll cycle (discovery only)
         env:
           MADEONSOL_API_KEY: ${{ secrets.MADEONSOL_API_KEY }}
+          FOMOAPI_API_KEY: ${{ secrets.FOMOAPI_API_KEY }}
+          BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
           MOBULA_API_KEY: ${{ secrets.MOBULA_API_KEY }}
           CRYPTOPANIC_AUTH_TOKEN: ${{ secrets.CRYPTOPANIC_AUTH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

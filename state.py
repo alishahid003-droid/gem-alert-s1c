@@ -1033,7 +1033,8 @@ def get_fomo_signal_feed(limit: int = 100) -> list:
 def record_fomo_candidate(handle: str, display_name: str, balance_usd: float,
                            pnl_usd: Optional[float] = None, volume_usd: Optional[float] = None,
                            pnl_24h: Optional[float] = None, pnl_7d: Optional[float] = None,
-                           pnl_30d: Optional[float] = None, ts: Optional[float] = None):
+                           pnl_30d: Optional[float] = None, ts: Optional[float] = None,
+                           **extra):
     """A trader NOT on Ali's roster who cleared the $5k balance threshold
     (Ali's locked number, Sept 30 2026) -- surfaced for Ali to approve
     adding to the roster, never auto-added (roster.py's own docstring:
@@ -1049,6 +1050,7 @@ def record_fomo_candidate(handle: str, display_name: str, balance_usd: float,
         "handle": handle, "display_name": display_name, "balance_usd": balance_usd,
         "pnl_usd": pnl_usd, "volume_usd": volume_usd,
         "pnl_24h": pnl_24h, "pnl_7d": pnl_7d, "pnl_30d": pnl_30d, "ts": ts,
+        **extra,  # insider/insider_detail/wallet/promoted/promotion_reason (Sept 30 2026)
     })
     cutoff = ts - FOMO_CANDIDATE_MAX_AGE_SECONDS
     candidates = [c for c in candidates if c.get("ts", 0) >= cutoff][-FOMO_CANDIDATE_MAX_ITEMS:]
@@ -1201,3 +1203,29 @@ def record_runner_heartbeat(name: str, where: str = "", note: str = "", ts: Opti
 def get_runner_heartbeats() -> dict:
     v = get_value(RUNNER_HEARTBEATS_KEY)
     return v if isinstance(v, dict) else {}
+
+
+# --- Small TTL cache for paid third-party lookups (Sept 30 2026) ---
+def cache_get(key: str, max_age_seconds: float):
+    v = get_value(f"cache:{key}")
+    if not isinstance(v, dict) or "ts" not in v:
+        return None
+    if time.time() - v["ts"] > max_age_seconds:
+        return None
+    return v.get("value")
+
+
+def cache_set(key: str, value):
+    set_value(f"cache:{key}", {"ts": time.time(), "value": value})
+
+
+FOMO_CREDIT_STATE_KEY = "fomo_credit_state"
+
+
+def get_fomo_credit_state() -> dict:
+    v = get_value(FOMO_CREDIT_STATE_KEY)
+    return v if isinstance(v, dict) else {}
+
+
+def set_fomo_credit_state(v: dict):
+    set_value(FOMO_CREDIT_STATE_KEY, v)

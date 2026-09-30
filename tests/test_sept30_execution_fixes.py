@@ -137,3 +137,25 @@ def test_convergence_event_reaches_stage2(monkeypatch):
     assert calls[0][1] == "TokC"
     assert calls[0][2]["fomo_convergence_count"] == 3
     assert calls[0][2]["current_mcap_usd"] == 400000.0
+
+
+def test_orphan_stage_repaired_frees_budget():
+    import time as _t
+    position_state.record_stage_entry("bsc", "0xorphan1", "stage1", 15.0, 1000, "structural score band B")
+    position_state.record_stage_entry("bsc", "0xorphan2", "stage1", 15.0, 1000, "structural score band B")
+    assert position_state.stage_committed_usd("stage1") == 30.0
+    blocked = triggers.evaluate_stage1("bsc", "0xnew", "B", None, 0, signal_coverage=0.9)
+    assert blocked.should_fire is False and "budget" in blocked.reason
+    repaired = position_state.reconcile_orphan_stages(now=_t.time() + 7200)
+    assert len(repaired) == 2
+    assert position_state.stage_committed_usd("stage1") == 0.0
+    assert triggers.evaluate_stage1("bsc", "0xnew", "B", None, 0, signal_coverage=0.9).should_fire is True
+
+
+def test_recent_or_filled_stage_not_repaired():
+    import time as _t
+    position_state.record_stage_entry("solana", "Fresh", "stage1", 10.0, 1000, "x")
+    position_state.record_stage_entry("solana", "Filled", "stage1", 10.0, 1000, "x")
+    position_state.record_fill("solana", "Filled", 12345.0, tx_signature="sig")
+    assert position_state.reconcile_orphan_stages(now=_t.time() + 60) == []
+    assert position_state.reconcile_orphan_stages(now=_t.time() + 7200) == [("solana", "Fresh", "stage1")]
