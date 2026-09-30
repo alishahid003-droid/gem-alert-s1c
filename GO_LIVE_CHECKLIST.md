@@ -53,8 +53,12 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - [ ] **2.5 BOTH** — **Go/no-go gate**: real money only on signal types with paper win rate ≥ 80% (or the best achieved, with your explicit OK) over ≥ 30 closed paper trades. DONE-WHEN: gate numbers reviewed with you.
 - [ ] **2.6 CLAUDE** — Grow the labeled backtest set from ~17 to 100+ real rugs / pump-dumps / moonshots and re-run weekly (current accuracy 54.5% on 11 tokens is too small to trust). DONE-WHEN: ≥100 labeled, result logged.
 
+- [x] **2.7 CLAUDE** — **Fast trade backtest** on the labeled coins (Ali: no time to wait for paper results): real Birdeye candles, entry at +15/30/60 min, stage + scalper exits, costs, pessimistic candle order; point-in-time entry filter and exit-parameter grid. `backtest_trades.py`, workflow "Trade backtest" — `a4aeb14`, `2bb20fc`. First result (no entry filter, 24 coins): 33–42% win rate.
+- [ ] **2.8 CLAUDE** — Apply the backtest's best exit settings as defaults ONLY where the paper ledger confirms them (24 coins overfit easily). DONE-WHEN: defaults changed with paper evidence logged.
+
 ## Phase 3 — Entry quality (fewer, better buys)
 
+- [x] **3.0 CLAUDE** — **Solana + Robinhood Chain discovery** (Ali: "why are only BSC/Base coins on the Alerts tab?"): free GeckoTerminal trending + new pools (>=10 min, >=$5k liquidity), GoPlus Solana security, free-RPC holder concentration, pump.fun pre-graduation bands, Robinhood via GeckoTerminal id `robinhood` — zero MadeOnSol calls — `78d6c42`, `e33cd92`. Live once PR #2 merges.
 - [ ] **3.1 CLAUDE** — **Confluence rule**: a real buy needs ≥2 independent layers agreeing (e.g. band A/B + tracked trader, or trusted deployer + momentum), not one signal alone. Tunable per signal from Phase 2 data. DONE-WHEN: enforced + tested.
 - [ ] **3.2 CLAUDE** — **Sell-ability check before every buy**: quote the SELL leg too (Jupiter/router) and refuse if it can't route, tax > 10%, or honeypot/freeze/Token-2022 transfer-hook risk (GoPlus + on-chain). DONE-WHEN: buys refuse unsellable tokens in tests.
 - [ ] **3.3 CLAUDE** — **Liquidity & slippage floor**: refuse if our size is > 2% of pool liquidity or quoted price impact > 3%. DONE-WHEN: enforced + tested.
