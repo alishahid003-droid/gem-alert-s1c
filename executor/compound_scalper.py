@@ -359,6 +359,9 @@ def status() -> dict:
         "tripped_reason": pool.get("tripped_reason"),
         "session_expired": session_expired(pool),
         "open_position": pool.get("open_position"),
+        "banked_usd": pool.get("banked_usd", 0.0),
+        "milestones_hit": pool.get("milestones_hit", []),
+        "sprint": sprint_mode(),
     }
 
 
@@ -397,9 +400,11 @@ def entry_gate(chain: str, token: str, score_band: Optional[str],
     if pool.get("session_start_ts") is None:
         return ScalpDecision(False, "pool not started -- call init_pool() first (deliberate, manual step)")
 
-    if pool.get("tripped") and sprint_mode():
-        from executor.sprint import maybe_resume
-        pool = maybe_resume(pool)
+    if sprint_mode():
+        from executor.sprint import maybe_resume, apply_milestones
+        pool = apply_milestones(pool)
+        if pool.get("tripped"):
+            pool = maybe_resume(pool)
 
     if pool.get("tripped"):
         return ScalpDecision(False, f"circuit tripped: {pool.get('tripped_reason')}")

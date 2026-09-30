@@ -90,3 +90,39 @@ def test_sprint_reserves_wallet(monkeypatch):
     bought = []
     monkeypatch.setattr(ep, "_attempt_buy_and_record_fill", lambda *a, **k: bought.append(a) or {"ok": True})
     assert ep.handle_moonshot_candidate("solana", "MS2", "B", 800_000, 400_000, 70, {"signals": 1})["fired"]
+
+
+def test_milestones_bank_profits(monkeypatch):
+    monkeypatch.delenv("SPRINT_MILESTONES", raising=False)
+    sent = []
+    import executor.trade_ops as to
+    monkeypatch.setattr(to, "_send", lambda t: sent.append(t))
+    pool = cs._default_pool()
+    pool.update(balance_usd=3_620.0, seed_usd=100.0, session_start_ts=time.time())
+    pool = sprint.apply_milestones(pool)
+    assert pool["balance_usd"] == 500 and pool["banked_usd"] == 3_120.0 and "3500.0" in pool["milestones_hit"]
+    pool = sprint.apply_milestones(pool)                                # no double banking
+    assert pool["banked_usd"] == 3_120.0
+    pool["balance_usd"] = 21_000.0
+    pool = sprint.apply_milestones(pool)
+    assert pool["balance_usd"] == 1_500 and pool["banked_usd"] == 3_120.0 + 19_500.0
+    pool["balance_usd"] = 76_000.0
+    pool = sprint.apply_milestones(pool)
+    assert pool["tripped"] and pool["tripped_kind"] == "target_reached" and pool["balance_usd"] == 0
+    assert len(sent) == 3 and "MILESTONE" in sent[0]
+
+
+def test_milestones_wait_for_flat_pool():
+    pool = cs._default_pool()
+    pool.update(balance_usd=5_000.0, open_position={"token": "X"})
+    assert sprint.apply_milestones(pool)["balance_usd"] == 5_000.0
+
+
+def test_modules_board_rows(monkeypatch):
+    import dashboard
+    monkeypatch.setenv("SPRINT_MODE", "true")
+    rows = dashboard._modules_board(cs.status())
+    names = [r["module"] for r in rows]
+    assert any("Sprint pool" in n for n in names) and any("Momentum lane" in n for n in names)
+    assert any("Moonshot" in n for n in names) and len(rows) == 5
+    assert all(r["real"] is False for r in rows)        # EXECUTION_ENABLED off in tests
