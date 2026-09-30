@@ -513,12 +513,13 @@ def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool =
     unmatched = {}
     convergence = {}
     buyers_by_handle = {}
+    roster_sells = []
     learned = state.get_fomo_handle_map()
     promoted = state.get_fomo_promoted()
     seen = state.fomo_signal_ids()
     for a in alerts:
         alert_type = (a.get("alertType") or a.get("type") or "").lower()
-        if alert_type not in ("buy", "thesis"):
+        if alert_type not in ("buy", "thesis", "sell"):
             continue
         handle = a.get("trader") or a.get("handle")
         display = _alert_display_name(a)
@@ -527,6 +528,12 @@ def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool =
         if alert_type == "buy" and handle and mint:
             buyers_by_handle.setdefault(handle, []).append((chain, mint))
         roster_name = _match_roster(handle, display, learned=learned, promoted=promoted)
+        if alert_type == "sell":
+            # Checklist 4.5: a roster trader's sell feeds executor.copy_exit
+            # (no scoring, no PnL lookup -- zero extra credits).
+            if roster_name and mint:
+                roster_sells.append({"chain": chain, "mint": mint, "trader": roster_name})
+            continue
         if not roster_name:
             label = handle or display or "?"
             unmatched[label] = unmatched.get(label, 0) + 1
@@ -567,7 +574,7 @@ def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool =
         state.note_fomo_unmatched_handles(unmatched)
     return {"buys_recorded": buys_recorded, "theses_recorded": theses_recorded,
             "unmatched": unmatched, "convergence": list(convergence.values()),
-            "buyers_by_handle": buyers_by_handle}
+            "buyers_by_handle": buyers_by_handle, "roster_sells": roster_sells}
 
 
 def _auto_promote_enabled() -> bool:

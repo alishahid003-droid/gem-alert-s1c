@@ -1339,6 +1339,14 @@ def poll_layer13_fomo_copytrade() -> dict:
                 if stage2["fired"] and _stats():
                     _stats().note_execution(2, ev["chain"], ev["mint"], stage2["position_usd"],
                                             stage2["conviction_score"])
+            # Checklist 4.5: the traders we copied sold -> we sell.
+            if detected.get("roster_sells"):
+                from executor import copy_exit
+                mirrored = _safe(copy_exit.mirror_sells, detected["roster_sells"]) or []
+                out["copy_exits"] = len(mirrored) if isinstance(mirrored, list) else 0
+                for m in (mirrored if isinstance(mirrored, list) else []):
+                    print(f"[layer13] copy-exit {m['mint'][:8]} [{m['chain']}] after {m['trader']} sold: "
+                          f"attempted={m['sell_attempted']} ok={m.get('ok')} ({m.get('reason')})")
     else:
         out["alerts_skipped"] = "polled recently by another runner/cycle"
 
