@@ -714,3 +714,45 @@ they're slipping into band B alongside real moonshots:
 - [ ] Once the sample is wider (item B above), re-run the categorized
   backtest and look specifically at the per-token pump-dump breakdown for
   a common pattern -- n=2 today is too small to see one.
+
+## Update -- Sept 30 2026, ~9:40 AM PKT (real scheduling bug found and fixed: poll-fast was stuck for 4h38m+)
+
+Ali gave full go-ahead to hunt down and fix everything except deployer-history
+signup and private keys/execution, working autonomously while he sleeps.
+
+- [x] DONE: fixed executor/rpc_pool.py to actually use its own fallback pool
+  on a network-level failure (ApiUnreachable), not just ordinary bad
+  responses. Root cause of the RPC-timeout skips seen in run #7. No fresh
+  endpoint test needed -- Ali already live-tested all 3 Solana endpoints
+  healthy Sept 23 2026 (see rpc_pool.py's own docstring); this was a pure
+  code gap in using that already-verified pool. 3 new tests, 521/522
+  passing (1 pre-existing unrelated failure, unchanged). Committed e0a2dbd.
+- [x] DONE, REAL BUG FOUND AND FIXED (bigger than expected): while checking
+  Section 2's "are the live signals actually populating" item, found
+  poll-fast had been effectively DEAD for a long stretch -- run #146
+  (commit 5a70b28, started ~overnight) was stuck running the OLD
+  `run_poll_fast_loop()` entrypoint (self-loops internally for up to
+  5h45m, built before cron-job.org existed) instead of the newer
+  `--poll-fast-once` single-cycle flag. It held the `poll-fast`
+  concurrency group's one slot for 4h38m+, during which 130+ consecutive
+  cron-job.org dispatches (runs #40 through #172, checked directly) all
+  queued behind it and got CANCELLED with 0s actual job run time --
+  real Layer 1/0b/4/6 discovery cycles silently not happening basically
+  the entire time. Confirmed via that run's own log it wasn't hung/broken
+  -- it was delivering real alerts every ~20min the whole time, just using
+  the wrong entrypoint for the current cron-job.org-driven architecture.
+  Fixed: poll-fast.yml now calls `--poll-fast-once` (cron-job.org's own
+  10-min cadence is the sole pacing source now). Also added
+  `timeout-minutes` (8 for poll-fast, 15 for poll-slow) as a hard safety
+  net so ANY future hang -- not just this specific bug -- can never again
+  block a concurrency group for hours. Ali cancelled run #146 manually via
+  GitHub's UI once the fix was ready. 521/522 passing. Committed 8f41af9.
+- [ ] STILL PENDING: push commits e0a2dbd (rpc_pool fix), 8f41af9
+  (poll-fast/poll-slow scheduling fix + 02cd0f5's checklist doc) from
+  Ali's machine -- git push required from his own terminal, this bridge
+  shell has no cached GitHub credentials. Batching further work before
+  asking for the next push.
+- [ ] Once pushed: watch the next 2-3 real poll-fast cron-job.org runs
+  complete SUCCESSFULLY (not cancelled) at their real ~10-min cadence, to
+  confirm the fix actually holds under real repeated dispatches, not just
+  in theory.
