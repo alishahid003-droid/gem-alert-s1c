@@ -32,7 +32,8 @@ def test_thin_pool_and_pool_share():
 def test_vertical_candle_and_late_entry():
     assert "5 min" in g.check("A", 20, {"liquidity_usd": 90_000, "change_m5": 80})[1]
     assert "1 h" in g.check("A", 20, {"liquidity_usd": 90_000, "change_h1": 450})[1]
-    assert g.check("C", 20, {"liquidity_usd": 90_000, "change_h1": 450}, momentum=True)[0]  # momentum: 1h ok
+    assert g.check("B", 20, {"liquidity_usd": 90_000, "change_h1": 450}, momentum=True)[0]  # momentum: 1h ok
+    assert not g.check("C", 20, {"liquidity_usd": 90_000}, momentum=True)[0]  # band C: paper only (replay)
 
 
 def test_snipers():

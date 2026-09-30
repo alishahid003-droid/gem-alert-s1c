@@ -35,7 +35,7 @@ from backtest_trades import sim_stage, sim_scalper, POSITION_USD
 from executor.compound_scalper import estimate_round_trip_cost_pct
 
 GT_NET = {"solana": "solana", "bsc": "bsc", "base": "base", "robinhood_chain": "robinhood"}
-GT_PAUSE_SECONDS = 2.2          # GeckoTerminal free tier: 30 calls/min
+GT_PAUSE_SECONDS = 5.0          # run 2 hit 429 on ~every other call at 2.2 s
 ENTRY_DELAY_MIN = 2
 
 
@@ -122,9 +122,38 @@ def stats(rows):
     return f"{wins:>3}/{len(rows):<3} {wins / len(rows) * 100:>4.0f}%  avg {avg:+6.1f}%  P&L ${tot:+8.1f}"
 
 
+def report(results, skipped):
+    print("\n" + "=" * 90)
+    for strat in ("stage", "scalper"):
+        rs = [r for r in results if r["strat"] == strat]
+        print(f"{strat.upper():8s} ALL            {stats(rs)}")
+        for b in "ABCD":
+            print(f"         band {b}         {stats([r for r in rs if r['band'] == b])}")
+        for ch in GT_NET:
+            sub = [r for r in rs if r["chain"] == ch]
+            if sub:
+                print(f"         {ch:15s}{stats(sub)}")
+        for g in ("WOULD BUY", "refused", "no verdict"):
+            sub = [r for r in rs if r["gate"] == g]
+            if sub:
+                print(f"         gate: {g:9s}{stats(sub)}")
+        exits = defaultdict(int)
+        for r in rs:
+            exits[r["how"]] += 1
+        print(f"         exits: {dict(exits)}")
+        print("-" * 90)
+    open_end = sum(1 for r in results if r["how"].startswith("still_open"))
+    print(f"GeckoTerminal non-OK replies by status: {dict(_GT_ERRORS)}")
+    print(f"skipped: {dict(skipped)}; trades still open at data end (marked to last candle): {open_end}")
+    print("Limits: last-24h live alerts only; open trades marked to market; entry = alert time + "
+          f"{ENTRY_DELAY_MIN} min.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-coins", type=int, default=120)
+    ap.add_argument("--budget-minutes", type=float, default=18.0,
+                    help="stop replaying and print the report after this long")
     args = ap.parse_args()
 
     feed = state.get_alert_feed(limit=300)
@@ -135,7 +164,8 @@ def main():
             continue
         seen.add(tok)
         alerts.append(it)
-    alerts = alerts[-args.max_coins:]
+    # Band B first (the real-money band), newest first, then band C.
+    alerts = sorted(alerts, key=lambda a: (_band(a) != "B", -a.get("ts", 0)))[:args.max_coins]
     verdicts = state.get_autobuy_verdicts([a["token_address"] for a in alerts])
     band_counts = {b: sum(1 for a in alerts if _band(a) == b) for b in "ABCD"}
     print(f"Alert replay: {len(alerts)} unique alerted coins from the live feed (bands {band_counts})\n")
@@ -148,7 +178,11 @@ def main():
     print(f"DexScreener found pools for {len(pools)}/{len(alerts)} coins\n")
 
     results, skipped = [], defaultdict(int)
-    for a in alerts:
+    deadline = time.time() + args.budget_minutes * 60
+    for n, a in enumerate(alerts):
+        if time.time() > deadline:
+            skipped["time budget reached (not replayed)"] += len(alerts) - n
+            break
         chain, tok, band = a["chain"], a["token_address"], _band(a)
         pool, liq = pools.get(tok) or top_pool(chain, tok)
         if not pool:
@@ -175,31 +209,7 @@ def main():
         print(f"  {chain:15s} {tok[:10]} band {band} {gate:10s} stage {st['pnl'] / POSITION_USD * 100:+6.0f}% "
               f"{st['how']:22s} scalper {sc['pnl'] / POSITION_USD * 100:+6.0f}% {sc['how']}")
 
-    print("\n" + "=" * 90)
-    for strat in ("stage", "scalper"):
-        rs = [r for r in results if r["strat"] == strat]
-        print(f"{strat.upper():8s} ALL            {stats(rs)}")
-        for b in "ABCD":
-            print(f"         band {b}         {stats([r for r in rs if r['band'] == b])}")
-        for ch in GT_NET:
-            sub = [r for r in rs if r["chain"] == ch]
-            if sub:
-                print(f"         {ch:15s}{stats(sub)}")
-        for g in ("WOULD BUY", "refused", "no verdict"):
-            sub = [r for r in rs if r["gate"] == g]
-            if sub:
-                print(f"         gate: {g:9s}{stats(sub)}")
-        exits = defaultdict(int)
-        for r in rs:
-            exits[r["how"]] += 1
-        print(f"         exits: {dict(exits)}")
-        print("-" * 90)
-    open_end = sum(1 for r in results if r["how"].startswith("still_open"))
-    print(f"GeckoTerminal non-OK replies by status: {dict(_GT_ERRORS)}")
-    print(f"skipped: {dict(skipped)}; trades still open at data end (marked to last candle): {open_end}")
-    print("Limits: last-24h live alerts only; open trades marked to market; entry = alert time + "
-          f"{ENTRY_DELAY_MIN} min.")
-
+    report(results, skipped)
 
 if __name__ == "__main__":
     main()
