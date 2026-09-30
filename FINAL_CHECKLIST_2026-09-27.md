@@ -877,3 +877,37 @@ signup and private keys/execution, working autonomously while he sleeps.
   complete SUCCESSFULLY (not cancelled) at their real ~10-min cadence, to
   confirm the fix actually holds under real repeated dispatches, not just
   in theory.
+
+## Update -- Sept 30 2026, ~11:17 AM PKT (real Fomo API found -- fixes the dead fomoapi_base_url config)
+
+Ali corrected a wrong assumption I was working under: config.py's
+`fomoapi_api_key` / `fomoapi_base_url` have been dead/unwired the whole
+time -- nothing in the codebase ever calls it. Ali also clarified Fomo is
+NOT just an alert source layered on pump.fun data -- he wants real
+copy-trading detection off Fomo itself (which traders he follows are
+buying/selling, plus any "thesis" comment they leave on a coin, sometimes
+with a verifiable X link), and StonkFun should be treated as equally
+first-class, not a pump.fun-only test scope.
+
+StonkFun re-confirmed as already real and live (layers/layer0c_stonkfun_scoring.py,
+worker_stonkfun_snipe.py, wired into scheduler.py since Sept 22) -- no
+action needed there, this was a communication gap on my side, not a
+missing build.
+
+- [ ] TODO: wire a real fomoapi.io integration (found via web research --
+  this is a THIRD-PARTY API that tracks the Fomo social-trading platform:
+  resolves a trader's X/Telegram handle to their real on-chain wallet,
+  live WebSocket trade feed, holdings/PnL, and a **theses endpoint** --
+  i.e. exactly the "trader leaves a thesis on a coin" signal Ali asked
+  for, in the same API). Free tier: $0/mo, no card, 1,000 calls/month,
+  covers wallets/trades/holdings/theses on Solana + EVM; realtime feed
+  has a 15-sec delay after first 7 days on free tier (paid removes delay,
+  starts $49.99/mo).
+  BLOCKED ON: Ali signing up at fomoapi.io/dashboard (email only, no
+  card) and supplying the API key -- account creation/credential entry is
+  a hard line I don't cross even on explicit request. Once key is in
+  hand: replace the current dead-end (layers/roster.py's 38 hand-typed
+  trader names matched only against pump.fun's MadeOnSol KOL feed via
+  layers/layer2_convergence.py) with real Fomo wallet-resolution + trade
+  feed + thesis detection, verified against the actual trader list Ali
+  supplied Sept 24.
