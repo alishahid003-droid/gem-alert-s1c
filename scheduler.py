@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd, fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, score_geckoterminal_pools, GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd, fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, score_geckoterminal_pools, GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE, fetch_geckoterminal_trending_pools, select_gt_candidates, GT_MIN_LIQUIDITY_USD, GT_MIN_AGE_MINUTES
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -131,6 +131,8 @@ import executor.compound_scalper as compound_scalper
 import executor.position_state as position_state
 import executor.moonbag as moonbag
 import executor.defensive_sell as defensive_sell
+import executor.exit_rules as exit_rules
+import executor.paper_ledger as paper_ledger
 import executor.campaign_milestones as campaign_milestones
 from layers.layer0_scoring import RawSignals, fetch_dexscreener_snapshot
 from layers.layer3_backing_check import check_backing_spike
@@ -330,6 +332,9 @@ def _safe(fn, *args, **kwargs):
 # worst case -- see README's call-budget section.
 LAYER8_MAX_DEEP_SCORES_PER_SLOW_CYCLE = 3
 
+GECKOTERMINAL_NETWORK_SLUGS = {"bsc": "bsc", "base": "base", "solana": "solana",
+                               "robinhood_chain": "robinhood"}  # "robinhood" confirmed live via /networks, Sept 30 2026
+GECKOTERMINAL_EXTRA_CHAINS = ["solana", "robinhood_chain"]  # free Layer 0b scan beyond Mobula's chains (Sept 30 2026)
 MOBULA_PULSE_CHAINS = [("bsc", "evm:56"), ("base", "evm:8453")]  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- TON/ETH still dropped, scope cut Sept 22, 2026. evm:<numeric chainId> is Mobula's real chain-id format (bug #4, fixed Sept 24 2026) -- "bnb:bnb"/"base:base" were never valid and caused a raw 500.
 
 
@@ -583,6 +588,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
                 chain, mint, score_band=sr.band, deployer_tier=effective_deployer_tier,
                 convergence_count=0, entry_mcap=mc,
                 signal_coverage=getattr(sr, "signal_coverage", None),
+                liquidity_usd=(scored.get("raw") or {}).get("liquidity_usd"),
             )
         # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
         # 2026, Ali: "would these trades have been executed?") -- the real
@@ -973,7 +979,7 @@ def _run_position_management_cycle() -> dict:
     not just a low absolute number -- state stores the last-seen liquidity
     per chain:token, same pattern worker_stonkfun_snipe.py already uses,
     so this is correct across cycles/restarts too)."""
-    managed, trims_fired, milestones_fired, defends_fired = [], [], [], []
+    managed, trims_fired, milestones_fired, defends_fired, exits_fired = [], [], [], [], []
     for pos in position_state.list_open_positions():
         chain, token = pos.get("chain"), pos.get("token")
         if not chain or not token:
@@ -985,6 +991,16 @@ def _run_position_management_cycle() -> dict:
         current_mcap = snap["mcap_usd"]
         current_liq = snap.get("liquidity_usd")
         managed.append(f"{chain}:{token[:8]}")
+
+        # Exit discipline first (Phase 4, Sept 30 2026): stop-loss, breakeven
+        # lock, trailing stop, time stop -- see executor/exit_rules.py.
+        exit_result = _safe(exit_rules.check_and_exit, chain, token, current_mcap, current_liq)
+        if isinstance(exit_result, dict) and exit_result.get("decision"):
+            exits_fired.append(exit_result)
+            d = exit_result["decision"]
+            print(f"[position-mgmt:{chain}] {d.exit_type.upper()} {token[:8]}: {d.reason}")
+            if d.action == "exit_all":
+                continue
 
         trim_result = moonbag.check_and_trim(chain, token, current_mcap)
         if trim_result is not None:
@@ -1014,7 +1030,8 @@ def _run_position_management_cycle() -> dict:
               f"{len(trims_fired)} trim(s), {len(milestones_fired)} milestone action(s), "
               f"{len(defends_fired)} defensive exit(s) fired this cycle.")
     return {"managed": managed, "trims_fired": trims_fired,
-            "milestones_fired": milestones_fired, "defends_fired": defends_fired}
+            "milestones_fired": milestones_fired, "defends_fired": defends_fired,
+            "exits_fired": exits_fired}
 
 
 def _run_compound_scalper_cycle() -> dict:
@@ -1214,7 +1231,8 @@ def poll_layer13_fomo_copytrade() -> dict:
                 snap = _safe(fetch_dexscreener_snapshot, ev["chain"], ev["mint"])
                 mcap = snap.get("mcap_usd") if isinstance(snap, dict) else None
                 stage2 = handle_stage2_candidate(ev["chain"], ev["mint"], current_mcap_usd=mcap,
-                                                 fomo_convergence_count=ev["count"], graduated=True)
+                                                 fomo_convergence_count=ev["count"], graduated=True,
+                                                 signal_name="fomoapi_roster_convergence")
                 state.record_autobuy_verdict(ev["mint"], ev["chain"], stage2)
                 print(f"[layer13] {ev['count']} roster traders ({', '.join(ev['traders'])}) bought "
                       f"{ev['mint'][:8]} [{ev['chain']}] -> stage2 fired={stage2['fired']} ({stage2['reason']})")
@@ -1360,9 +1378,14 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
     Returns the number of alerts actually delivered, same convention as
     every other _run_* helper in this file."""
     alerts_sent = 0
-    gt_network = chain  # GeckoTerminal's own slug already matches this codebase's chain name for bsc/base
+    gt_network = GECKOTERMINAL_NETWORK_SLUGS.get(chain, chain)  # bsc/base/solana match our names
+    # Trending pools first (coins already moving, with liquidity), then new
+    # pools; both filtered to >= $5k liquidity and >= 10 min old -- see
+    # layer0_scoring.select_gt_candidates for the live finding behind this.
+    trending = _safe(fetch_geckoterminal_trending_pools, gt_network)
     raw = _safe(fetch_geckoterminal_new_pools, gt_network)
-    if not (isinstance(raw, dict) and raw.get("ok")):
+    ok_sources = [r for r in (trending, raw) if isinstance(r, dict) and r.get("ok")]
+    if not ok_sources:
         detail = raw.get("reason") if isinstance(raw, dict) else describe_fetch_failure({"raw": raw})
         print(f"[layer0b/8:{chain}] GeckoTerminal fallback fetch failed: {detail}")
         if _stats():
@@ -1370,7 +1393,12 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
         return alerts_sent
     if _stats():
         _stats().note_module(f"layer0b pulse ({chain}) [GeckoTerminal fallback]", True)
-    items = flatten_geckoterminal_pools(raw.get("json"))
+    fetched_items = []
+    for r in ok_sources:
+        fetched_items.extend(flatten_geckoterminal_pools(r.get("json")))
+    items = select_gt_candidates(fetched_items)
+    print(f"[layer0b/8:{chain}] {len(fetched_items)} pool(s) fetched, {len(items)} tradeable candidate(s) "
+          f"(>= ${GT_MIN_LIQUIDITY_USD:,.0f} liquidity, >= {GT_MIN_AGE_MINUTES:.0f} min old)")
     for scored in score_geckoterminal_pools(chain, items):
         mint = scored["address"]
         mc = scored["raw"].get("market_cap_usd") or scored["raw"].get("fdv_usd")
@@ -1719,6 +1747,15 @@ def run_poll_fast():
         if not mobula_ok:
             alerts_sent += _run_geckoterminal_fallback(chain, board)
 
+    # Free Solana discovery (Sept 30 2026). Ali: "why is no Solana coin
+    # coming up in the alerts?" -- BSC/Base had a free scan every 10 min,
+    # Solana was ONLY scored via MadeOnSol on the PC, whose 190/day budget
+    # is spent by mid-day. Same GeckoTerminal new-pools feed, GoPlus Solana
+    # security, free-RPC holder concentration, capped Birdeye crash check:
+    # zero MadeOnSol calls.
+    for chain in GECKOTERMINAL_EXTRA_CHAINS:
+        alerts_sent += _run_geckoterminal_fallback(chain, board)
+
     # --- Layer 2b: self-built pump.fun smart-money convergence (Ali, Sept
     # 23 2026). Keyless (free Solana RPC only), so always attempted, no
     # CONFIG gate -- see poll_layer2b_pumpfun_smart_money's docstring for
@@ -1828,6 +1865,13 @@ def run_poll_fast():
                      f"- madeonsol_calls: {madeonsol_calls}\n"
                      f"- layer2b roster_size: {l2b_result.get('roster_size') if isinstance(l2b_result, dict) else 'n/a'}\n")
 
+    # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
+    # position and apply the same exits real money uses -- the measured win
+    # rate per signal lives here. See executor/paper_ledger.py.
+    paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot)
+    if isinstance(paper, dict) and paper.get("open") is not None:
+        print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
+
     # Layer 13 (Fomo) also runs here since Sept 30 2026 -- it was PC-only,
     # so it silently never ran whenever the PC job wasn't scheduled. Shared
     # state gating inside poll_layer13_fomo_copytrade keeps GitHub Actions
@@ -1870,7 +1914,7 @@ def _run_layer8_cycle(board):
                 # per-cycle overflow above, so nothing here is lost, just
                 # deferred to whenever budget frees up (next UTC day, or a
                 # quieter cycle).
-                if state.madeonsol_budget_remaining() < 3:
+                if not state.madeonsol_can_spend(3, priority=True):  # paced, checklist 5.7
                     state.queue_rescan(p["token"], p["chain"], p["is_pregraduation"])
                     continue
                 scored = _safe(score_solana_mint, p["token"], chain, is_pregraduation=p["is_pregraduation"])

@@ -63,3 +63,27 @@ def test_goplus_holder_count_recorded(monkeypatch):
     monkeypatch.setattr(l0, "_evm_launch_drawdown", lambda c, i: None)
     l0.score_geckoterminal_pools("bsc", [_item()])
     assert state.get_holder_history("0xabc")
+
+
+def test_solana_free_path_uses_goplus_solana_and_rpc(monkeypatch):
+    sol_gp = {"mintable": {"status": "0"}, "freezable": {"status": "0"}}
+    monkeypatch.setattr(l0, "fetch_goplus_security", lambda c, a: {"ok": True, "data": sol_gp})
+    monkeypatch.setattr(l0, "fetch_solana_top10_holder_pct", lambda mint: 0.18)
+    monkeypatch.setattr(l0, "_evm_launch_drawdown", lambda c, i: -5.0)
+    item = _item(address="So1anaMint111", dex_id="raydium")
+    out = l0.score_geckoterminal_pools("solana", [item])[0]["score"]
+    assert out.band in ("A", "B")
+    assert out.signal_coverage >= 0.5          # passes the real-data gate
+    pregrad = l0.signals_from_geckoterminal_pool(dict(item, dex_id="pump-fun"), "solana", goplus_data=sol_gp)
+    assert pregrad.is_pregraduation_solana is True
+
+
+def test_select_gt_candidates_filters_fresh_and_illiquid():
+    now = 1_790_700_000
+    import datetime
+    iso = lambda mins: datetime.datetime.fromtimestamp(now - mins * 60, tz=datetime.timezone.utc).isoformat()
+    items = [{"address": "a", "liquidity_usd": 0.0, "pool_created_at": iso(30)},        # no liquidity
+             {"address": "b", "liquidity_usd": 20000.0, "pool_created_at": iso(2)},     # too fresh
+             {"address": "c", "liquidity_usd": 20000.0, "pool_created_at": iso(30)},    # good
+             {"address": "c", "liquidity_usd": 20000.0, "pool_created_at": iso(30)}]    # duplicate
+    assert [i["address"] for i in l0.select_gt_candidates(items, now_ts=now)] == ["c"]

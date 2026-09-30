@@ -49,9 +49,11 @@ def fetch_deployer_alerts(chain: str = "solana", since: str = None) -> dict:
     # madeonsol_budget_remaining() docstring for why (a confirmed real
     # 200/day BASIC-tier cap, hit live today). Fails closed with a clear
     # reason rather than spending a call MadeOnSol would just reject anyway.
-    if state.madeonsol_budget_remaining() < 1:
-        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted "
-                                        f"({state.madeonsol_calls_today()}/{state.MADEONSOL_DAILY_BUDGET})"}
+    # Paced since Sept 30 2026 (checklist 5.7) -- routine scan, see
+    # state.madeonsol_can_spend. Skipped cycles simply run on a later one.
+    if not state.madeonsol_can_spend(1, priority=False):
+        return {"ok": False, "reason": "MadeOnSol routine budget paced for this hour "
+                                        f"({state.madeonsol_calls_today()}/{state.MADEONSOL_DAILY_BUDGET} used today)"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
     # FIXED Sept 25, 2026 -- real bug found live-testing backtest.py's
@@ -69,7 +71,7 @@ def fetch_deployer_alerts(chain: str = "solana", since: str = None) -> dict:
         params["since"] = since
     result = get_json(f"{CONFIG.madeonsol_base_url}{prefix}/deployer-hunter/alerts",
                        headers=headers, params=params)
-    state.record_madeonsol_calls(1)
+    state.record_madeonsol_routine_calls(1)
     return {"ok": result["ok"], "raw": result}
 
 

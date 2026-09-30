@@ -87,6 +87,8 @@ def section_heartbeats():
     print(f"  MadeOnSol calls today (UTC day): {used} used, "
           f"{state.madeonsol_budget_remaining()} left of {state.MADEONSOL_DAILY_BUDGET} "
           f"(resets 00:00 UTC = 5:00 AM PKT)")
+    if hasattr(state, "madeonsol_pacing_status"):
+        print(f"  MadeOnSol pacing: {state.madeonsol_pacing_status()}")
 
 
 def _fomo(path, params=None):
@@ -192,6 +194,37 @@ def section_fomo():
                 print(f"    {k}: {str(v)[:300]}")
 
 
+def section_discovery():
+    hdr("5. FREE DISCOVERY PROBE (Solana via GeckoTerminal; Robinhood Chain network id)")
+    from layers.layer0_scoring import fetch_geckoterminal_new_pools, fetch_geckoterminal_trending_pools, \
+        flatten_geckoterminal_pools, score_geckoterminal_pools, select_gt_candidates
+    for chain, slug in (("solana", "solana"), ("robinhood_chain", "robinhood")):
+        pools = []
+        for fn in (fetch_geckoterminal_trending_pools, fetch_geckoterminal_new_pools):
+            r = fn(slug)
+            if r.get("ok"):
+                pools.extend(flatten_geckoterminal_pools(r.get("json")))
+        cands = select_gt_candidates(pools)
+        print(f"  {chain}: {len(pools)} pools fetched (trending+new), {len(cands)} tradeable candidates")
+        t0 = time.time()
+        for sc in score_geckoterminal_pools(chain, cands[:4]):
+            sr = sc["score"]
+            print(f"    {str(sc['address'])[:10]} {sr.score}/100 band {sr.band} real-data {sr.signal_coverage} "
+                  f"dex={sc['raw'].get('dex_id')} liq=${(sc['raw'].get('liquidity_usd') or 0):,.0f}")
+        print(f"    scored in {time.time() - t0:.0f}s")
+    found = []
+    for page in range(1, 8):
+        r = get_json(f"{CONFIG.geckoterminal_base_url}/networks", params={"page": page})
+        data = (r.get("json") or {}).get("data") or []
+        if not data:
+            break
+        for n in data:
+            name = ((n.get("attributes") or {}).get("name") or "")
+            if "robinhood" in (n.get("id", "") + name).lower():
+                found.append((n.get("id"), name))
+    print(f"  GeckoTerminal Robinhood network ids: {found or 'NOT LISTED'}")
+
+
 def section_execution():
     hdr("4. WOULD THE CURRENT ALERTS HAVE BEEN AUTO-BOUGHT?")
     from executor.config import EXECUTOR_CONFIG
@@ -259,7 +292,7 @@ def section_execution():
 
 def main():
     section_keys()
-    for fn in (section_heartbeats, section_fomo, section_execution):
+    for fn in (section_heartbeats, section_fomo, section_execution, section_discovery):
         try:
             fn()
         except Exception as e:  # diagnostic: report and keep going

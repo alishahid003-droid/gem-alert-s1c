@@ -1254,8 +1254,8 @@ def fetch_madeonsol_token_risk(mint: str, chain: Chain = "solana") -> dict:
     # BASIC-tier cap this protects against. Fails closed rather than
     # partially spending the day's remaining budget on a call that would
     # get rejected anyway.
-    if state.madeonsol_budget_remaining() < 3:
-        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted "
+    if not state.madeonsol_can_spend(3, priority=True):  # paced (checklist 5.7), priority tier
+        return {"ok": False, "reason": "MadeOnSol daily call budget exhausted/paced "
                                         f"({state.madeonsol_calls_today()}/{state.MADEONSOL_DAILY_BUDGET})"}
     prefix = "/rhc" if chain == "robinhood_chain" else ""
     headers = {"Authorization": f"Bearer {CONFIG.madeonsol_api_key}"}
@@ -1409,6 +1409,7 @@ def score_mobula_pulse_items(chain: str, items: list) -> list:
 # first every cycle (harmless if Ali ever upgrades that plan), and this is
 # the fallback scheduler.py reaches for only when Mobula's own fetch fails.
 GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE = 8
+GECKOTERMINAL_SCORING_TIME_BUDGET_SECONDS = 75
 
 
 def fetch_geckoterminal_new_pools(network: str) -> dict:
@@ -1417,6 +1418,47 @@ def fetch_geckoterminal_new_pools(network: str) -> dict:
     names, so no extra mapping needed, unlike Mobula's evm:<chainId> or
     GoPlus's numeric chain-id conventions)."""
     return get_json(f"{CONFIG.geckoterminal_base_url}/networks/{network}/new_pools")
+
+
+def fetch_geckoterminal_trending_pools(network: str) -> dict:
+    """Pools GeckoTerminal ranks as trending right now -- coins that already
+    have momentum and liquidity, same JSON shape as new_pools (Sept 30 2026)."""
+    return get_json(f"{CONFIG.geckoterminal_base_url}/networks/{network}/trending_pools")
+
+
+GT_MIN_LIQUIDITY_USD = 5000.0
+GT_MIN_AGE_MINUTES = 10.0
+
+
+def select_gt_candidates(items: list, now_ts: Optional[float] = None,
+                         min_liquidity_usd: float = GT_MIN_LIQUIDITY_USD,
+                         min_age_minutes: float = GT_MIN_AGE_MINUTES) -> list:
+    """Live finding (Sept 30 2026 diagnostic): the newest GeckoTerminal pools
+    are seconds old with $0 liquidity and no security data yet, so every one
+    scored band C on ~10% real data -- no alert could ever come out, and the
+    free RPC/GoPlus lookups timed out on them. Only coins at least
+    min_age_minutes old with real liquidity (also the floor a real trade
+    needs) are worth scoring. Dedupes by address, keeps input order."""
+    import datetime
+    now_ts = now_ts if now_ts is not None else time.time()
+    out, seen = [], set()
+    for it in items:
+        addr = it.get("address")
+        if not addr or addr in seen:
+            continue
+        if (it.get("liquidity_usd") or 0) < min_liquidity_usd:
+            continue
+        created = it.get("pool_created_at")
+        if created:
+            try:
+                age_min = (now_ts - datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp()) / 60
+                if age_min < min_age_minutes:
+                    continue
+            except ValueError:
+                pass
+        seen.add(addr)
+        out.append(it)
+    return out
 
 
 def _gt_float(val):
@@ -1480,8 +1522,36 @@ def flatten_geckoterminal_pools(gt_json) -> list:
             "pool_created_at": attrs.get("pool_created_at"),
             "txns_h1_total": _gt_txn_total(attrs, "h1"),
             "txns_h24_total": _gt_txn_total(attrs, "h24"),
+            # e.g. "pump-fun" for a pump.fun bonding-curve pool (Sept 30 2026:
+            # decides the stricter pre-graduation bands on the Solana path)
+            "dex_id": (((pool.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id"),
         })
     return out
+
+
+# Live finding (Sept 30 2026 diagnostic): from GitHub's runners the free
+# public Solana RPC often times out on getTokenLargestAccounts (~40 s per
+# coin), so the Solana scan scored only 2 of 4 candidates inside its time
+# budget. One slow/failed lookup switches the RPC holder check off for the
+# next 10 minutes -- the other signals (GoPlus, liquidity, activity,
+# Birdeye) still score every candidate.
+_SOL_TOP10_SLOW_SECONDS = 8.0
+_SOL_TOP10_COOLDOWN_SECONDS = 600
+_sol_top10_disabled_until = 0.0
+
+
+def _gt_solana_top10_fast(mint: str) -> Optional[float]:
+    global _sol_top10_disabled_until
+    if time.time() < _sol_top10_disabled_until:
+        return None
+    t0 = time.time()
+    try:
+        pct = fetch_solana_top10_holder_pct(mint)
+    except Exception:
+        pct = None
+    if pct is None or time.time() - t0 > _SOL_TOP10_SLOW_SECONDS:
+        _sol_top10_disabled_until = time.time() + _SOL_TOP10_COOLDOWN_SECONDS
+    return pct
 
 
 def signals_from_geckoterminal_pool(item: dict, chain: str,
@@ -1502,6 +1572,33 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
     unexpected rather than risk a wrong percentage."""
     lp_locked = mint_revoked = freeze_revoked = top10_pct = None
     address = item.get("address")
+    if address and chain == "solana":
+        # Free Solana path (Sept 30 2026): GoPlus's Solana schema differs
+        # from EVM (mintable/freezable objects), already parsed by
+        # parse_goplus_solana_security; top-10 concentration from the free
+        # RPC pool. No MadeOnSol call anywhere on this path.
+        gp = {"ok": True, "data": goplus_data} if goplus_data is not None else fetch_goplus_security(chain, address)
+        if gp.get("ok") and gp.get("data"):
+            parsed = parse_goplus_solana_security(gp["data"])
+            mint_revoked = parsed["mint_authority_revoked"]
+            freeze_revoked = parsed["freeze_authority_revoked"]
+            lp_locked = parsed["lp_locked"]
+        top10_pct = _gt_solana_top10_fast(address)
+        is_pregrad = "pump" in str(item.get("dex_id") or "").lower()
+        return RawSignals(
+            top10_holder_pct=top10_pct,
+            lp_locked_or_curve_healthy=lp_locked,
+            mint_authority_revoked=mint_revoked,
+            freeze_authority_revoked=freeze_revoked,
+            vol_to_liq_ratio=_safe_div(item.get("volume_24h_usd"), item.get("liquidity_usd")),
+            holder_growth_rate_per_hr=holder_growth_rate_per_hr,
+            bundler_sniper_pct=None,
+            liquidity_usd=item.get("liquidity_usd"),
+            is_pregraduation_solana=is_pregrad,
+            price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
+            txn_activity_decay_ratio=compute_activity_decay_ratio(item.get("txns_h1_total"),
+                                                                  item.get("txns_h24_total")),
+        )
     if address:
         gp = {"ok": True, "data": goplus_data} if goplus_data is not None else fetch_goplus_security(chain, address)
         if gp.get("ok"):
@@ -1606,7 +1703,10 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
         drawdown -- the backtest's strongest signal (7/7 settled) -- on a
         daily-capped budget, then the token is re-scored with it."""
     results = []
+    started = time.time()
     for item in items[:GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE]:
+        if time.time() - started > GECKOTERMINAL_SCORING_TIME_BUDGET_SECONDS:
+            break  # slow free RPC/GoPlus must never push poll-fast past its timeout
         address = item.get("address")
         gp = fetch_goplus_security(chain, address) if address else {"ok": False}
         gp_data = gp["data"] if gp.get("ok") else {}
@@ -1621,7 +1721,7 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
         sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
                                               goplus_data=gp_data)
         sr = score_token(sig)
-        if sr.band in ("A", "B") and chain in ("bsc", "base"):
+        if sr.band in ("A", "B") and chain in ("bsc", "base", "solana"):
             dd = _evm_launch_drawdown(chain, item)
             if dd is not None:
                 sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,

@@ -128,7 +128,13 @@ def close_position(chain: str, token: str, reason: str, exit_usd: Optional[float
     pos["closed_ts"] = time.time()
     if exit_usd is not None:
         pos["exit_usd"] = exit_usd
-        pos["pnl_usd"] = exit_usd - pos["total_usd"]
+        # FIXED Sept 30 2026: earlier partial sells (moonbag trims, the
+        # breakeven lock) already returned money -- a position trimmed at 3x
+        # and then stopped out was recorded as a LOSS because only the final
+        # sale was compared to the whole cost. Real P&L = every sale's
+        # proceeds minus the whole cost.
+        trim_proceeds = sum((t.get("exit_usd") or 0.0) for t in (pos.get("moonbag_trims") or {}).values())
+        pos["pnl_usd"] = exit_usd + trim_proceeds - pos["total_usd"]
     state.set_value(_key(chain, token), pos)
     _record_deployer_outcome_for_close(chain, token, pos, reason)
     return pos
@@ -358,3 +364,27 @@ def reconcile_orphan_stages(now: Optional[float] = None,
                                   reason="orphan record: no buy was ever attempted/filled (auto-repaired)")
             repaired.append((pos["chain"], pos["token"], stage))
     return repaired
+
+
+def update_peak_mcap(chain: str, token: str, current_mcap: Optional[float]) -> Optional[float]:
+    """Highest mcap seen since entry (for the trailing stop). Writes only
+    when a new high is set."""
+    pos = get_position(chain, token)
+    if not pos or current_mcap is None:
+        return (pos or {}).get("peak_mcap")
+    if current_mcap > (pos.get("peak_mcap") or 0):
+        pos["peak_mcap"] = current_mcap
+        state.set_value(_key(chain, token), pos)
+    return pos["peak_mcap"] if pos.get("peak_mcap") else current_mcap
+
+
+def mark_breakeven_locked(chain: str, token: str, pct_sold: float):
+    """After the breakeven lock sells pct_sold of the original, the moonbag
+    ladder's remaining rungs apply to what's left (ladder_scale)."""
+    pos = get_position(chain, token)
+    if not pos:
+        return None
+    pos["breakeven_locked"] = True
+    pos["ladder_scale"] = max(0.0, 1.0 - pct_sold)
+    state.set_value(_key(chain, token), pos)
+    return pos

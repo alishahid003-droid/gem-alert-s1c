@@ -296,6 +296,14 @@ def check_and_trim(chain: str, token: str, current_mcap_usd: Optional[float]) ->
         return None
 
     pos = position_state.get_position(chain, token)
+    # After a breakeven lock (executor/exit_rules.py) only part of the
+    # position rides, so each rung is scaled to it and never exceeds what's
+    # actually left (Sept 30 2026).
+    scaled_pct = min(decision.pct_of_original * float(pos.get("ladder_scale", 1.0)),
+                     position_state.remaining_pct(chain, token))
+    if scaled_pct <= 0:
+        return None
+    decision.pct_of_original = scaled_pct
     amount_tokens_to_sell = pos.get("amount_tokens", 0) * decision.pct_of_original
 
     result = swap_executor.execute_sell(

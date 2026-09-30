@@ -76,7 +76,23 @@ def fetch_kol_feed_both(chain: str = "solana", limit: int = 100) -> dict:
     downside is bounded and the upside (half the calls, permanently) is
     large relative to the overall MadeOnSol budget -- see README."""
     already_confirmed = bool(state.get_value(_confirmed_key(chain)))
+    # Sept 30 2026 (checklist 5.7): these calls were never counted or gated,
+    # so real MadeOnSol usage ran above the tracked number. Worst case this
+    # cycle is 3 calls (probe + 2-call fallback) until unfiltered mode is
+    # confirmed, then 1.
+    if CONFIG.madeonsol_api_key:
+        worst_case = 1 if already_confirmed else 3
+        if not state.madeonsol_can_spend(worst_case, priority=False):
+            return {"ok": False, "reason": "MadeOnSol routine budget paced for this hour",
+                    "buy_trades": [], "sell_trades": [], "mode": "paced", "calls_made": 0}
+        result = _fetch_kol_feed_both_unpaced(chain, limit, already_confirmed)
+        if result.get("calls_made"):
+            state.record_madeonsol_routine_calls(result["calls_made"])
+        return result
+    return _fetch_kol_feed_both_unpaced(chain, limit, already_confirmed)
 
+
+def _fetch_kol_feed_both_unpaced(chain: str, limit: int, already_confirmed: bool) -> dict:
     unfiltered = fetch_kol_feed_raw(chain, limit, action=None)
     if unfiltered.get("reason") == "MADEONSOL_API_KEY not configured":
         return {"ok": False, "reason": unfiltered["reason"], "buy_trades": [], "sell_trades": [],

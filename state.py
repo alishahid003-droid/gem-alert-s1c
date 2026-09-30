@@ -335,6 +335,59 @@ def madeonsol_budget_remaining() -> int:
     return max(0, MADEONSOL_DAILY_BUDGET - madeonsol_calls_today())
 
 
+# --- MadeOnSol pacing (Sept 30 2026, checklist 5.7) ---
+# REAL finding: by 12:37 UTC 160 of 190 calls were gone. One PC cycle uses
+# ~7 calls and the job runs every 15 minutes (~670 calls wanted/day), so the
+# budget ran out by mid-day and Layers 1/2/8/9 went blind until 00:00 UTC.
+# The fix spreads the budget over the whole UTC day:
+#   - ROUTINE calls (Layer 1 deployer alerts, Layer 2+9 wallet feed) may use
+#     at most MADEONSOL_ROUTINE_SHARE of the budget, released evenly hour by
+#     hour -- a routine scan skipped now just runs on a later cycle.
+#   - PRIORITY calls (deep-scoring a real candidate) may use the whole budget
+#     and run up to MADEONSOL_PRIORITY_LEAD_HOURS ahead of the even pace, so a
+#     real candidate is almost never refused.
+MADEONSOL_ROUTINE_SHARE = 0.5
+MADEONSOL_PRIORITY_LEAD_HOURS = 2
+
+
+def _madeonsol_routine_key() -> str:
+    return f"madeonsol_routine_calls:{time.strftime('%Y-%m-%d', time.gmtime())}"
+
+
+def _day_fraction_with_current_hour(now: Optional[float] = None) -> float:
+    now = now if now is not None else time.time()
+    secs = now % 86400
+    return min(1.0, (int(secs // 3600) + 1) / 24.0)
+
+
+def madeonsol_can_spend(n: int, priority: bool = False, now: Optional[float] = None) -> bool:
+    """True if spending n MadeOnSol calls now stays inside the paced budget."""
+    used = madeonsol_calls_today()
+    if used + n > MADEONSOL_DAILY_BUDGET:
+        return False
+    frac = _day_fraction_with_current_hour(now)
+    if priority:
+        allowance = MADEONSOL_DAILY_BUDGET * min(1.0, frac + MADEONSOL_PRIORITY_LEAD_HOURS / 24.0)
+        return used + n <= allowance
+    routine_used = get_value(_madeonsol_routine_key()) or 0
+    return routine_used + n <= MADEONSOL_DAILY_BUDGET * MADEONSOL_ROUTINE_SHARE * frac
+
+
+def record_madeonsol_routine_calls(n: int = 1):
+    """Counts n routine calls against BOTH the routine share and the total."""
+    key = _madeonsol_routine_key()
+    set_value(key, (get_value(key) or 0) + n)
+    record_madeonsol_calls(n)
+
+
+def madeonsol_pacing_status(now: Optional[float] = None) -> dict:
+    frac = _day_fraction_with_current_hour(now)
+    return {"used": madeonsol_calls_today(), "budget": MADEONSOL_DAILY_BUDGET,
+            "routine_used": get_value(_madeonsol_routine_key()) or 0,
+            "routine_allowance_now": int(MADEONSOL_DAILY_BUDGET * MADEONSOL_ROUTINE_SHARE * frac),
+            "priority_allowance_now": int(MADEONSOL_DAILY_BUDGET * min(1.0, frac + MADEONSOL_PRIORITY_LEAD_HOURS / 24.0))}
+
+
 # --- Layer 7: rolling alert-event log, for cross-layer correlation
 # (Ali, Sept 23 2026: wired tonight). One list per TOKEN (not global) so a
 # busy cycle across many tokens doesn't force scanning one huge shared list
