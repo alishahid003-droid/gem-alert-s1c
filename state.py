@@ -994,7 +994,8 @@ def record_fomo_signal(kind: str, trader: str, tier: str, token_symbol: str,
                         score: Optional[int] = None, band: Optional[str] = None,
                         thesis_text: Optional[str] = None, thesis_link: Optional[str] = None,
                         pnl_24h: Optional[float] = None, pnl_7d: Optional[float] = None,
-                        pnl_30d: Optional[float] = None, ts: Optional[float] = None):
+                        pnl_30d: Optional[float] = None, ts: Optional[float] = None,
+                        signal_id: Optional[str] = None):
     """One dashboard-only Fomo signal: kind is "buy" or "thesis". Never
     sent to Telegram -- Ali's explicit call (Sept 30 2026). score/band are
     this coin's own Layer 0 structural score, run independently of the
@@ -1007,7 +1008,10 @@ def record_fomo_signal(kind: str, trader: str, tier: str, token_symbol: str,
     never $0."""
     ts = ts if ts is not None else time.time()
     signals = get_value(FOMO_SIGNALS_KEY) or []
+    if signal_id and any(x.get("signal_id") == signal_id for x in signals):
+        return  # already recorded (overlapping cursor / both runners saw it)
     signals.append({
+        "signal_id": signal_id,
         "kind": kind, "trader": trader, "tier": tier, "token_symbol": token_symbol,
         "token_address": token_address, "chain": chain, "detail": detail,
         "score": score, "band": band, "thesis_text": thesis_text, "thesis_link": thesis_link,
@@ -1029,7 +1033,8 @@ def get_fomo_signal_feed(limit: int = 100) -> list:
 def record_fomo_candidate(handle: str, display_name: str, balance_usd: float,
                            pnl_usd: Optional[float] = None, volume_usd: Optional[float] = None,
                            pnl_24h: Optional[float] = None, pnl_7d: Optional[float] = None,
-                           pnl_30d: Optional[float] = None, ts: Optional[float] = None):
+                           pnl_30d: Optional[float] = None, ts: Optional[float] = None,
+                           **extra):
     """A trader NOT on Ali's roster who cleared the $5k balance threshold
     (Ali's locked number, Sept 30 2026) -- surfaced for Ali to approve
     adding to the roster, never auto-added (roster.py's own docstring:
@@ -1045,6 +1050,7 @@ def record_fomo_candidate(handle: str, display_name: str, balance_usd: float,
         "handle": handle, "display_name": display_name, "balance_usd": balance_usd,
         "pnl_usd": pnl_usd, "volume_usd": volume_usd,
         "pnl_24h": pnl_24h, "pnl_7d": pnl_7d, "pnl_30d": pnl_30d, "ts": ts,
+        **extra,  # insider/insider_detail/wallet/promoted/promotion_reason (Sept 30 2026)
     })
     cutoff = ts - FOMO_CANDIDATE_MAX_AGE_SECONDS
     candidates = [c for c in candidates if c.get("ts", 0) >= cutoff][-FOMO_CANDIDATE_MAX_ITEMS:]
@@ -1068,3 +1074,158 @@ def get_fomo_alerts_since() -> Optional[str]:
 def set_fomo_alerts_since(iso_ts: Optional[str]):
     if iso_ts:
         set_value(FOMO_ALERTS_SINCE_KEY, iso_ts)
+
+
+# --- Auto-buy verdict per token (Sept 30 2026) ---
+# Ali: "if we would have the funds and system would have been live would
+# these trades on these alerts have been executed". Every Stage 1/Stage 2
+# trigger decision on an alert-worthy token is recorded here -- fired or
+# not, and the exact reason -- so the dashboard's Alerts tab can show the
+# real answer per row instead of anyone having to reconstruct it.
+
+def _autobuy_key(token: str) -> str:
+    return f"autobuy_verdict:{token}"
+
+
+def record_autobuy_verdict(token: str, chain: str, result: dict, ts: Optional[float] = None):
+    if not token or not isinstance(result, dict):
+        return
+    buy = result.get("buy") or {}
+    set_value(_autobuy_key(token), {
+        "chain": chain, "stage": result.get("stage"), "fired": bool(result.get("fired")),
+        "reason": result.get("reason"), "position_usd": result.get("position_usd"),
+        "buy_ok": buy.get("ok") if buy else None, "buy_reason": buy.get("reason") if buy else None,
+        "ts": ts if ts is not None else time.time(),
+    })
+
+
+def get_autobuy_verdicts(tokens: List[str]) -> dict:
+    """{token: verdict_or_None} in one batched read."""
+    tokens = [t for t in dict.fromkeys(tokens) if t]
+    if not tokens:
+        return {}
+    raw = get_values([_autobuy_key(t) for t in tokens])
+    return {t: raw.get(_autobuy_key(t)) for t in tokens}
+
+
+# --- Layer 13 support (Sept 30 2026 roster-matching fix) ---
+FOMO_HANDLE_MAP_KEY = "fomo_handle_map"
+FOMO_PROMOTED_KEY = "fomo_promoted_traders"
+FOMO_UNMATCHED_KEY = "fomo_unmatched_handles"
+FOMO_ROSTER_BUYS_KEY = "fomo_roster_buys"
+FOMO_LAST_RUN_KEY = "fomo_layer13_last_run"
+
+
+def fomo_signal_ids() -> set:
+    return {x.get("signal_id") for x in (get_value(FOMO_SIGNALS_KEY) or []) if x.get("signal_id")}
+
+
+def get_fomo_handle_map() -> dict:
+    """normalized fomoapi.io handle -> canonical roster name, learned from
+    leaderboard rows whose displayName matched the roster."""
+    v = get_value(FOMO_HANDLE_MAP_KEY)
+    return v if isinstance(v, dict) else {}
+
+
+def set_fomo_handle_map(mapping: dict):
+    set_value(FOMO_HANDLE_MAP_KEY, mapping)
+
+
+def get_fomo_promoted() -> dict:
+    """normalized handle -> {handle, display_name, reason, ts} for
+    new-trader candidates auto-promoted onto the tracked list."""
+    v = get_value(FOMO_PROMOTED_KEY)
+    return v if isinstance(v, dict) else {}
+
+
+def set_fomo_promoted(promoted: dict):
+    set_value(FOMO_PROMOTED_KEY, promoted)
+
+
+def note_fomo_unmatched_handles(counts: dict, ts: Optional[float] = None):
+    """Rolling tally of fomoapi.io traders whose buys/theses did NOT match
+    the roster -- visible on the dashboard/diag so a name mismatch can't
+    hide behind "zero roster buys" again."""
+    ts = ts if ts is not None else time.time()
+    cur = get_value(FOMO_UNMATCHED_KEY) or {}
+    for handle, n in counts.items():
+        e = cur.get(handle) or {"count": 0}
+        cur[handle] = {"count": e["count"] + n, "last_ts": ts}
+    if len(cur) > 300:
+        cur = dict(sorted(cur.items(), key=lambda kv: kv[1].get("last_ts", 0))[-300:])
+    set_value(FOMO_UNMATCHED_KEY, cur)
+
+
+def get_fomo_unmatched_handles() -> dict:
+    v = get_value(FOMO_UNMATCHED_KEY)
+    return v if isinstance(v, dict) else {}
+
+
+def record_fomo_roster_buy(chain: str, mint: str, trader: str, ts: Optional[float] = None,
+                           window_seconds: int = 3600) -> Tuple[int, list]:
+    """Records one roster trader's buy of (chain, mint); returns (distinct
+    roster traders who bought it inside the window, their names)."""
+    now = time.time()
+    ts = ts if ts is not None else now
+    data = get_value(FOMO_ROSTER_BUYS_KEY) or {}
+    key = f"{chain}:{mint}"
+    entries = [e for e in data.get(key, []) if e.get("ts", 0) >= now - window_seconds]
+    if not any(e.get("trader") == trader for e in entries):
+        entries.append({"trader": trader, "ts": ts})
+    data[key] = entries
+    data = {k: v for k, v in data.items() if v and max(e.get("ts", 0) for e in v) >= now - 6 * 3600}
+    set_value(FOMO_ROSTER_BUYS_KEY, data)
+    traders = sorted({e["trader"] for e in entries})
+    return len(traders), traders
+
+
+def set_fomo_last_run(info: dict):
+    set_value(FOMO_LAST_RUN_KEY, {**info, "ts": time.time()})
+
+
+def get_fomo_last_run() -> Optional[dict]:
+    return get_value(FOMO_LAST_RUN_KEY)
+
+
+# --- Runner heartbeats (Sept 30 2026) ---
+# Every poll cycle (poll-fast / poll-slow on GitHub Actions, --poll-madeonsol
+# on Ali's PC) stamps its completion here, so "is the PC Task Scheduler job
+# actually running?" is a fact on the dashboard, not a question.
+RUNNER_HEARTBEATS_KEY = "runner_heartbeats"
+
+
+def record_runner_heartbeat(name: str, where: str = "", note: str = "", ts: Optional[float] = None):
+    beats = get_value(RUNNER_HEARTBEATS_KEY) or {}
+    beats[name] = {"ts": ts if ts is not None else time.time(), "where": where, "note": note}
+    set_value(RUNNER_HEARTBEATS_KEY, beats)
+
+
+def get_runner_heartbeats() -> dict:
+    v = get_value(RUNNER_HEARTBEATS_KEY)
+    return v if isinstance(v, dict) else {}
+
+
+# --- Small TTL cache for paid third-party lookups (Sept 30 2026) ---
+def cache_get(key: str, max_age_seconds: float):
+    v = get_value(f"cache:{key}")
+    if not isinstance(v, dict) or "ts" not in v:
+        return None
+    if time.time() - v["ts"] > max_age_seconds:
+        return None
+    return v.get("value")
+
+
+def cache_set(key: str, value):
+    set_value(f"cache:{key}", {"ts": time.time(), "value": value})
+
+
+FOMO_CREDIT_STATE_KEY = "fomo_credit_state"
+
+
+def get_fomo_credit_state() -> dict:
+    v = get_value(FOMO_CREDIT_STATE_KEY)
+    return v if isinstance(v, dict) else {}
+
+
+def set_fomo_credit_state(v: dict):
+    set_value(FOMO_CREDIT_STATE_KEY, v)

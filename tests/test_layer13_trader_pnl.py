@@ -1,8 +1,19 @@
 """Sept 30 2026 (Ali: add 24h/7d/30d PnL to both Fomo tables) --
 fetch_trader_pnl() and its wiring into detect_roster_buys_and_theses /
 find_new_trader_candidates."""
+import pytest
+
 import layers.layer13_fomo_copytrade as l13
+import state
 from config import CONFIG
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path, monkeypatch):
+    # fetch_trader_pnl now reads a cached profile (credit budget) -- each
+    # test needs a fresh cache or an earlier test's profile leaks in.
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
+    yield
 
 
 def test_fetch_trader_pnl_parses_all_three_windows(monkeypatch):
@@ -43,6 +54,7 @@ def test_find_new_trader_candidates_attaches_pnl(monkeypatch):
     monkeypatch.setattr(CONFIG, "fomoapi_api_key", "fake-key")
     monkeypatch.setattr(l13, "fetch_trader_balance_usd", lambda handle: 8000.0)
     monkeypatch.setattr(l13, "fetch_trader_pnl", lambda handle: {"pnl_24h": 1.0, "pnl_7d": 2.0, "pnl_30d": 3.0})
+    monkeypatch.setattr(l13, "fetch_trader_profile", lambda handle: None)
     recorded = {}
     monkeypatch.setattr(l13.state, "record_fomo_candidate", lambda **kw: recorded.update(kw))
     l13.find_new_trader_candidates([{"handle": "newguy", "displayName": "New Guy"}])

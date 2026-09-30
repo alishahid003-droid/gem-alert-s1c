@@ -181,3 +181,83 @@ def tag_insider_holders(chain: str, deployer_address: str, holder_addresses: lis
             continue  # can't determine -- omit, don't guess
         out[holder] = (funder.lower() == deployer_address.lower())
     return out
+
+
+# ---------------------------------------------------------------------------
+# Free Solana-RPC insider check for Fomo new-trader candidates (Sept 30 2026)
+# ---------------------------------------------------------------------------
+# Ali's ask: before trusting a new trader, check whether they're an insider.
+# The Mobula-based _first_inbound_transfer above can't run today (Mobula's
+# free plan returns 403 -- see layer0_scoring's GeckoTerminal fallback
+# notes), so this does the same funding-chain test over the free Solana RPC
+# pool already used by layer0_scoring (executor.rpc_pool): the wallet's
+# OLDEST transaction, and whoever's SOL balance dropped in it, is its first
+# funder. A trader whose first funder is the deployer of a coin they bought
+# -- or who IS that deployer -- is trading their own/insider supply.
+# Same single-page limit as fetch_solana_wallet_first_seen_ts: a wallet with
+# 1000+ transactions can't have its true first funder found in one page, so
+# that returns None ("unknown"), never a guess.
+
+def solana_first_funder(wallet: str) -> Optional[str]:
+    from executor.rpc_pool import rpc_call
+    sigs = rpc_call("solana", "getSignaturesForAddress", [wallet, {"limit": 1000}])
+    if not sigs.get("ok"):
+        return None
+    rows = sigs.get("result") or []
+    if not rows or len(rows) >= 1000:
+        return None  # empty, or too active to see the first tx in one page
+    oldest = rows[-1].get("signature") if isinstance(rows[-1], dict) else None
+    if not oldest:
+        return None
+    tx = rpc_call("solana", "getTransaction",
+                  [oldest, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+    if not tx.get("ok") or not tx.get("result"):
+        return None
+    try:
+        res = tx["result"]
+        keys = [k.get("pubkey") if isinstance(k, dict) else k for k in res["transaction"]["message"]["accountKeys"]]
+        pre, post = res["meta"]["preBalances"], res["meta"]["postBalances"]
+    except (KeyError, TypeError):
+        return None
+    best, best_drop = None, 0
+    for addr, a, b in zip(keys, pre, post):
+        if addr == wallet:
+            continue
+        drop = (a or 0) - (b or 0)
+        if drop > best_drop:
+            best, best_drop = addr, drop
+    return best
+
+
+def check_trader_insider(wallets: list, bought_mints: list, max_mints: int = 3) -> dict:
+    """Returns {"insider": True/False/None, "detail": str}. True = a
+    wallet deployed, or was first funded by the deployer of, a coin the
+    trader bought. None = couldn't determine (no wallet, RPC failure)."""
+    from layers.layer0_scoring import fetch_solana_token_deployer
+    if not wallets:
+        return {"insider": None, "detail": "no Solana wallet on the trader's profile"}
+    if not bought_mints:
+        return {"insider": None, "detail": "no recent Solana buys to check against"}
+    deployers = {}
+    for mint in list(dict.fromkeys(bought_mints))[:max_mints]:
+        dep = fetch_solana_token_deployer(mint)
+        if dep:
+            deployers[mint] = dep
+    if not deployers:
+        return {"insider": None, "detail": "could not resolve any token deployer"}
+    determined = False
+    for w in wallets:
+        for mint, dep in deployers.items():
+            if w == dep:
+                return {"insider": True, "detail": f"wallet {w[:6]}.. DEPLOYED {mint[:6]}.. which they bought"}
+        funder = solana_first_funder(w)
+        if funder is None:
+            continue
+        determined = True
+        for mint, dep in deployers.items():
+            if funder == dep:
+                return {"insider": True,
+                        "detail": f"wallet {w[:6]}.. was first funded by {mint[:6]}..'s deployer"}
+    if determined:
+        return {"insider": False, "detail": f"funding checked against {len(deployers)} deployer(s): independent"}
+    return {"insider": None, "detail": "wallet funding source undeterminable (RPC/too active)"}
