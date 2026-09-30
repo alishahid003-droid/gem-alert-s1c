@@ -219,12 +219,66 @@ def moonshot_enabled() -> bool:
     return os.environ.get("MOONSHOT_ENABLED", "").strip().lower() == "true"
 
 
-def moonshot_position_usd() -> float:
+def _env_f(name: str, default: float) -> float:
     import os
     try:
-        return float(os.environ.get("MOONSHOT_POSITION_USD", "5"))
+        v = os.environ.get(name, "").strip()
+        return float(v) if v else default
     except ValueError:
-        return 5.0
+        return default
+
+
+def bankroll_equity() -> float:
+    """Starting wallet (TOTAL_WALLET_USD) plus realized P&L of closed real
+    positions -- the non-aggressor side of the account (the compound scalper
+    keeps its own pool)."""
+    from executor.config import EXECUTOR_CONFIG
+    try:
+        realized = position_state.realized_pnl_summary().get("total_realized_pnl_usd") or 0.0
+    except Exception:  # noqa: BLE001
+        realized = 0.0
+    return max(0.0, float(EXECUTOR_CONFIG.total_wallet_usd) + realized)
+
+
+# Moonshot stake ladder (Oct 1 2026, Ali: "$5 for a moonshot is useless -- it
+# gets eaten by fees; at least $30-40, and $50-60 once the account is 5-7x").
+# (equity from, stake): $30 from the start, $40 from $300, $60 from $700;
+# above that MOONSHOT_EQUITY_PCT (8%) of equity, capped at MOONSHOT_MAX_USD
+# (memecoin pools can't absorb much more). Never more than MOONSHOT_MAX_SHARE
+# (35%) of equity. MOONSHOT_POSITION_USD, if set, overrides everything.
+MOONSHOT_LADDER = ((0.0, 30.0), (300.0, 40.0), (700.0, 60.0))
+
+
+def moonshot_position_usd(equity: Optional[float] = None) -> float:
+    import os
+    if os.environ.get("MOONSHOT_POSITION_USD", "").strip():
+        return _env_f("MOONSHOT_POSITION_USD", 30.0)
+    equity = bankroll_equity() if equity is None else equity
+    stake = 0.0
+    for lo, usd in MOONSHOT_LADDER:
+        if equity >= lo:
+            stake = usd
+    stake = max(stake, min(equity * _env_f("MOONSHOT_EQUITY_PCT", 0.08), _env_f("MOONSHOT_MAX_USD", 2000.0)))
+    return round(min(stake, equity * _env_f("MOONSHOT_MAX_SHARE", 0.35)), 2)
+
+
+def moonshot_max_open(equity: Optional[float] = None) -> int:
+    """One moonshot at a time until the account passes $300, then two."""
+    import os
+    if os.environ.get("MOONSHOT_MAX_OPEN", "").strip():
+        return int(_env_f("MOONSHOT_MAX_OPEN", 1))
+    equity = bankroll_equity() if equity is None else equity
+    return 1 if equity < 300 else 2
+
+
+def open_moonshots_at_risk() -> int:
+    """Moonshots whose stake is still at risk (a free-riding runner, stake
+    already recovered, doesn't count)."""
+    n = 0
+    for pos in position_state.list_open_positions():
+        if "moonshot" in (pos.get("stages") or {}) and pos.get("amount_tokens") and not pos.get("breakeven_locked"):
+            n += 1
+    return n
 
 
 def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
@@ -238,7 +292,7 @@ def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
     ctx = dict(entry_ctx or {})
     ctx.setdefault("liquidity_usd", liquidity_usd)
     guard_ok, guard_why = entry_guards.check(score_band, usd, ctx, momentum=True)
-    paper_ledger.open_paper(chain, token, "moonshot", "moonshot", max(usd, 10.0), entry_mcap,
+    paper_ledger.open_paper(chain, token, "moonshot", "moonshot", usd, entry_mcap,
                             band=score_band, liquidity_usd=liquidity_usd,
                             tags={"moonshot_score": moonshot_score},
                             guard="pass" if guard_ok else "blocked", exit_profile="moonshot")
@@ -253,6 +307,11 @@ def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
     block = triggers._concurrency_block()
     if block:
         return {"fired": False, "stage": "moonshot", "reason": block}
+    if open_moonshots_at_risk() >= moonshot_max_open():
+        return {"fired": False, "stage": "moonshot",
+                "reason": f"already {moonshot_max_open()} moonshot(s) with stake at risk (limit for this account size)"}
+    if usd < 10:
+        return {"fired": False, "stage": "moonshot", "reason": f"account too small for a meaningful moonshot (${usd:.2f})"}
     allowed, why = paper_ledger.signal_allowed("moonshot")
     if not allowed:
         return {"fired": False, "stage": "moonshot", "reason": f"paper-record gate: {why}"}
