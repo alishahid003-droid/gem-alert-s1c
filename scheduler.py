@@ -908,6 +908,18 @@ def _run_soft_fail_watch_cycle() -> int:
     return queued
 
 
+FAST_WATCH_OWNERSHIP_SECONDS = 120
+
+
+def fast_watch_owns_management(now: "float | None" = None) -> bool:
+    """True while worker_fast_watch.py (PC) has stamped a heartbeat within
+    FAST_WATCH_OWNERSHIP_SECONDS -- it then owns every position/paper/
+    revival write so the GitHub cycle never races it."""
+    now = now if now is not None else time.time()
+    beat = (state.get_runner_heartbeats() or {}).get("fast-watch") or {}
+    return now - (beat.get("ts") or 0) < FAST_WATCH_OWNERSHIP_SECONDS
+
+
 REVIVAL_MAX_PER_CHAIN_PER_CYCLE = 30      # one DexScreener batch call per chain
 REVIVAL_COOLDOWN_SECONDS = 30 * 60
 
@@ -1926,12 +1938,19 @@ def run_poll_fast():
     # defensive rug-exits for every OPEN EXECUTOR POSITION, every fast
     # cycle. See _run_position_management_cycle's docstring for the real
     # gap this closes. ---
-    _safe(_run_position_management_cycle)
+    # Sept 30 2026: when the PC fast watcher (worker_fast_watch.py) is alive
+    # it owns position/scalper/paper/revival management every ~20 s, so this
+    # 10-minute cycle skips them (two writers on the same state would race).
+    fast_owner = fast_watch_owns_management()
+    if fast_owner:
+        print("[fast-watch] PC fast watcher is live -- position/scalper/paper/revival management left to it")
+    else:
+        _safe(_run_position_management_cycle)
 
-    # --- Compound scalper pool management (Ali, Sept 29 2026) -- separate
-    # from the position management pass above on purpose. See
-    # _run_compound_scalper_cycle's docstring. ---
-    _safe(_run_compound_scalper_cycle)
+        # --- Compound scalper pool management (Ali, Sept 29 2026) -- separate
+        # from the position management pass above on purpose. See
+        # _run_compound_scalper_cycle's docstring. ---
+        _safe(_run_compound_scalper_cycle)
 
     print(f"\nFast cycle done. {alerts_sent} alert(s) delivered. ~{madeonsol_calls} MadeOnSol call(s) "
           f"used ({state.pending_rescan_count()} token(s) now queued for the next slow cycle's deep-score "
@@ -1945,14 +1964,15 @@ def run_poll_fast():
 
     # Layer 14 revival watch (Sept 30 2026) -- before paper management so a
     # revival opened this cycle is priced on the next one.
-    _safe(_run_revival_watch_cycle, board)
+    if not fast_owner:
+        _safe(_run_revival_watch_cycle, board)
 
-    # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
-    # position and apply the same exits real money uses -- the measured win
-    # rate per signal lives here. See executor/paper_ledger.py.
-    paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot)
-    if isinstance(paper, dict) and paper.get("open") is not None:
-        print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
+        # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
+        # position and apply the same exits real money uses -- the measured win
+        # rate per signal lives here. See executor/paper_ledger.py.
+        paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot)
+        if isinstance(paper, dict) and paper.get("open") is not None:
+            print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
 
     # Layer 13 (Fomo) also runs here since Sept 30 2026 -- it was PC-only,
     # so it silently never ran whenever the PC job wasn't scheduled. Shared

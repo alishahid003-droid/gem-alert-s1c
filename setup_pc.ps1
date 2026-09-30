@@ -91,8 +91,23 @@ Ok "registered"
 schtasks /run /tn "GemAlert MadeOnSol" | Out-Null
 Ok "first run started now (log: $PSScriptRoot\logs\poll_madeonsol.log)"
 
+# ---- 6. Fast watcher (checklist 5.1) ----------------------------------------
+Step "Registering 'GemAlert FastWatch' (20-second position/scalper watcher, starts at logon)"
+$fw = Join-Path $PSScriptRoot "run_fast_watch.bat"
+schtasks /create /tn "GemAlert FastWatch" /sc onlogon /f /tr "cmd /c `"$fw`"" | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Warn "Could not register the logon task (needs 'Run as administrator'). Starting it for this session only."
+} else {
+    Ok "registered (starts automatically every time you log in)"
+}
+$running = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'worker_fast_watch' }
+if ($running) { Ok "fast watcher already running" }
+else { Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$fw`"" -WindowStyle Minimized; Ok "fast watcher started now (log: $PSScriptRoot\logs\fast_watch.log)" }
+
 Step "All done"
 Write-Host "    Within ~15 minutes the dashboard System tab should show:" -ForegroundColor Green
 Write-Host "      poll-madeonsol   last cycle Xm ago   local-pc" -ForegroundColor Green
+Write-Host "      fast-watch       last cycle Xs ago   local-pc" -ForegroundColor Green
 Write-Host "    If your dashboard is open: close it (Ctrl+C in its window), run  python dashboard.py  again."
 Read-Host "Press Enter to close"
