@@ -196,16 +196,22 @@ def section_fomo():
 
 def section_discovery():
     hdr("5. FREE DISCOVERY PROBE (Solana via GeckoTerminal; Robinhood Chain network id)")
-    from layers.layer0_scoring import fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, \
-        score_geckoterminal_pools
-    raw = fetch_geckoterminal_new_pools("solana")
-    items = flatten_geckoterminal_pools(raw.get("json")) if raw.get("ok") else []
-    print(f"  GeckoTerminal solana new_pools -> HTTP {raw.get('status_code')} pools={len(items)} "
-          f"dexes={sorted({str(i.get('dex_id')) for i in items})}")
-    for sc in score_geckoterminal_pools("solana", items[:4]):
-        sr = sc["score"]
-        print(f"    {str(sc['address'])[:10]} {sr.score}/100 band {sr.band} coverage {sr.signal_coverage} "
-              f"dex={sc['raw'].get('dex_id')} liq=${(sc['raw'].get('liquidity_usd') or 0):,.0f}")
+    from layers.layer0_scoring import fetch_geckoterminal_new_pools, fetch_geckoterminal_trending_pools, \
+        flatten_geckoterminal_pools, score_geckoterminal_pools, select_gt_candidates
+    for chain, slug in (("solana", "solana"), ("robinhood_chain", "robinhood")):
+        pools = []
+        for fn in (fetch_geckoterminal_trending_pools, fetch_geckoterminal_new_pools):
+            r = fn(slug)
+            if r.get("ok"):
+                pools.extend(flatten_geckoterminal_pools(r.get("json")))
+        cands = select_gt_candidates(pools)
+        print(f"  {chain}: {len(pools)} pools fetched (trending+new), {len(cands)} tradeable candidates")
+        t0 = time.time()
+        for sc in score_geckoterminal_pools(chain, cands[:4]):
+            sr = sc["score"]
+            print(f"    {str(sc['address'])[:10]} {sr.score}/100 band {sr.band} real-data {sr.signal_coverage} "
+                  f"dex={sc['raw'].get('dex_id')} liq=${(sc['raw'].get('liquidity_usd') or 0):,.0f}")
+        print(f"    scored in {time.time() - t0:.0f}s")
     found = []
     for page in range(1, 8):
         r = get_json(f"{CONFIG.geckoterminal_base_url}/networks", params={"page": page})

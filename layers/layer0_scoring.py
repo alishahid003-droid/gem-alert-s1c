@@ -1409,6 +1409,7 @@ def score_mobula_pulse_items(chain: str, items: list) -> list:
 # first every cycle (harmless if Ali ever upgrades that plan), and this is
 # the fallback scheduler.py reaches for only when Mobula's own fetch fails.
 GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE = 8
+GECKOTERMINAL_SCORING_TIME_BUDGET_SECONDS = 75
 
 
 def fetch_geckoterminal_new_pools(network: str) -> dict:
@@ -1417,6 +1418,47 @@ def fetch_geckoterminal_new_pools(network: str) -> dict:
     names, so no extra mapping needed, unlike Mobula's evm:<chainId> or
     GoPlus's numeric chain-id conventions)."""
     return get_json(f"{CONFIG.geckoterminal_base_url}/networks/{network}/new_pools")
+
+
+def fetch_geckoterminal_trending_pools(network: str) -> dict:
+    """Pools GeckoTerminal ranks as trending right now -- coins that already
+    have momentum and liquidity, same JSON shape as new_pools (Sept 30 2026)."""
+    return get_json(f"{CONFIG.geckoterminal_base_url}/networks/{network}/trending_pools")
+
+
+GT_MIN_LIQUIDITY_USD = 5000.0
+GT_MIN_AGE_MINUTES = 10.0
+
+
+def select_gt_candidates(items: list, now_ts: Optional[float] = None,
+                         min_liquidity_usd: float = GT_MIN_LIQUIDITY_USD,
+                         min_age_minutes: float = GT_MIN_AGE_MINUTES) -> list:
+    """Live finding (Sept 30 2026 diagnostic): the newest GeckoTerminal pools
+    are seconds old with $0 liquidity and no security data yet, so every one
+    scored band C on ~10% real data -- no alert could ever come out, and the
+    free RPC/GoPlus lookups timed out on them. Only coins at least
+    min_age_minutes old with real liquidity (also the floor a real trade
+    needs) are worth scoring. Dedupes by address, keeps input order."""
+    import datetime
+    now_ts = now_ts if now_ts is not None else time.time()
+    out, seen = [], set()
+    for it in items:
+        addr = it.get("address")
+        if not addr or addr in seen:
+            continue
+        if (it.get("liquidity_usd") or 0) < min_liquidity_usd:
+            continue
+        created = it.get("pool_created_at")
+        if created:
+            try:
+                age_min = (now_ts - datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp()) / 60
+                if age_min < min_age_minutes:
+                    continue
+            except ValueError:
+                pass
+        seen.add(addr)
+        out.append(it)
+    return out
 
 
 def _gt_float(val):
@@ -1636,7 +1678,10 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
         drawdown -- the backtest's strongest signal (7/7 settled) -- on a
         daily-capped budget, then the token is re-scored with it."""
     results = []
+    started = time.time()
     for item in items[:GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE]:
+        if time.time() - started > GECKOTERMINAL_SCORING_TIME_BUDGET_SECONDS:
+            break  # slow free RPC/GoPlus must never push poll-fast past its timeout
         address = item.get("address")
         gp = fetch_goplus_security(chain, address) if address else {"ok": False}
         gp_data = gp["data"] if gp.get("ok") else {}

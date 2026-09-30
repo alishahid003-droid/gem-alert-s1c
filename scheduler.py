@@ -121,7 +121,7 @@ except ImportError:
 
 from config import CONFIG
 from layers.kol_feed import fetch_kol_feed_both
-from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd, fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, score_geckoterminal_pools, GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE
+from layers.layer0_scoring import fetch_mobula_pulse, score_mobula_pulse_items, score_solana_mint, flatten_mobula_pulse_response, fetch_solana_token_deployer, fetch_solana_dev_holding_pct, classify_dev_holding_pct, fetch_solana_wallet_first_seen_ts, classify_deployer_wallet_age, free_recheck_solana_signals, fetch_dexscreener_token_price_usd, fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, score_geckoterminal_pools, GECKOTERMINAL_MAX_GOPLUS_PER_CYCLE, fetch_geckoterminal_trending_pools, select_gt_candidates, GT_MIN_LIQUIDITY_USD, GT_MIN_AGE_MINUTES
 from layers.layer1_deployer import poll_layer1, chain_for_cycle
 from layers.layer0c_stonkfun_scoring import poll_layer0c, poll_layer0c_momentum, \
     MOMENTUM_GEM_MIN_MULTIPLE, MOMENTUM_LOOKBACK_HOURS
@@ -332,8 +332,9 @@ def _safe(fn, *args, **kwargs):
 # worst case -- see README's call-budget section.
 LAYER8_MAX_DEEP_SCORES_PER_SLOW_CYCLE = 3
 
-GECKOTERMINAL_NETWORK_SLUGS = {"bsc": "bsc", "base": "base", "solana": "solana"}
-GECKOTERMINAL_EXTRA_CHAINS = ["solana"]  # free Layer 0b scan beyond Mobula's chains (Sept 30 2026)
+GECKOTERMINAL_NETWORK_SLUGS = {"bsc": "bsc", "base": "base", "solana": "solana",
+                               "robinhood_chain": "robinhood"}  # "robinhood" confirmed live via /networks, Sept 30 2026
+GECKOTERMINAL_EXTRA_CHAINS = ["solana", "robinhood_chain"]  # free Layer 0b scan beyond Mobula's chains (Sept 30 2026)
 MOBULA_PULSE_CHAINS = [("bsc", "evm:56"), ("base", "evm:8453")]  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- TON/ETH still dropped, scope cut Sept 22, 2026. evm:<numeric chainId> is Mobula's real chain-id format (bug #4, fixed Sept 24 2026) -- "bnb:bnb"/"base:base" were never valid and caused a raw 500.
 
 
@@ -1378,8 +1379,13 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
     every other _run_* helper in this file."""
     alerts_sent = 0
     gt_network = GECKOTERMINAL_NETWORK_SLUGS.get(chain, chain)  # bsc/base/solana match our names
+    # Trending pools first (coins already moving, with liquidity), then new
+    # pools; both filtered to >= $5k liquidity and >= 10 min old -- see
+    # layer0_scoring.select_gt_candidates for the live finding behind this.
+    trending = _safe(fetch_geckoterminal_trending_pools, gt_network)
     raw = _safe(fetch_geckoterminal_new_pools, gt_network)
-    if not (isinstance(raw, dict) and raw.get("ok")):
+    ok_sources = [r for r in (trending, raw) if isinstance(r, dict) and r.get("ok")]
+    if not ok_sources:
         detail = raw.get("reason") if isinstance(raw, dict) else describe_fetch_failure({"raw": raw})
         print(f"[layer0b/8:{chain}] GeckoTerminal fallback fetch failed: {detail}")
         if _stats():
@@ -1387,7 +1393,12 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
         return alerts_sent
     if _stats():
         _stats().note_module(f"layer0b pulse ({chain}) [GeckoTerminal fallback]", True)
-    items = flatten_geckoterminal_pools(raw.get("json"))
+    fetched_items = []
+    for r in ok_sources:
+        fetched_items.extend(flatten_geckoterminal_pools(r.get("json")))
+    items = select_gt_candidates(fetched_items)
+    print(f"[layer0b/8:{chain}] {len(fetched_items)} pool(s) fetched, {len(items)} tradeable candidate(s) "
+          f"(>= ${GT_MIN_LIQUIDITY_USD:,.0f} liquidity, >= {GT_MIN_AGE_MINUTES:.0f} min old)")
     for scored in score_geckoterminal_pools(chain, items):
         mint = scored["address"]
         mc = scored["raw"].get("market_cap_usd") or scored["raw"].get("fdv_usd")

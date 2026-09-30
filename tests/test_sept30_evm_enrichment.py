@@ -76,3 +76,14 @@ def test_solana_free_path_uses_goplus_solana_and_rpc(monkeypatch):
     assert out.signal_coverage >= 0.5          # passes the real-data gate
     pregrad = l0.signals_from_geckoterminal_pool(dict(item, dex_id="pump-fun"), "solana", goplus_data=sol_gp)
     assert pregrad.is_pregraduation_solana is True
+
+
+def test_select_gt_candidates_filters_fresh_and_illiquid():
+    now = 1_790_700_000
+    import datetime
+    iso = lambda mins: datetime.datetime.fromtimestamp(now - mins * 60, tz=datetime.timezone.utc).isoformat()
+    items = [{"address": "a", "liquidity_usd": 0.0, "pool_created_at": iso(30)},        # no liquidity
+             {"address": "b", "liquidity_usd": 20000.0, "pool_created_at": iso(2)},     # too fresh
+             {"address": "c", "liquidity_usd": 20000.0, "pool_created_at": iso(30)},    # good
+             {"address": "c", "liquidity_usd": 20000.0, "pool_created_at": iso(30)}]    # duplicate
+    assert [i["address"] for i in l0.select_gt_candidates(items, now_ts=now)] == ["c"]
