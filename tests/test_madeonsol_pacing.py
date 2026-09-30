@@ -52,3 +52,13 @@ def test_kol_feed_counts_calls_and_respects_pace(monkeypatch):
     monkeypatch.setattr(state, "madeonsol_can_spend", lambda n, priority=False, now=None: False)
     paced = kol_feed.fetch_kol_feed_both("solana")
     assert paced["ok"] is False and paced["mode"] == "paced"
+
+
+def test_replay_archive_keeps_first_alert_per_coin(tmp_path, monkeypatch):
+    import state
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "arch.json"))
+    state.log_full_alert("layer0b", "base", "X", "0xA", "h", {"Score": "72/100 band B"})
+    state.log_full_alert("layer0b", "base", "X", "0xA", "h", {"Score": "74/100 band B"})
+    state.log_full_alert("layer0b", "base", "Y", "0xB", "h", {"Chain": "base"})     # no band: not archived
+    arch = state.get_replay_archive()
+    assert [a["token_address"] for a in arch] == ["0xA"] and "band B" in arch[0]["tags"]["Score"]
