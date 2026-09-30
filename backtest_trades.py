@@ -101,12 +101,13 @@ def sim_stage(candles, secs, entry_idx, cost):
 
 
 def sim_scalper(candles, secs, entry_idx, cost):
-    """Compound scalper thresholds (take-profit partial, trail, hard stop,
-    time stop) from SCALPER_CONFIG."""
+    """Compound scalper exits via the SAME pure function the live pool and
+    the paper ledger use (compound_scalper.scalp_exit_decision)."""
+    from executor.compound_scalper import scalp_exit_decision
     cfg = SCALPER_CONFIG
     entry = candles[entry_idx]["o"]
     t0 = candles[entry_idx].get("unixTime", 0)
-    remaining, proceeds, tp_done, peak = 1.0, 0.0, False, entry
+    remaining, proceeds, tp_done, peak = 1.0, 0.0, False, 1.0
 
     def sell(pct, price):
         nonlocal remaining, proceeds
@@ -115,25 +116,60 @@ def sim_scalper(candles, secs, entry_idx, cost):
         remaining -= pct
 
     for c in candles[entry_idx:]:
-        now = c.get("unixTime", t0)
+        elapsed = (c.get("unixTime", t0) - t0) / 60.0
         for price in (c["l"], c["h"], c["c"]):
-            peak = max(peak, price)
             mult = price / entry
-            if not tp_done and mult <= 1 - cfg.hard_stop_pct:
+            peak = max(peak, mult)
+            d = scalp_exit_decision(mult, peak, elapsed, tp_done)
+            if not d.should_exit:
+                continue
+            if d.exit_type == "hard_stop":
                 sell(remaining, min(c["o"], entry * (1 - cfg.hard_stop_pct)))
-                return proceeds - POSITION_USD, "hard_stop"
-            if not tp_done and mult >= cfg.take_profit_multiple:
-                sell(cfg.partial_tp_pct, entry * cfg.take_profit_multiple)
+            elif d.exit_type == "take_profit_partial":
+                sell(d.pct_to_sell, entry * cfg.take_profit_multiple)
                 tp_done = True
                 continue
-            if tp_done and (peak - price) / peak >= cfg.trail_stop_pct:
-                sell(remaining, min(c["o"], peak * (1 - cfg.trail_stop_pct)))
-                return proceeds - POSITION_USD, "trail_stop"
-        if not tp_done and (now - t0) / 60 >= cfg.time_stop_minutes:
-            sell(remaining, c["c"])
-            return proceeds - POSITION_USD, "time_stop"
+            elif d.exit_type == "trail_stop":
+                sell(remaining, min(c["o"], entry * peak * (1 - cfg.trail_stop_pct)))
+            else:
+                sell(remaining, price)
+            return proceeds - POSITION_USD, d.exit_type
     sell(remaining, candles[-1]["c"])
     return proceeds - POSITION_USD, "still_open_at_window_end"
+
+
+SCALPER_GRID = [(stop, tp, tmin, trail) for stop in (0.30, 0.45, 0.55) for tp in (1.5, 2.0, 2.5)
+                for tmin in (20, 60, 180) for trail in (0.20, 0.35)]
+
+
+def run_scalper_grid(cached, delays):
+    """Compound scalper settings grid -- same caveat: 24 coins overfit, paper confirms."""
+    orig = (SCALPER_CONFIG.hard_stop_pct, SCALPER_CONFIG.take_profit_multiple,
+            SCALPER_CONFIG.time_stop_minutes, SCALPER_CONFIG.trail_stop_pct)
+    rows = []
+    for stop, tp, tmin, trail in SCALPER_GRID:
+        SCALPER_CONFIG.hard_stop_pct, SCALPER_CONFIG.take_profit_multiple = stop, tp
+        SCALPER_CONFIG.time_stop_minutes, SCALPER_CONFIG.trail_stop_pct = tmin, trail
+        w = n = 0
+        pnl = 0.0
+        for _name, _cat, candles, secs, cost in cached:
+            for d in delays:
+                idx = min(len(candles) - 2, max(0, int(d * 60 / secs)))
+                p, _ = sim_scalper(candles, secs, idx, cost)
+                n += 1
+                w += p > 0
+                pnl += p
+        rows.append((w / n if n else 0, pnl, stop, tp, tmin, trail, w, n))
+    (SCALPER_CONFIG.hard_stop_pct, SCALPER_CONFIG.take_profit_multiple,
+     SCALPER_CONFIG.time_stop_minutes, SCALPER_CONFIG.trail_stop_pct) = orig
+    rows.sort(reverse=True)
+    print("\nCOMPOUND SCALPER GRID (all entry delays pooled) -- top 10 by win rate")
+    print(f"{'stop':>5} {'tp':>4} {'time':>5} {'trail':>5}  wins/trades  win%   total P&L")
+    for wr, pnl, stop, tp, tmin, trail, w, n in rows[:10]:
+        print(f"{stop:>5.2f} {tp:>4.1f} {tmin:>5.0f} {trail:>5.2f}  {w:>4}/{n:<6}  {wr * 100:>4.0f}%  ${pnl:+8.0f}")
+    cur = [r for r in rows if (r[2], r[3], r[4], r[5]) == orig]
+    if cur:
+        print(f"current settings: {cur[0][6]}/{cur[0][7]} = {cur[0][0] * 100:.0f}%  ${cur[0][1]:+.0f}")
 
 
 def main():
@@ -186,6 +222,7 @@ def main():
     print("Limits: hand-picked labeled set (not a random sample); every coin bought (no score gate);\n"
           "pessimistic intra-candle order (stop before target); RHC coins skipped.")
     run_grid(cached, delays)
+    run_scalper_grid(cached, delays)
 
 
 def entry_filter_ok(candles, idx) -> bool:
