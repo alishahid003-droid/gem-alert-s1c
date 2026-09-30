@@ -194,6 +194,31 @@ def section_fomo():
                 print(f"    {k}: {str(v)[:300]}")
 
 
+def section_discovery():
+    hdr("5. FREE DISCOVERY PROBE (Solana via GeckoTerminal; Robinhood Chain network id)")
+    from layers.layer0_scoring import fetch_geckoterminal_new_pools, flatten_geckoterminal_pools, \
+        score_geckoterminal_pools
+    raw = fetch_geckoterminal_new_pools("solana")
+    items = flatten_geckoterminal_pools(raw.get("json")) if raw.get("ok") else []
+    print(f"  GeckoTerminal solana new_pools -> HTTP {raw.get('status_code')} pools={len(items)} "
+          f"dexes={sorted({str(i.get('dex_id')) for i in items})}")
+    for sc in score_geckoterminal_pools("solana", items[:4]):
+        sr = sc["score"]
+        print(f"    {str(sc['address'])[:10]} {sr.score}/100 band {sr.band} coverage {sr.signal_coverage} "
+              f"dex={sc['raw'].get('dex_id')} liq=${(sc['raw'].get('liquidity_usd') or 0):,.0f}")
+    found = []
+    for page in range(1, 8):
+        r = get_json(f"{CONFIG.geckoterminal_base_url}/networks", params={"page": page})
+        data = (r.get("json") or {}).get("data") or []
+        if not data:
+            break
+        for n in data:
+            name = ((n.get("attributes") or {}).get("name") or "")
+            if "robinhood" in (n.get("id", "") + name).lower():
+                found.append((n.get("id"), name))
+    print(f"  GeckoTerminal Robinhood network ids: {found or 'NOT LISTED'}")
+
+
 def section_execution():
     hdr("4. WOULD THE CURRENT ALERTS HAVE BEEN AUTO-BOUGHT?")
     from executor.config import EXECUTOR_CONFIG
@@ -261,7 +286,7 @@ def section_execution():
 
 def main():
     section_keys()
-    for fn in (section_heartbeats, section_fomo, section_execution):
+    for fn in (section_heartbeats, section_fomo, section_execution, section_discovery):
         try:
             fn()
         except Exception as e:  # diagnostic: report and keep going

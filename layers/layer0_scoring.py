@@ -1480,6 +1480,9 @@ def flatten_geckoterminal_pools(gt_json) -> list:
             "pool_created_at": attrs.get("pool_created_at"),
             "txns_h1_total": _gt_txn_total(attrs, "h1"),
             "txns_h24_total": _gt_txn_total(attrs, "h24"),
+            # e.g. "pump-fun" for a pump.fun bonding-curve pool (Sept 30 2026:
+            # decides the stricter pre-graduation bands on the Solana path)
+            "dex_id": (((pool.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id"),
         })
     return out
 
@@ -1502,6 +1505,33 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
     unexpected rather than risk a wrong percentage."""
     lp_locked = mint_revoked = freeze_revoked = top10_pct = None
     address = item.get("address")
+    if address and chain == "solana":
+        # Free Solana path (Sept 30 2026): GoPlus's Solana schema differs
+        # from EVM (mintable/freezable objects), already parsed by
+        # parse_goplus_solana_security; top-10 concentration from the free
+        # RPC pool. No MadeOnSol call anywhere on this path.
+        gp = {"ok": True, "data": goplus_data} if goplus_data is not None else fetch_goplus_security(chain, address)
+        if gp.get("ok") and gp.get("data"):
+            parsed = parse_goplus_solana_security(gp["data"])
+            mint_revoked = parsed["mint_authority_revoked"]
+            freeze_revoked = parsed["freeze_authority_revoked"]
+            lp_locked = parsed["lp_locked"]
+        top10_pct = fetch_solana_top10_holder_pct(address)
+        is_pregrad = "pump" in str(item.get("dex_id") or "").lower()
+        return RawSignals(
+            top10_holder_pct=top10_pct,
+            lp_locked_or_curve_healthy=lp_locked,
+            mint_authority_revoked=mint_revoked,
+            freeze_authority_revoked=freeze_revoked,
+            vol_to_liq_ratio=_safe_div(item.get("volume_24h_usd"), item.get("liquidity_usd")),
+            holder_growth_rate_per_hr=holder_growth_rate_per_hr,
+            bundler_sniper_pct=None,
+            liquidity_usd=item.get("liquidity_usd"),
+            is_pregraduation_solana=is_pregrad,
+            price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
+            txn_activity_decay_ratio=compute_activity_decay_ratio(item.get("txns_h1_total"),
+                                                                  item.get("txns_h24_total")),
+        )
     if address:
         gp = {"ok": True, "data": goplus_data} if goplus_data is not None else fetch_goplus_security(chain, address)
         if gp.get("ok"):
@@ -1621,7 +1651,7 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
         sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
                                               goplus_data=gp_data)
         sr = score_token(sig)
-        if sr.band in ("A", "B") and chain in ("bsc", "base"):
+        if sr.band in ("A", "B") and chain in ("bsc", "base", "solana"):
             dd = _evm_launch_drawdown(chain, item)
             if dd is not None:
                 sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,

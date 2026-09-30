@@ -332,6 +332,8 @@ def _safe(fn, *args, **kwargs):
 # worst case -- see README's call-budget section.
 LAYER8_MAX_DEEP_SCORES_PER_SLOW_CYCLE = 3
 
+GECKOTERMINAL_NETWORK_SLUGS = {"bsc": "bsc", "base": "base", "solana": "solana"}
+GECKOTERMINAL_EXTRA_CHAINS = ["solana"]  # free Layer 0b scan beyond Mobula's chains (Sept 30 2026)
 MOBULA_PULSE_CHAINS = [("bsc", "evm:56"), ("base", "evm:8453")]  # Base re-enabled Sept 24 2026 (Ali: Fomo trades Base too) -- TON/ETH still dropped, scope cut Sept 22, 2026. evm:<numeric chainId> is Mobula's real chain-id format (bug #4, fixed Sept 24 2026) -- "bnb:bnb"/"base:base" were never valid and caused a raw 500.
 
 
@@ -1375,7 +1377,7 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
     Returns the number of alerts actually delivered, same convention as
     every other _run_* helper in this file."""
     alerts_sent = 0
-    gt_network = chain  # GeckoTerminal's own slug already matches this codebase's chain name for bsc/base
+    gt_network = GECKOTERMINAL_NETWORK_SLUGS.get(chain, chain)  # bsc/base/solana match our names
     raw = _safe(fetch_geckoterminal_new_pools, gt_network)
     if not (isinstance(raw, dict) and raw.get("ok")):
         detail = raw.get("reason") if isinstance(raw, dict) else describe_fetch_failure({"raw": raw})
@@ -1733,6 +1735,15 @@ def run_poll_fast():
         # _run_geckoterminal_fallback's docstring.
         if not mobula_ok:
             alerts_sent += _run_geckoterminal_fallback(chain, board)
+
+    # Free Solana discovery (Sept 30 2026). Ali: "why is no Solana coin
+    # coming up in the alerts?" -- BSC/Base had a free scan every 10 min,
+    # Solana was ONLY scored via MadeOnSol on the PC, whose 190/day budget
+    # is spent by mid-day. Same GeckoTerminal new-pools feed, GoPlus Solana
+    # security, free-RPC holder concentration, capped Birdeye crash check:
+    # zero MadeOnSol calls.
+    for chain in GECKOTERMINAL_EXTRA_CHAINS:
+        alerts_sent += _run_geckoterminal_fallback(chain, board)
 
     # --- Layer 2b: self-built pump.fun smart-money convergence (Ali, Sept
     # 23 2026). Keyless (free Solana RPC only), so always attempted, no
