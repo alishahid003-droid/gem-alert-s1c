@@ -204,6 +204,11 @@ def handle_compound_scalper_candidate(chain: str, token: str, score_band: Option
                                            momentum=momentum)
     if decision.should_fire and not guard_ok:
         return {"fired": False, "mode": "compound_scalper", "reason": f"entry guard: {guard_why}"}
+    if decision.should_fire and compound_scalper.sprint_mode():
+        from executor import sprint
+        ok, why = sprint.entry_ok(ctx)
+        if not ok:
+            return {"fired": False, "mode": "compound_scalper", "reason": why}
     if not decision.should_fire:
         return {"fired": False, "mode": "compound_scalper", "reason": decision.reason}
 

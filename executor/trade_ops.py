@@ -134,6 +134,13 @@ def daily_summary_text(now: Optional[float] = None) -> str:
         f"in ${spent:,.2f} / out ${back:,.2f}",
         f"MadeOnSol: {ms.get('used')}/{ms.get('budget')} calls today",
     ]
+    try:
+        from executor.sprint import status_line
+        sl = status_line()
+        if sl:
+            lines.append(sl)
+    except Exception:  # noqa: BLE001
+        pass
     by_sig = sb.get("by_signal") or {}
     if by_sig:
         best = sorted(by_sig.items(), key=lambda kv: -(kv[1].get("n") or 0))[:4]

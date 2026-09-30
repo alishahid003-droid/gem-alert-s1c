@@ -102,22 +102,33 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def sprint_mode() -> bool:
+    """5-day sprint (Oct 1 2026, see executor/sprint.py): the compound
+    scalper with sprint defaults, stricter entries, auto-start and
+    auto-resume. Explicit COMPOUND_* env values still win."""
+    return (os.environ.get("SPRINT_MODE", "") or "").strip().lower() == "true"
+
+
+def _sd(normal, sprint):
+    return sprint if sprint_mode() else normal
+
+
 @dataclass
 class CompoundScalperConfig:
     # Master switch -- same "must be the literal string true" fail-safe
     # pattern as EXECUTION_ENABLED itself. Off by default.
-    enabled: bool = field(default_factory=lambda: _env("COMPOUND_SCALPER_ENABLED", "false") == "true")
+    enabled: bool = field(default_factory=lambda: _env("COMPOUND_SCALPER_ENABLED", "false") == "true" or sprint_mode())
 
     # Starting pool size -- Ali's own stated range, Sept 29 2026 ("$25,
     # $30"). Midpoint default, overridable.
-    seed_usd: float = field(default_factory=lambda: _env_float("COMPOUND_SEED_USD", 27.5))
+    seed_usd: float = field(default_factory=lambda: _env_float("COMPOUND_SEED_USD", _sd(27.5, 100.0)))
 
     # Fraction of CURRENT pool balance committed to each single sequential
     # position. Deliberately aggressive per Ali's explicit ask ("aggressive
     # compounding"), not a conservative default -- the 1-risk_pct remainder
     # stays uncommitted as a buffer against this module's cost estimate
     # being wrong in practice, not as a second concurrent position.
-    risk_pct: float = field(default_factory=lambda: _env_float("COMPOUND_RISK_PCT", 0.75))
+    risk_pct: float = field(default_factory=lambda: _env_float("COMPOUND_RISK_PCT", _sd(0.75, 0.9)))
 
     # Take-profit target as a price multiple vs entry mcap. Set above a
     # flat 2.0x on purpose: after round-trip cost (see
@@ -178,21 +189,21 @@ class CompoundScalperConfig:
     # executor/circuit_breaker.py's Stage 1/2 breaker (different pool,
     # different budget, shouldn't trip on each other's losses).
     max_consecutive_losses: int = field(default_factory=lambda: _env_int("COMPOUND_MAX_CONSECUTIVE_LOSSES", 3))
-    max_session_loss_pct: float = field(default_factory=lambda: _env_float("COMPOUND_MAX_SESSION_LOSS_PCT", 0.50))
+    max_session_loss_pct: float = field(default_factory=lambda: _env_float("COMPOUND_MAX_SESSION_LOSS_PCT", _sd(0.50, 0.75)))
 
     # Absolute dollar floor -- stop entirely (not just "trip until Ali
     # resets it") once the pool is this small, since a pool this size can
     # no longer clear its own round-trip cost on any real position size.
-    floor_usd: float = field(default_factory=lambda: _env_float("COMPOUND_FLOOR_USD", 5.0))
+    floor_usd: float = field(default_factory=lambda: _env_float("COMPOUND_FLOOR_USD", _sd(5.0, 20.0)))
 
     # Session window, hours -- Ali's own stated range ("24 to 48 hours").
     # Default to the wide end; narrower is one env var away.
-    session_hours: float = field(default_factory=lambda: _env_float("COMPOUND_SESSION_HOURS", 48.0))
+    session_hours: float = field(default_factory=lambda: _env_float("COMPOUND_SESSION_HOURS", _sd(48.0, 120.0)))
 
     # Sanity ceiling only, not a target -- Ali said "tens to hundreds"; this
     # just stops a bug (or an unexpectedly fast market) from spinning the
     # pool through an unbounded number of trades in one session.
-    max_trades_per_session: int = field(default_factory=lambda: _env_int("COMPOUND_MAX_TRADES_PER_SESSION", 80))
+    max_trades_per_session: int = field(default_factory=lambda: _env_int("COMPOUND_MAX_TRADES_PER_SESSION", _sd(80, 400)))
 
 
 SCALPER_CONFIG = CompoundScalperConfig()
@@ -380,8 +391,14 @@ def entry_gate(chain: str, token: str, score_band: Optional[str],
         return ScalpDecision(False, "compound scalper disabled")
 
     pool = _get_pool()
+    if pool.get("session_start_ts") is None and sprint_mode():
+        pool = init_pool()          # sprint: turning SPRINT_MODE on IS the deliberate start
     if pool.get("session_start_ts") is None:
         return ScalpDecision(False, "pool not started -- call init_pool() first (deliberate, manual step)")
+
+    if pool.get("tripped") and sprint_mode():
+        from executor.sprint import maybe_resume
+        pool = maybe_resume(pool)
 
     if pool.get("tripped"):
         return ScalpDecision(False, f"circuit tripped: {pool.get('tripped_reason')}")
@@ -581,6 +598,8 @@ def _evaluate_trip(pool: dict):
         pool["tripped"] = True
         pool["tripped_reason"] = (f"{pool['consecutive_losses']} consecutive losses "
                                     f"(cap: {SCALPER_CONFIG.max_consecutive_losses})")
+        pool["tripped_ts"] = time.time()
+        pool["tripped_kind"] = "losing_streak"
         return
     seed = pool.get("seed_usd")
     if not seed:
@@ -591,3 +610,5 @@ def _evaluate_trip(pool: dict):
         pool["tripped"] = True
         pool["tripped_reason"] = (f"session loss {loss_pct*100:.1f}% of seed "
                                     f"(cap: {SCALPER_CONFIG.max_session_loss_pct*100:.0f}%)")
+        pool["tripped_ts"] = time.time()
+        pool["tripped_kind"] = "session_loss"
