@@ -45,9 +45,33 @@ def test_breakeven_fires_once():
 
 
 def test_trailing_stop_after_big_run():
-    d = ev(2.5, peak=4.0, locked=True)
-    assert d.action == "exit_all" and d.exit_type == "trailing_stop"
-    assert ev(3.5, peak=4.0, locked=True).action == "hold"
+    d = ev(2.5, peak=4.0, locked=True, remaining=0.35)
+    # sells the trading part, the 25% moonshot runner keeps riding
+    assert d.action == "sell_partial" and d.exit_type == "trailing_stop"
+    assert abs(d.pct_of_original - 0.10) < 1e-9
+    assert ev(3.5, peak=4.0, locked=True, remaining=0.35).action == "hold"
+    d = ev(2.5, peak=4.0, locked=False)          # not locked yet: the lock comes first
+    assert d.exit_type == "breakeven_lock"
+
+
+def test_runner_survives_normal_pullbacks():
+    # a 1000x-style run pulls back 50-70% several times on the way up
+    assert ev(4.0, peak=10.0, locked=True, remaining=0.25).action == "hold"      # -60% from peak
+    assert ev(1.2, peak=3.0, locked=True, remaining=0.25).action == "hold"       # not armed yet
+    assert ev(1.0, peak=1.6, age_min=600, locked=True, remaining=0.25).action == "hold"  # no time stop
+
+
+def test_runner_deep_trail_and_floor():
+    d = ev(2.0, peak=10.0, locked=True, remaining=0.25)                          # -80% from a 10x peak
+    assert d.action == "exit_all" and d.exit_type == "runner_trail"
+    d = ev(0.48, peak=1.6, locked=True, remaining=0.25)
+    assert d.action == "exit_all" and d.exit_type in ("runner_faded", "stop_loss")
+
+
+def test_runner_pct_env(monkeypatch):
+    monkeypatch.setenv("MOONSHOT_RUNNER_PCT", "0")
+    d = ev(2.5, peak=4.0, locked=True, remaining=0.35)
+    assert d.action == "exit_all"
 
 
 def test_time_stop_on_dead_coin():

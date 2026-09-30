@@ -55,6 +55,21 @@ def trail_giveback_pct() -> float:       return _f("TRAIL_GIVEBACK_PCT", 0.50)
 def time_stop_minutes() -> float:        return _f("TIME_STOP_MINUTES", 90.0)
 def time_stop_min_mult() -> float:       return _f("TIME_STOP_MIN_MULT", 1.2)
 
+# Moonshot runner (Sept 30 2026, Ali: "1500 dollars cashed out a million --
+# how are we going to be the ones benefiting from that?"). Before this, the
+# 50% trailing stop sold EVERYTHING left -- including the moonbag -- at the
+# first 50% pullback, and every 100x-1000x memecoin run has several of those
+# on the way up. Once the breakeven lock has taken the stake back, a runner
+# slice (MOONSHOT_RUNNER_PCT of the original) is exempt from the normal trail
+# and time stop. It only leaves via: rug detection / liquidity collapse, the
+# moonbag ladder's 10x/50x trims, a DEEP trail once it has really run
+# (RUNNER_TRAIL_ARM_MULT, give back RUNNER_TRAIL_GIVEBACK_PCT from peak), or
+# falling to RUNNER_FLOOR_MULT of our entry (thesis dead; stake already safe).
+def moonshot_runner_pct() -> float:      return _f("MOONSHOT_RUNNER_PCT", 0.25)
+def runner_trail_arm_mult() -> float:    return _f("RUNNER_TRAIL_ARM_MULT", 5.0)
+def runner_trail_giveback() -> float:    return _f("RUNNER_TRAIL_GIVEBACK_PCT", 0.75)
+def runner_floor_mult() -> float:        return _f("RUNNER_FLOOR_MULT", 0.5)
+
 
 @dataclass
 class ExitDecision:
@@ -90,12 +105,30 @@ def evaluate_exit(entry_mcap: Optional[float], current_mcap: Optional[float],
         return ExitDecision("sell_partial", "breakeven_lock", pct_of_original=frac,
                             reason=f"{mult:.2f}x: sold {frac * 100:.0f}% to recover the full stake -- rest rides free")
 
+    runner = min(moonshot_runner_pct(), remaining_pct) if breakeven_locked else 0.0
+    tradeable = remaining_pct - runner
+    if runner > 0 and tradeable <= 1e-6:
+        # Only the free-ride runner is left.
+        if peak_mult >= runner_trail_arm_mult() and mult <= peak_mult * (1.0 - runner_trail_giveback()):
+            return ExitDecision("exit_all", "runner_trail",
+                                reason=f"runner fell {(1 - mult / peak_mult) * 100:.0f}% from its {peak_mult:.1f}x peak")
+        if mult <= runner_floor_mult():
+            return ExitDecision("exit_all", "runner_faded",
+                                reason=f"runner back to {mult:.2f}x of entry -- move is over (stake was already recovered)")
+        return ExitDecision("hold", reason=f"runner riding {mult:.2f}x (peak {peak_mult:.2f}x)")
+
     if peak_mult >= trail_arm_mult() and mult <= peak_mult * (1.0 - trail_giveback_pct()):
-        return ExitDecision("exit_all", "trailing_stop",
-                            reason=f"fell {(1 - mult / peak_mult) * 100:.0f}% from its {peak_mult:.1f}x peak")
+        why = f"fell {(1 - mult / peak_mult) * 100:.0f}% from its {peak_mult:.1f}x peak"
+        if runner > 0:
+            return ExitDecision("sell_partial", "trailing_stop", pct_of_original=tradeable,
+                                reason=why + f" -- sold the rest, {runner * 100:.0f}% runner keeps riding")
+        return ExitDecision("exit_all", "trailing_stop", reason=why)
 
     age_min = (now_ts - opened_ts) / 60.0
     if age_min >= time_stop_minutes() and peak_mult < time_stop_min_mult():
+        if runner > 0:
+            return ExitDecision("sell_partial", "time_stop", pct_of_original=tradeable,
+                                reason=f"{age_min:.0f} min without reaching {time_stop_min_mult():.1f}x -- runner kept")
         return ExitDecision("exit_all", "time_stop",
                             reason=f"{age_min:.0f} min without reaching {time_stop_min_mult():.1f}x (peak {peak_mult:.2f}x)")
 
@@ -137,8 +170,10 @@ def check_and_exit(chain: str, token: str, current_mcap: Optional[float],
             position_state.close_position(chain, token, reason=f"{decision.exit_type}: {decision.reason}",
                                           exit_usd=result.filled_usd)
         else:
-            position_state.record_moonbag_trim(chain, token, decision.exit_type, pct, result.filled_usd)
-            position_state.mark_breakeven_locked(chain, token, pct)
+            position_state.record_moonbag_trim(chain, token, f"{decision.exit_type}@{int(now_ts)}", pct,
+                                               result.filled_usd)
+            if decision.exit_type == "breakeven_lock":
+                position_state.mark_breakeven_locked(chain, token, pct)
         if result.filled_usd is not None:
             circuit_breaker.record_trade_result(result.filled_usd - cost_basis)
     return {"chain": chain, "token": token, "decision": decision, "sell_result": result}

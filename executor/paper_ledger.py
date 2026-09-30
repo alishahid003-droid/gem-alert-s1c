@@ -199,6 +199,14 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             del book[pid]
             continue
 
+        if pos.get("strategy") == "runner":
+            d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
+                                         exit_rules.moonshot_runner_pct(), True, pos["cost_pct"])
+            if d.action == "exit_all":
+                _sell(pos, pos["remaining"], mcap, d.exit_type, now)
+                closed_now.append(_close(pos, d.exit_type, d.reason, now))
+                del book[pid]
+            continue
         if pos.get("strategy") == "scalper":
             if _manage_scalper(pos, mcap, now):
                 closed_now.append(pos)
@@ -213,8 +221,26 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             continue
         if d.action == "sell_partial":
             _sell(pos, d.pct_of_original, mcap, d.exit_type, now)
-            pos["breakeven_locked"] = True
-            pos["ladder_scale"] = max(0.0, 1.0 - d.pct_of_original)
+            if d.exit_type == "breakeven_lock":
+                pos["breakeven_locked"] = True
+                pos["ladder_scale"] = max(0.0, 1.0 - d.pct_of_original)
+            else:
+                # Only the moonshot runner is left: score the trade now
+                # (runner marked to market), and track the runner on its own
+                # so the win rate isn't held open by a free ride.
+                runner_frac = pos["remaining"]
+                runner_value = pos["usd"] * runner_frac * (mcap / pos["entry_mcap"]) * (1.0 - pos["cost_pct"])
+                pos["proceeds_usd"] += runner_value
+                closed_now.append(_close(pos, d.exit_type, d.reason + " (runner marked to market)", now))
+                del book[pid]
+                book["runner:" + pid] = {
+                    **{k: pos[k] for k in ("chain", "token", "signal", "band", "tags", "entry_mcap",
+                                           "peak_mcap", "cost_pct", "guard")},
+                    "id": "runner:" + pid, "source": "runner", "strategy": "runner",
+                    "usd": pos["usd"] * runner_frac, "opened_ts": now, "remaining": 1.0,
+                    "breakeven_locked": True, "ladder_scale": 1.0, "rungs_fired": [], "proceeds_usd": 0.0,
+                    "unpriced_cycles": 0, "events": [], "tp_done": False}
+                continue
 
         mult = mcap / pos["entry_mcap"]
         for tier, pct in DEFAULT_TRIM_LADDER:
@@ -250,8 +276,17 @@ def _stats(rows: list) -> dict:
 
 
 def scoreboard(since_ts: Optional[float] = None) -> dict:
-    rows = [r for r in _closed() if since_ts is None or r.get("closed_ts", 0) >= since_ts]
-    out = {"overall": _stats(rows), "open_count": len(_open())}
+    allrows = [r for r in _closed() if since_ts is None or r.get("closed_ts", 0) >= since_ts]
+    rows = [r for r in allrows if r.get("strategy") != "runner"]
+    runners = [r for r in allrows if r.get("strategy") == "runner"]
+    book = _open()
+    out = {"overall": _stats(rows), "open_count": len(book),
+           # Moonshot runners: each is the free-ride slice of a trade already
+           # scored above; P&L is vs the original entry price.
+           "runners": {**_stats(runners), "riding": sum(1 for p in book.values() if p.get("strategy") == "runner"),
+                       "best_multiple": round(max([r["peak_mcap"] / r["entry_mcap"] for r in runners]
+                                                  + [p["peak_mcap"] / p["entry_mcap"] for p in book.values()
+                                                     if p.get("strategy") == "runner"] + [0]), 1)}}
     for field in ("signal", "chain", "band", "source", "exit_type", "guard"):
         groups = {}
         for r in rows:
@@ -284,7 +319,7 @@ def signal_allowed(signal: Optional[str]) -> tuple:
     can earn its way back). Too little data -> allowed."""
     if not signal:
         return True, "no signal"
-    rows = [r for r in _closed() if r.get("signal") == signal][-200:]
+    rows = [r for r in _closed() if r.get("signal") == signal and r.get("strategy") != "runner"][-200:]
     st = _stats(rows)
     if st["n"] < min_trades_for_verdict():
         return True, f"{signal}: {st['n']} paper trades so far (verdict at {min_trades_for_verdict()})"
