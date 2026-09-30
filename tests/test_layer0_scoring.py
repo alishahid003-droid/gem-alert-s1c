@@ -568,6 +568,48 @@ def test_compute_holder_growth_rate_per_hr_sorts_unordered_input():
     assert abs(rate - 120.0) < 0.01
 
 
+def test_compute_holder_growth_rate_per_hr_prefers_recent_window_over_stale_history():
+    # Real gap fixed Sept 30 2026 (checklist: "minute-level, not hourly").
+    # Token was flat for its first ~100 min, then added holders fast in the
+    # last ~10 min. Old behavior (oldest-vs-newest only) would dilute this
+    # down to a much smaller number over the whole ~110 min span. New
+    # behavior should report close to the REAL recent rate instead.
+    now = time.time()
+    history = [
+        (now - 110 * 60, 100),  # 110 min ago: 100 holders (flat start)
+        (now - 100 * 60, 101),  # 100 min ago: basically flat
+        (now - 10 * 60, 110),   # 10 min ago: still flat-ish
+        (now, 190),              # now: +80 holders in the last 10 min
+    ]
+    rate = compute_holder_growth_rate_per_hr(history)
+    assert rate is not None
+    # Recent window (last 20 min) = (now-10min, 110) -> (now, 190):
+    # +80 holders / (10/60)hr = 480/hr -- NOT the old diluted
+    # (190-100)/(110/60) = ~49/hr full-history number.
+    assert abs(rate - 480.0) < 0.01
+
+
+def test_compute_holder_growth_rate_per_hr_falls_back_when_recent_window_too_thin():
+    # Only one point falls inside the recent window (itself) -- not enough
+    # to compute a recent-window rate, so it must fall back to the old
+    # oldest-vs-newest full-history behavior rather than returning None.
+    now = time.time()
+    history = [(now - 3600, 100), (now, 220)]  # only 2 points, 1hr apart
+    rate = compute_holder_growth_rate_per_hr(history)
+    assert rate is not None
+    assert abs(rate - 120.0) < 0.01
+
+
+def test_compute_holder_growth_rate_per_hr_recent_window_still_respects_min_elapsed():
+    # Two points inside the recent window but only 60s apart -- must still
+    # refuse to compute a rate from that (would massively amplify noise),
+    # and there's no older point to fall back to either, so this must
+    # stay None, not silently return some other number.
+    now = time.time()
+    history = [(now - 60, 100), (now, 105)]
+    assert compute_holder_growth_rate_per_hr(history) is None
+
+
 def test_fetch_dexscreener_vol_liq_picks_highest_liquidity_pair(monkeypatch):
     import layers.layer0_scoring as l0
 

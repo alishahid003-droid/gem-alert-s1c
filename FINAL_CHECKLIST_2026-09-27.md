@@ -566,6 +566,25 @@ priority order, not build order.
   which move in minutes, not hours -- same category of fix as the
   arXiv-measured "0.08 tx/hr rug vs 299 tx/hr legitimate" signal, just at
   finer time resolution.
+  - [x] DONE Sept 30 2026: `compute_holder_growth_rate_per_hr`
+    (layers/layer0_scoring.py) now prefers a RECENT-WINDOW rate (last 20
+    min of retained points) instead of always averaging oldest-to-newest
+    across the full 2hr retention window -- a fast launch in the last 10
+    min no longer gets diluted by an hour+ of earlier flat history. Falls
+    back to the old full-history behavior when the recent window doesn't
+    have enough points/elapsed time yet, so nothing regresses for
+    tokens with sparse history. Still requires
+    HOLDER_GROWTH_MIN_ELAPSED_SECONDS (5 min) of real elapsed time before
+    trusting any rate -- never fabricates one. 3 new regression tests
+    added (tests/test_layer0_scoring.py), full suite still 524/525 (only
+    the same pre-existing, unrelated $7-vs-$50 wallet-tier failure).
+    HONEST CEILING: this is still bounded by the real poll cadence
+    feeding state.record_holder_point (poll-fast.yml's ~10min
+    cron-job.org cadence) -- "minute-level" here means "not diluted by
+    stale hours-old data," not literal sub-minute sampling, which no free
+    data source this codebase uses can actually provide. Getting finer
+    than ~10min would need a paid/faster holder-count source, not just a
+    code change.
 
 ## Pre-flight check for tomorrow's ~5:05 AM PKT run (Sept 29, ~9:00 PM PKT)
 

@@ -420,19 +420,59 @@ def _factor_ok(factors: dict, key: str) -> Optional[bool]:
 # the oldest and newest retained point before computing a rate at all.
 HOLDER_GROWTH_MIN_ELAPSED_SECONDS = 5 * 60
 
+# UPDATED Sept 30 2026 -- real gap found and fixed, checklist item "Minute-
+# level holder growth signal, not hourly" (FINAL_CHECKLIST_2026-09-27.md).
+#
+# The original version always averaged from the OLDEST retained point to
+# the NEWEST one. state.py keeps up to HOLDER_HISTORY_MAX_POINTS=20 points
+# over HOLDER_HISTORY_MAX_AGE_SECONDS=2 hours, so once a token had been
+# tracked for a while, that "oldest to newest" span could stretch out to
+# nearly 2 hours -- exactly wrong for memecoins, which move (and rug) on a
+# scale of minutes, not hours. A token that added 40 holders in the last 10
+# minutes but was flat for the previous 90 would report a heavily diluted
+# rate, not the real, currently-accelerating number that actually matters
+# for catching a launch in progress.
+#
+# Fix: prefer a RECENT-WINDOW rate -- only the points from the last
+# HOLDER_GROWTH_RECENT_WINDOW_SECONDS (20 min) -- and fall back to the old
+# full-history (oldest-to-newest) rate only when there isn't enough recent
+# data yet (a token just starting to be tracked, or a scoring gap wider than
+# the window). Still requires HOLDER_GROWTH_MIN_ELAPSED_SECONDS of real
+# elapsed time before trusting any rate -- this doesn't lower that bar, it
+# just stops the OLD points from diluting a real, current acceleration.
+# Real ceiling: this can only be as fine-grained as the actual poll cadence
+# feeding state.record_holder_point (currently poll-fast.yml's ~10min
+# cron-job.org cadence, after today's separate stuck-loop fix) -- "minute-
+# level" here means "not diluted by stale hours-old data", not literally
+# sub-minute sampling, which nothing in this codebase's free data sources
+# can honestly provide.
+HOLDER_GROWTH_RECENT_WINDOW_SECONDS = 20 * 60
+
 
 def compute_holder_growth_rate_per_hr(history: List[Tuple[float, float]]) -> Optional[float]:
     """history: list of (ts, holder_count) tuples, any order, as returned by
-    state.get_holder_history. Returns net new holders/hr between the oldest
-    and newest retained point, or None if there's under 2 points yet, or the
-    real time span between them is too short to trust (see
-    HOLDER_GROWTH_MIN_ELAPSED_SECONDS) -- never fabricates a rate from too
-    little data."""
+    state.get_holder_history. Returns net new holders/hr, preferring a
+    RECENT-WINDOW rate (last HOLDER_GROWTH_RECENT_WINDOW_SECONDS only) so a
+    fresh acceleration isn't diluted by older, slower history -- falls back
+    to the oldest-vs-newest full-history rate when the recent window alone
+    doesn't have enough real elapsed time yet. Returns None if there's under
+    2 points total, or even the full history's time span is too short to
+    trust (see HOLDER_GROWTH_MIN_ELAPSED_SECONDS) -- never fabricates a rate
+    from too little data."""
     if len(history) < 2:
         return None
     points = sorted(history, key=lambda p: p[0])
-    oldest_ts, oldest_count = points[0]
     newest_ts, newest_count = points[-1]
+
+    recent_cutoff = newest_ts - HOLDER_GROWTH_RECENT_WINDOW_SECONDS
+    recent_points = [p for p in points if p[0] >= recent_cutoff]
+    if len(recent_points) >= 2:
+        recent_oldest_ts, recent_oldest_count = recent_points[0]
+        recent_elapsed = newest_ts - recent_oldest_ts
+        if recent_elapsed >= HOLDER_GROWTH_MIN_ELAPSED_SECONDS:
+            return (newest_count - recent_oldest_count) / (recent_elapsed / 3600.0)
+
+    oldest_ts, oldest_count = points[0]
     elapsed_seconds = newest_ts - oldest_ts
     if elapsed_seconds < HOLDER_GROWTH_MIN_ELAPSED_SECONDS:
         return None
