@@ -54,7 +54,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - [ ] **2.6 CLAUDE** — Grow the labeled backtest set from ~17 to 100+ real rugs / pump-dumps / moonshots and re-run weekly (current accuracy 54.5% on 11 tokens is too small to trust). DONE-WHEN: ≥100 labeled, result logged.
 
 - [x] **2.7 CLAUDE** — **Fast trade backtest** on the labeled coins (Ali: no time to wait for paper results): real Birdeye candles, entry at +15/30/60 min, stage + scalper exits, costs, pessimistic candle order; point-in-time entry filter and exit-parameter grid. `backtest_trades.py`, workflow "Trade backtest" — `a4aeb14`, `2bb20fc`. First result (no entry filter, 24 coins): 33–42% win rate.
-- [ ] **2.8 CLAUDE** — Apply the backtest's best exit settings as defaults ONLY where the paper ledger confirms them (24 coins overfit easily). DONE-WHEN: defaults changed with paper evidence logged.
+- [ ] **2.8 CLAUDE** — Backtest grid result: stop -55% / lock 1.5x / trail 50% = 75% wins (79% with entry filter, 15/19) vs 42% for the first settings. APPLIED as defaults (execution is off; paper ledger now runs them live). DONE-WHEN: 30+ closed paper trades confirm >= the backtest win rate; if not, re-tune.
 
 ## Phase 3 — Entry quality (fewer, better buys)
 
