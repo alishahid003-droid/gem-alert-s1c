@@ -189,6 +189,22 @@ def _refuse_unless_ready(chain: str) -> Optional[ExecutionResult]:
     return None
 
 
+def solana_swap_speed_params() -> dict:
+    """Checklist 5.2 (Sept 30 2026): no priority fee was ever set, so during
+    congestion buys/sells could land late or be dropped -- the exact moments a
+    memecoin trade needs to land. Jupiter picks a competitive fee, capped at
+    SOLANA_PRIORITY_MAX_LAMPORTS (default 1,000,000 = 0.001 SOL), and sizes
+    compute units to the real transaction."""
+    import os
+    try:
+        cap = int(os.environ.get("SOLANA_PRIORITY_MAX_LAMPORTS", "1000000"))
+    except ValueError:
+        cap = 1_000_000
+    level = os.environ.get("SOLANA_PRIORITY_LEVEL", "veryHigh")
+    return {"dynamicComputeUnitLimit": True,
+            "prioritizationFeeLamports": {"priorityLevelWithMaxLamports": {"maxLamports": cap, "priorityLevel": level}}}
+
+
 def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     guard = _refuse_unless_ready("solana")
     if guard:
@@ -216,11 +232,18 @@ def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     if not quote.get("ok"):
         return ExecutionResult(False, f"jupiter quote failed: status {quote.get('status_code')}")
 
+    # Checklist 3.2: never buy what can't be sold back.
+    from executor.sellability import check_sellable
+    sellable, why = check_sellable("solana", token_mint, lamports_in=lamports, buy_quote=quote.get("json"))
+    if not sellable:
+        return ExecutionResult(False, f"refused before buying: {why}")
+
     # Step 2: get the actual swap transaction for this quote.
     swap_resp = post_json(f"{CONFIG.jupiter_quote_base_url}/swap", json={
         "quoteResponse": quote.get("json"),
         "userPublicKey": _solana_pubkey_from_private_key(),
         "wrapAndUnwrapSol": True,
+        **solana_swap_speed_params(),
     })
     if not swap_resp.get("ok"):
         return ExecutionResult(False, f"jupiter swap-tx build failed: status {swap_resp.get('status_code')}")
@@ -425,6 +448,12 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
         from eth_account import Account  # type: ignore
     except ImportError:
         return ExecutionResult(False, "web3.py not installed -- add to requirements.txt before enabling")
+
+    # Checklist 3.2: GoPlus honeypot / sell-tax check before anything is signed.
+    from executor.sellability import check_sellable
+    sellable, why = check_sellable("bsc", token_address)
+    if not sellable:
+        return ExecutionResult(False, f"refused before buying: {why}")
 
     bnb_price = _bnb_price_usd()
     if bnb_price is None or bnb_price <= 0:
@@ -797,6 +826,7 @@ def _sell_solana(token_mint: str, amount_tokens: float) -> ExecutionResult:
         "quoteResponse": quote.get("json"),
         "userPublicKey": pubkey,
         "wrapAndUnwrapSol": True,
+        **solana_swap_speed_params(),
     })
     if not swap_resp.get("ok"):
         return ExecutionResult(False, f"jupiter sell swap-tx build failed: status {swap_resp.get('status_code')}")

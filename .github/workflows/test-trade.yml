@@ -1,0 +1,53 @@
+name: Test trade (Solana)
+
+# Checklist 6.3/6.4: one small buy + sell through the live swap code.
+# "dry-run" needs no wallet key and sends nothing. "live" needs the
+# EXECUTION_SOLANA_PRIVATE_KEY secret and enables execution for this job
+# only -- the scheduled system stays off until the EXECUTION_ENABLED secret
+# is set (checklist 6.5).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (no key, sends nothing) or live"
+        required: true
+        default: "dry-run"
+        type: choice
+        options: ["dry-run", "live"]
+      usd:
+        description: "USD amount (max 10)"
+        required: true
+        default: "2"
+      token:
+        description: "Token mint (default USDC)"
+        required: false
+        default: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  push:
+    branches: ["claude/**"]
+    paths: ["test_trade.py", ".github/workflows/test-trade.yml"]
+
+jobs:
+  test-trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Test trade
+        env:
+          PYTHONUNBUFFERED: "1"
+          EXECUTION_SOLANA_PRIVATE_KEY: ${{ secrets.EXECUTION_SOLANA_PRIVATE_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          USD: ${{ github.event.inputs.usd || '2' }}
+          TOKEN: ${{ github.event.inputs.token || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' }}
+        run: |
+          if [ "$MODE" = "live" ]; then
+            python -u test_trade.py --usd "$USD" --token "$TOKEN"
+          else
+            python -u test_trade.py --usd "$USD" --token "$TOKEN" --dry-run
+          fi
