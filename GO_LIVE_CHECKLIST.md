@@ -46,9 +46,9 @@ target is a number we measure against every week — not something assumed.
 
 The single biggest lever for 80%: stop guessing, measure every would-buy.
 
-- [ ] **2.1 CLAUDE** — **Paper-trading ledger**: every WOULD-BUY (Stage 1, Stage 2, scalper) opens a paper position at the real quoted price incl. estimated slippage/fees, and runs the SAME exit logic as real money, with live prices. Separate from real positions, never blocks real budget. DONE-WHEN: paper positions open/close automatically and show on the dashboard.
-- [ ] **2.2 CLAUDE** — **Win-rate scoreboard** on the dashboard: win rate, average win, average loss, expectancy, max drawdown — broken down per signal (score band, deployer, convergence, Fomo roster, scalper), per chain, per trader. DONE-WHEN: visible and updating daily.
-- [ ] **2.3 CLAUDE** — **Auto-disable losers**: any signal/trader/chain whose paper win rate is below target over ≥20 closed trades stops triggering real buys (still paper-traded so it can earn its way back). DONE-WHEN: rule live + unit-tested.
+- [ ] **2.1 CLAUDE** — **Paper-trading ledger**: every WOULD-BUY (Stage 1, Stage 2, scalper) opens a paper position at the real quoted price incl. estimated slippage/fees, and runs the SAME exit logic as real money, with live prices. Separate from real positions, never blocks real budget. DONE-WHEN: paper positions open/close automatically and show on the dashboard. — BUILT `dd71d46`; tick once live on main and the first paper trades close
+- [ ] **2.2 CLAUDE** — **Win-rate scoreboard** on the dashboard: win rate, average win, average loss, expectancy, max drawdown — broken down per signal (score band, deployer, convergence, Fomo roster, scalper), per chain, per trader. DONE-WHEN: visible and updating daily. — BUILT `dd71d46` (Positions tab); tick once it shows live data
+- [x] **2.3 CLAUDE** — **Auto-disable losers**: any signal/trader/chain whose paper win rate is below target over ≥20 closed trades stops triggering real buys (still paper-traded so it can earn its way back). DONE-WHEN: rule live + unit-tested. — `dd71d46`: >=20 paper trades and win rate < MIN_SIGNAL_WIN_RATE (default 50%) or negative expectancy -> real money blocked, paper continues. Raise the bar toward 80% as data grows (2.5).
 - [ ] **2.4 CLAUDE** — **Per-trader track record** for the 38 Fomo traders + promoted ones: copy only traders whose own copied-trade win rate is proven; demote the rest to alert-only. DONE-WHEN: ranking visible, gate enforced.
 - [ ] **2.5 BOTH** — **Go/no-go gate**: real money only on signal types with paper win rate ≥ 80% (or the best achieved, with your explicit OK) over ≥ 30 closed paper trades. DONE-WHEN: gate numbers reviewed with you.
 - [ ] **2.6 CLAUDE** — Grow the labeled backtest set from ~17 to 100+ real rugs / pump-dumps / moonshots and re-run weekly (current accuracy 54.5% on 11 tokens is too small to trust). DONE-WHEN: ≥100 labeled, result logged.
@@ -64,11 +64,16 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 
 ## Phase 4 — Exit discipline (this is where win rate is made)
 
-- [ ] **4.1 CLAUDE** — **Hard stop-loss** for Stage 1/2 positions (e.g. −25% from entry, tunable). Today only the scalper has one — a slow bleed with no rug signal is held forever. DONE-WHEN: enforced + tested.
-- [ ] **4.2 CLAUDE** — **Breakeven lock**: at +40–60% sell the slice that recovers the full stake + fees, then the rest rides risk-free (turns most green trades into locked wins). DONE-WHEN: enforced + tested.
-- [ ] **4.3 CLAUDE** — **Trailing stop** on the remainder (e.g. give back max 30–40% from peak), keeping the existing 3x/10x/50x moonbag ladder and dollar targets. DONE-WHEN: enforced + tested.
-- [ ] **4.4 CLAUDE** — **Time-stop**: exit a position that hasn't moved +X% within N minutes (dead coins tie up budget). DONE-WHEN: enforced + tested.
+- [x] **4.1 CLAUDE** — **Hard stop-loss** for Stage 1/2 positions (e.g. −25% from entry, tunable). Today only the scalper has one — a slow bleed with no rug signal is held forever. DONE-WHEN: enforced + tested. — `c243c97`: -25% stop (STOP_LOSS_PCT), tests in tests/test_exit_rules.py
+- [x] **4.2 CLAUDE** — **Breakeven lock**: at +40–60% sell the slice that recovers the full stake + fees, then the rest rides risk-free (turns most green trades into locked wins). DONE-WHEN: enforced + tested. — `c243c97`: at 1.5x sells just enough to recover stake + costs; moonbag rungs rescale to what rides
+- [x] **4.3 CLAUDE** — **Trailing stop** on the remainder (e.g. give back max 30–40% from peak), keeping the existing 3x/10x/50x moonbag ladder and dollar targets. DONE-WHEN: enforced + tested. — `c243c97`: arms at 2x, exits 35% off peak (TRAIL_ARM_MULT / TRAIL_GIVEBACK_PCT)
+- [x] **4.4 CLAUDE** — **Time-stop**: exit a position that hasn't moved +X% within N minutes (dead coins tie up budget). DONE-WHEN: enforced + tested. — `c243c97`: 90 min without reaching 1.2x (TIME_STOP_MINUTES / TIME_STOP_MIN_MULT)
 - [ ] **4.5 CLAUDE** — **Tracked-trader exit mirror**: when the Fomo trader(s) we copied sell, we sell (Layer 9 alerts already detect this — wire it to execution). DONE-WHEN: enforced + tested.
+
+### Bugs found & fixed while building Phases 2/4 (Sept 30)
+- [x] close_position P&L ignored earlier partial-sell proceeds -> winning trades recorded as losses — `c243c97`
+- [x] defensive_sell (rug exit) tried to sell 100% of original tokens after trims -> would fail on-chain mid-rug — `c243c97`
+- [x] MadeOnSol wallet-feed calls (Layers 2+9) were never counted or gated -> real usage above the tracked number — `ae43b4a`
 
 ## Phase 5 — Speed & reliability (don't lose trades to plumbing)
 
@@ -78,7 +83,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - [ ] **5.4 CLAUDE** — **Upstash usage check**: measure commands/day vs free-tier limit; batch/cache further if near it. DONE-WHEN: number logged, headroom ≥ 2x.
 - [ ] **5.5 CLAUDE** — **Telegram alert on every real trade + every failed trade + stalled runner** (dashboard already shows it; phone alert so nothing is missed). DONE-WHEN: tested message received.
 - [ ] **5.6 CLAUDE** — **Daily summary**: trades, win rate, P&L, API credits left — to Telegram once a day. DONE-WHEN: first one received.
-- [ ] **5.7 CLAUDE** — **MadeOnSol budget pacing**: at 12:37 UTC 160 of 190 daily calls were already used (one PC cycle ≈ 7 calls; every 15 min ≈ 670/day, so the budget runs out by mid-day and those layers go blind until 5 AM PKT). Spread the 190 calls across 24 h (per-hour allowance, priority to real candidates over routine scans) and show calls-left on the System tab. DONE-WHEN: budget lasts the full day in the diagnostic.
+- [ ] **5.7 CLAUDE** — **MadeOnSol budget pacing**: at 12:37 UTC 160 of 190 daily calls were already used (one PC cycle ≈ 7 calls; every 15 min ≈ 670/day, so the budget runs out by mid-day and those layers go blind until 5 AM PKT). Spread the 190 calls across 24 h (per-hour allowance, priority to real candidates over routine scans) and show calls-left on the System tab. DONE-WHEN: budget lasts the full day in the diagnostic. — BUILT `ae43b4a`; tick when a full UTC day passes with budget left in the diagnostic
 
 ## Phase 6 — First real money (Solana only)
 
