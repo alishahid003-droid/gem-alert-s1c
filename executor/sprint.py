@@ -108,6 +108,59 @@ def status_line() -> Optional[str]:
     day = (time.time() - (pool.get("session_start_ts") or time.time())) / 86400 + 1
     trades = pool.get("trades", [])
     wins = sum(1 for t in trades if (t.get("pnl_usd") or 0) > 0)
-    return (f"Sprint day {min(day, 5):.0f}/5: pool ${st.get('balance_usd') or 0:,.2f} "
-            f"({(st.get('multiple_of_seed') or 0):.2f}x seed), {len(trades)} exits, {wins} wins"
+    return (f"Sprint day {min(day, 5):.0f}/5: pool ${st.get('balance_usd') or 0:,.2f}, "
+            f"banked ${pool.get('banked_usd') or 0:,.2f}, {len(trades)} exits, {wins} wins"
             + (f", PAUSED: {st.get('tripped_reason')}" if st.get("tripped") else ""))
+
+
+def milestones() -> list:
+    """[(target_usd, keep_usd)] from SPRINT_MILESTONES (default Ali's plan,
+    Oct 1 2026: "$100 -> $3,500, extract $3,000; $500 -> $20,000, extract
+    $18,500; $1,500 -> $75,000"). keep 0 on the last one = target reached,
+    sprint stops and everything is banked."""
+    raw = os.environ.get("SPRINT_MILESTONES", "3500:500,20000:1500,75000:0")
+    out = []
+    for part in raw.split(","):
+        try:
+            t, k = part.split(":")
+            out.append((float(t), float(k)))
+        except ValueError:
+            continue
+    return sorted(out)
+
+
+def apply_milestones(pool: dict, now: Optional[float] = None) -> dict:
+    """Profit lock: when the (flat) pool reaches a milestone, everything above
+    its keep amount is BANKED -- it stays in the wallet but the sprint never
+    trades it again (withdraw it to be fully safe). Only while no position is
+    open, so nothing is sold to do it."""
+    from executor import compound_scalper as cs
+    if pool.get("open_position") is not None:
+        return pool
+    hit = set(pool.get("milestones_hit") or [])
+    changed = False
+    for target, keep in milestones():
+        if str(target) in hit or (pool.get("balance_usd") or 0) < target:
+            continue
+        bal = pool.get("balance_usd") or 0
+        banked = round(bal - keep, 2)
+        pool["banked_usd"] = round((pool.get("banked_usd") or 0) + banked, 2)
+        pool["balance_usd"] = keep
+        hit.add(str(target))
+        pool.setdefault("milestone_log", []).append({"target": target, "banked": banked, "kept": keep,
+                                                      "ts": now or time.time()})
+        if keep <= 0:
+            pool["tripped"] = True
+            pool["tripped_kind"] = "target_reached"
+            pool["tripped_reason"] = f"final target ${target:,.0f} reached -- everything banked"
+        changed = True
+        try:
+            from executor.trade_ops import _send
+            _send(f"🏁 SPRINT MILESTONE ${target:,.0f} reached: banked ${banked:,.2f}, "
+                  f"trading on with ${keep:,.2f}. Total banked ${pool['banked_usd']:,.2f}.")
+        except Exception:  # noqa: BLE001
+            pass
+    if changed:
+        pool["milestones_hit"] = sorted(hit)
+        cs._save_pool(pool)
+    return pool

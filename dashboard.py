@@ -269,6 +269,42 @@ def _autobuy_text(v) -> dict:
     return {"level": "no", "text": f"NO: {(v.get('reason') or '')[:90]}"}
 
 
+def _modules_board(scalper_status: dict) -> list:
+    """One row per trading module (Ali, Oct 1 2026: "are all these modules
+    shown separately?"): is real money on, its paper record, its status."""
+    import os
+    from executor import entrypoint as ep
+    by_src = (paper_ledger.scoreboard() or {}).get("by_source") or {}
+    sb = paper_ledger.scoreboard() or {}
+    live = os.environ.get("EXECUTION_ENABLED", "").strip().lower() == "true"
+    sprint_on = compound_scalper.sprint_mode()
+    reserved = sprint_on and os.environ.get("SPRINT_ONLY", "true").strip().lower() != "false"
+    try:
+        from executor.sprint import lane_allowed
+        lane_ok, lane_why = lane_allowed()
+    except Exception:  # noqa: BLE001
+        lane_ok, lane_why = False, "?"
+    s = scalper_status or {}
+    pool_txt = (f"pool ${s.get('balance_usd') or 0:,.2f}, banked ${s.get('banked_usd') or 0:,.2f}, "
+                f"{s.get('trades_closed', 0)} exits" if s.get("started") else "not started")
+    if s.get("tripped"):
+        pool_txt += f" -- PAUSED: {s.get('tripped_reason')}"
+    rows = [
+        {"module": "Stage 1 -- band A/B buys", "real": live and not reserved,
+         "paper": by_src.get("stage1"), "status": "wallet reserved for sprint" if reserved else "per-coin buys"},
+        {"module": "Stage 2 -- Fomo copy-trade", "real": live and not reserved,
+         "paper": by_src.get("stage2"), "status": "needs Fomo credits"},
+        {"module": ("Sprint pool (5-day)" if sprint_on else "Compound aggressor"),
+         "real": live and bool(s.get("enabled")), "paper": by_src.get("scalper"), "status": pool_txt},
+        {"module": "Momentum lane (quick in/out)", "real": live and sprint_on and lane_ok,
+         "paper": by_src.get("momentum_lane"), "status": lane_why},
+        {"module": "Moonshot (Layer 15)", "real": live and ep.moonshot_enabled() and not reserved,
+         "paper": by_src.get("moonshot"),
+         "status": f"stake ${ep.moonshot_position_usd():,.0f}; runners riding {(sb.get('runners') or {}).get('riding', 0)}"},
+    ]
+    return rows
+
+
 def _health() -> dict:
     """System-tab health (Sept 30 2026): is each runner actually running,
     and what's the real fomoapi.io credit situation."""
@@ -423,6 +459,7 @@ def build_data() -> dict:
         "fomo_candidates": fomo_candidates,
         "health": _health(),
         "paper": paper_ledger.scoreboard(),
+        "modules_board": _modules_board(scalper_status),
         "win_rate_target": 0.8,
     }
     _lap(f"TOTAL")
@@ -541,6 +578,10 @@ PAGE_TEMPLATE = """<!doctype html>
   <section>
     <h2>What needs your eyes <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(most recent, non-noise alerts)</span></h2>
     <div id="recent_highlights"></div>
+  </section>
+  <section>
+    <h2>Modules <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(each trading module on its own: real money on/off, paper record, status)</span></h2>
+    <div id="modules_board"></div>
   </section>
   <section>
     <h2>Compound Scalper <span class="tag" id="scalper-tag"></span></h2>
@@ -838,6 +879,14 @@ function render(data) {
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No alerts to show (try the toggle above if you want to see filtered noise too).</div>';
   document.getElementById("noise-toggle").onclick = () => { showNoise = !showNoise; render(window.__lastData); };
 
+  const mb = data.modules_board || [];
+  const mbPct = (st) => st && st.n ? `${(st.win_rate * 100).toFixed(0)}% (${st.wins}/${st.n})` : '-';
+  document.getElementById("modules_board").innerHTML = mb.length ? `<table><thead><tr><th>Module</th><th>Real money</th>
+    <th>Paper win rate</th><th>Paper P&amp;L</th><th>Status</th></tr></thead><tbody>${mb.map(r => `<tr>
+      <td>${esc(r.module)}</td><td>${r.real ? '<span class="pos-pnl">ON</span>' : '<span class="na">off</span>'}</td>
+      <td>${mbPct(r.paper)}</td><td>${r.paper && r.paper.n ? fmtUsd(r.paper.total_pnl_usd) : '-'}</td>
+      <td>${esc(r.status || '')}</td></tr>`).join("")}</tbody></table>` : '<div class="empty">no module data</div>';
+
   const pp = data.paper || {};
   const ov = pp.overall || {};
   const tgt = data.win_rate_target || 0.8;
@@ -853,7 +902,7 @@ function render(data) {
   document.getElementById("paper").innerHTML = ov.n ? `
     <p><strong>${ov.n}</strong> closed paper trades &middot; win rate ${pctCell(ov)} (target ${(tgt * 100).toFixed(0)}%)
       &middot; expectancy ${ov.expectancy_pct}% per trade &middot; total ${fmtUsd(ov.total_pnl_usd)} &middot; ${pp.open_count || 0} open</p>
-    ${groupTable("By signal", pp.by_signal)}${groupTable("By chain", pp.by_chain)}${groupTable("By exit", pp.by_exit_type)}`
+    ${groupTable("By module", pp.by_source)}${groupTable("By signal", pp.by_signal)}${groupTable("By chain", pp.by_chain)}${groupTable("By exit", pp.by_exit_type)}`
     : `<div class="empty">No closed paper trades yet -- ${pp.open_count || 0} open. Every buy signal is paper-traded automatically; results appear here as they close.</div>`;
 
   const h = data.health || {};
