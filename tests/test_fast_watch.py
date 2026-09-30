@@ -20,7 +20,7 @@ def test_tick_stamps_heartbeat_and_takes_ownership(monkeypatch):
     calls = []
     monkeypatch.setattr(scheduler, "_run_position_management_cycle", lambda: calls.append("pos") or {})
     monkeypatch.setattr(scheduler, "_run_compound_scalper_cycle", lambda: calls.append("scalp") or {})
-    monkeypatch.setattr(fw.paper_ledger, "manage", lambda fn: calls.append("paper") or {"open": 0})
+    monkeypatch.setattr(fw.paper_ledger, "manage", lambda fn, **kw: calls.append("paper") or {"open": 0})
     monkeypatch.setattr(scheduler, "_run_revival_watch_cycle", lambda board: calls.append("revival") or {})
     monkeypatch.setattr(fw, "fetch_boost_board", lambda: {"ok": False})
     fw.tick(0)

@@ -51,7 +51,8 @@ def tick(n: int) -> dict:
     state.record_runner_heartbeat("fast-watch", scheduler._runner_where(), f"tick {n}")
     out["positions"] = scheduler._safe(scheduler._run_position_management_cycle)
     out["scalper"] = scheduler._safe(scheduler._run_compound_scalper_cycle)
-    out["paper"] = scheduler._safe(paper_ledger.manage, fetch_dexscreener_snapshot)
+    out["paper"] = scheduler._safe(paper_ledger.manage, fetch_dexscreener_snapshot,
+                                  batch_fn=scheduler.layer14.fetch_dexscreener_batch)
     if n % REVIVAL_EVERY_N_TICKS == 0:
         board = scheduler._safe(fetch_boost_board)
         board = board if isinstance(board, dict) and board.get("ok") else None

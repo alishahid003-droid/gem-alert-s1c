@@ -35,7 +35,8 @@ OPEN_KEY = "paper_open_positions"
 CLOSED_KEY = "paper_closed_positions"
 MAX_OPEN = 80                      # bounds DexScreener calls per cycle
 MAX_CLOSED_KEPT = 3000
-UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3
+UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3      # AND at least UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF
+UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = 30.0  # time-based: the fast watcher ticks every 20 s
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
 PAPER_SCALP_USD = 25.0   # compound-scalper paper size (the pool's seed scale)
@@ -137,28 +138,58 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
     return True
 
 
-def manage(snapshot_fn: Callable[[str, str], Optional[dict]], now: Optional[float] = None) -> dict:
-    """Re-price every open paper position and apply exits. snapshot_fn is
-    layers.layer0_scoring.fetch_dexscreener_snapshot (injected for tests)."""
+def _batch_snapshots(book: dict, batch_fn) -> dict:
+    """{(chain, token): snapshot} via ONE DexScreener batch call per chain
+    per 30 tokens (Sept 30 2026: the 20-second fast watcher would otherwise
+    make one call per paper position -- up to ~240/min, near DexScreener's
+    limit)."""
+    by_chain = {}
+    for pos in book.values():
+        by_chain.setdefault(pos["chain"], []).append(pos["token"])
+    out = {}
+    for chain, tokens in by_chain.items():
+        try:
+            pairs = batch_fn(chain, list(dict.fromkeys(tokens))) or {}
+        except Exception:
+            pairs = {}
+        for tok, pair in pairs.items():
+            mcap = pair.get("marketCap") or pair.get("fdv")
+            out[(chain, tok)] = {"mcap_usd": float(mcap) if mcap else None,
+                                 "liquidity_usd": (pair.get("liquidity") or {}).get("usd")}
+    return out
+
+
+def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, now: Optional[float] = None,
+           batch_fn: Optional[Callable] = None) -> dict:
+    """Re-price every open paper position and apply exits. Pass batch_fn
+    (layers.layer14_revival.fetch_dexscreener_batch) in production; the
+    per-token snapshot_fn is kept for tests and as a fallback."""
     now = now if now is not None else time.time()
     book = _open()
     if not book:
         return {"open": 0, "closed_now": 0}
+    batched = _batch_snapshots(book, batch_fn) if batch_fn else None
     closed_now = []
     for pid, pos in list(book.items()):
-        try:
-            snap = snapshot_fn(pos["chain"], pos["token"])
-        except Exception:
-            snap = None
+        if batched is not None:
+            snap = batched.get((pos["chain"], pos["token"]))
+        else:
+            try:
+                snap = snapshot_fn(pos["chain"], pos["token"])
+            except Exception:
+                snap = None
         mcap = (snap or {}).get("mcap_usd")
         liq = (snap or {}).get("liquidity_usd")
         if mcap is None:
             pos["unpriced_cycles"] = pos.get("unpriced_cycles", 0) + 1
-            if pos["unpriced_cycles"] >= UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF:
+            pos.setdefault("unpriced_since", now)
+            if (pos["unpriced_cycles"] >= UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF
+                    and now - pos["unpriced_since"] >= UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF * 60):
                 closed_now.append(_close(pos, "written_off", "no longer priceable (delisted/rugged)", now))
                 del book[pid]
             continue
         pos["unpriced_cycles"] = 0
+        pos.pop("unpriced_since", None)
         pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
         if liq is not None and liq < DEAD_LIQUIDITY_USD:
             _sell(pos, pos["remaining"], mcap, "liquidity collapsed", now)

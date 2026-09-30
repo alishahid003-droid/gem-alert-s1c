@@ -1970,7 +1970,7 @@ def run_poll_fast():
         # Paper-trading ledger (Phase 2, Sept 30 2026): re-price every paper
         # position and apply the same exits real money uses -- the measured win
         # rate per signal lives here. See executor/paper_ledger.py.
-        paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot)
+        paper = _safe(paper_ledger.manage, fetch_dexscreener_snapshot, batch_fn=layer14.fetch_dexscreener_batch)
         if isinstance(paper, dict) and paper.get("open") is not None:
             print(f"[paper] {paper.get('open')} open paper position(s), {paper.get('closed_now')} closed this cycle")
 
