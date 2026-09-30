@@ -196,6 +196,26 @@ SOLANA_LABELED = [
     # pump -- a genuinely settled, sustained moonshot.
     ("TRUMP", "solana", "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN", "moonshot", False),
     #
+    # 2 more real moonshot examples -- added Sept 30 2026, task #31.
+    # The earlier attempt at sourcing moonshots by sorting Solana pairs
+    # by 24h gain descending proved unusable (dominated by noise: absurd
+    # %-figures from tiny-liquidity first-day pump.fun spikes, not real
+    # sustained winners). Pivoted instead to well-known, long-running
+    # Solana memecoins with genuine multi-year track records -- verified
+    # directly via DexScreener's token-pairs endpoint
+    # (api.dexscreener.com/token-pairs/v1/solana/<mint>), picking each
+    # token's highest-liquidity pair:
+    ("BONK", "solana", "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "moonshot", False),
+    # Bonk/SOL, Orca pair 5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9:
+    # $425.5K liquidity, $330M mcap, pair created Dec 2022 (~3y old), 24h
+    # volume $1.24M, 24h change +9.05% (real ongoing trading, not a crash
+    # -- a genuinely settled, sustained moonshot like TRUMP above).
+    ("WIF", "solana", "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", "moonshot", False),
+    # dogwifhat/$WIF/SOL, Raydium pair
+    # EP2ib6dYdEeqD8MfE2ezHCxX3kP3K2eLKkirfPm5eyMx: $6.7M liquidity,
+    # $242M mcap, pair created Nov 2023 (~2y old), 24h volume $788.6K,
+    # 24h change +4.21%.
+    #
     # 5 real rugs from the last ~2 days of launches, found by sorting
     # Solana pairs on DexScreener by 24h price change ascending with a
     # liquidity floor (same method as AROS above), picking ones with
