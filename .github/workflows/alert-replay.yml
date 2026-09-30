@@ -1,0 +1,27 @@
+name: Alert replay (win rate of the system's own live alerts)
+
+# Replays every coin the live system alerted on (last 24 h, from the Upstash
+# alert feed) with GeckoTerminal candles through the live exit logic.
+# Read-only; no MadeOnSol or Birdeye calls.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["claude/**"]
+    paths: ["backtest_alert_replay.py", ".github/workflows/alert-replay.yml"]
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Replay live alerts
+        env:
+          PYTHONUNBUFFERED: "1"
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+        run: timeout 1380 python -u backtest_alert_replay.py --max-coins 120
