@@ -124,7 +124,12 @@ class CompoundScalperConfig:
     # estimate_round_trip_cost_pct -- commonly 5-10% on Solana, more on a
     # thin pool), a gross 2.0x nets meaningfully less than 2x; 2.5x leaves
     # real margin over that friction rather than just clearing it.
-    take_profit_multiple: float = field(default_factory=lambda: _env_float("COMPOUND_TAKE_PROFIT_MULTIPLE", 2.5))
+    # Sept 30 2026 retune from backtest_trades.py's scalper grid (72 simulated
+    # trades on the labeled coins): stop 55% / take-profit 1.5x / 3 h time
+    # stop / 35% trail = 71% wins, +$648 vs 32% wins, -$44 for the original
+    # 30% / 2.5x / 20 min / 20% -- the tight stop and 20-min clock cut coins
+    # before their move. Paper ledger confirms live (checklist 2.8).
+    take_profit_multiple: float = field(default_factory=lambda: _env_float("COMPOUND_TAKE_PROFIT_MULTIPLE", 1.5))
 
     # Fraction of the ORIGINAL position sold at the take-profit trigger --
     # the rest keeps riding under the trailing stop below, so a token that
@@ -138,7 +143,7 @@ class CompoundScalperConfig:
     # fully if price pulls back this fraction from its own peak multiple --
     # protects the post-target remainder from giving back the gain the
     # partial sale already locked in.
-    trail_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_TRAIL_STOP_PCT", 0.20))
+    trail_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_TRAIL_STOP_PCT", 0.35))
 
     # Hard stop-loss, as a fraction BELOW entry mcap, before any take-profit
     # has fired -- cuts a loser fast rather than let it sit hoping for a
@@ -147,7 +152,7 @@ class CompoundScalperConfig:
     # is subtracted, which is the honest reason this stays relatively tight
     # (30%, not 50%+): waiting longer for a bigger stop just compounds the
     # cost problem on a loser.
-    hard_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_HARD_STOP_PCT", 0.30))
+    hard_stop_pct: float = field(default_factory=lambda: _env_float("COMPOUND_HARD_STOP_PCT", 0.55))
 
     # If neither the hard stop nor the take-profit has fired within this
     # many minutes, exit fully regardless -- the momentum thesis this
@@ -155,7 +160,7 @@ class CompoundScalperConfig:
     # this long is a stalled entry, not a slow-building one, and capital
     # sitting idle in it is capital not compounding. Tight on purpose, to
     # fit "tens to hundreds of transactions" inside a 24-48h window.
-    time_stop_minutes: float = field(default_factory=lambda: _env_float("COMPOUND_TIME_STOP_MINUTES", 20.0))
+    time_stop_minutes: float = field(default_factory=lambda: _env_float("COMPOUND_TIME_STOP_MINUTES", 180.0))
 
     # Entry is refused if estimate_round_trip_cost_pct's HEURISTIC estimate
     # (see that function's own honesty flag) exceeds this -- a real gate
