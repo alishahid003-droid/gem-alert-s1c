@@ -5,6 +5,8 @@ name: Alert replay (win rate of the system's own live alerts)
 # Read-only; no MadeOnSol or Birdeye calls.
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: "7 6 * * *"      # daily: replays the last 7 days of alerts (>= 4 h old)
   push:
     branches: ["claude/**"]
     paths: ["backtest_alert_replay.py", ".github/workflows/alert-replay.yml"]

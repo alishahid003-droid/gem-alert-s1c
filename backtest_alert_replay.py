@@ -152,15 +152,18 @@ def report(results, skipped):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-coins", type=int, default=120)
+    ap.add_argument("--min-age-hours", type=float, default=4.0,
+                    help="only alerts at least this old, so trades have had time to play out")
     ap.add_argument("--budget-minutes", type=float, default=18.0,
                     help="stop replaying and print the report after this long")
     args = ap.parse_args()
 
-    feed = state.get_alert_feed(limit=300)
+    feed = state.get_alert_feed(limit=300) + state.get_replay_archive()
+    min_ts = time.time() - args.min_age_hours * 3600
     seen, alerts = set(), []
     for it in sorted(feed, key=lambda x: x.get("ts", 0)):          # first alert per coin
         tok, chain = it.get("token_address"), it.get("chain")
-        if not tok or chain not in GT_NET or tok in seen or _band(it) is None:
+        if not tok or chain not in GT_NET or tok in seen or _band(it) is None or it.get("ts", 0) > min_ts:
             continue
         seen.add(tok)
         alerts.append(it)

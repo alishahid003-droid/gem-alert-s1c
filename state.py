@@ -441,6 +441,9 @@ def get_recent_alert_events(token: str) -> List[Tuple[float, str]]:
 ALERT_FEED_MAX_AGE_SECONDS = 24 * 3600
 ALERT_FEED_MAX_ITEMS = 300
 ALERT_FEED_KEY = "dashboard_alert_feed"
+REPLAY_ARCHIVE_KEY = "replay_alert_archive"
+REPLAY_ARCHIVE_MAX_AGE_SECONDS = 7 * 24 * 3600
+REPLAY_ARCHIVE_MAX_ITEMS = 6000
 
 
 def log_full_alert(layer: str, chain: str, token_symbol: str, token_address: str,
@@ -454,6 +457,23 @@ def log_full_alert(layer: str, chain: str, token_symbol: str, token_address: str
     cutoff = time.time() - ALERT_FEED_MAX_AGE_SECONDS
     feed = [f for f in feed if f["ts"] >= cutoff][-ALERT_FEED_MAX_ITEMS:]
     set_value(ALERT_FEED_KEY, feed)
+    # Replay archive (Sept 30 2026): the dashboard feed's 300-item cap only
+    # covers ~2 h on a busy day -- too short to see how an alert played out.
+    # Keep a compact 7-day record of the first alert per coin (band A/B/C and
+    # moonshots) for backtest_alert_replay.py.
+    score_tag = str((tags or {}).get("Score", ""))
+    if token_address and ("band " in score_tag or layer.startswith("layer15")):
+        arch = get_value(REPLAY_ARCHIVE_KEY) or []
+        if not any(a.get("token_address") == token_address for a in arch[-2000:]):
+            arch.append({"ts": ts, "layer": layer, "chain": chain, "token_address": token_address,
+                         "tags": {"Score": score_tag}})
+            cutoff7 = time.time() - REPLAY_ARCHIVE_MAX_AGE_SECONDS
+            set_value(REPLAY_ARCHIVE_KEY, [a for a in arch if a["ts"] >= cutoff7][-REPLAY_ARCHIVE_MAX_ITEMS:])
+
+
+def get_replay_archive() -> list:
+    v = get_value(REPLAY_ARCHIVE_KEY)
+    return v if isinstance(v, list) else []
 
 
 def get_alert_feed(limit: int = 100) -> list:
