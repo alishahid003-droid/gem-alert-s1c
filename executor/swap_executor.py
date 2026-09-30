@@ -1284,3 +1284,16 @@ def _sol_price_usd() -> Optional[float]:
         return int(out_amount) / 1_000_000  # USDC has 6 decimals
     except (TypeError, ValueError):
         return None
+
+
+# Checklist 5.3 / 5.5 (Sept 30 2026): every public buy/sell entry point
+# retries once on a transient pre-send failure and reports its final result
+# to Telegram -- see executor/trade_ops.py. Wrapped here, at the bottom, so
+# callers that map these names at import time (entrypoint, compound_scalper)
+# get the hardened versions.
+from executor import trade_ops as _trade_ops  # noqa: E402
+
+execute_buy_solana = _trade_ops.hardened("buy", "solana")(execute_buy_solana)
+execute_buy_bsc = _trade_ops.hardened("buy", "bsc")(execute_buy_bsc)
+execute_buy_robinhood_chain = _trade_ops.hardened("buy", "robinhood_chain")(execute_buy_robinhood_chain)
+execute_sell = _trade_ops.hardened("sell")(execute_sell)

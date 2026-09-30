@@ -1993,6 +1993,12 @@ def run_poll_fast():
         print(f"[layer13] {l13.get('reason')}")
     _safe(state.record_runner_heartbeat, "poll-fast", _runner_where(),
           f"alerts={alerts_sent} state_cmds={state.COMMAND_COUNTER['n']}")
+    # Checklist 5.5 / 5.6: stalled-runner alerts + once-a-day Telegram summary.
+    from executor import trade_ops
+    stalled = _safe(trade_ops.check_stalled_runners)
+    if stalled:
+        print(f"[ops] stalled runners: {stalled}")
+    _safe(trade_ops.maybe_send_daily_summary)
     if _stats():
         _print_cycle_summary(_stats())
 
