@@ -206,6 +206,18 @@ def section_execution():
           f"closed: {len(closed)}")
     by_chain = Counter(p.get("chain") for p in opens)
     print(f"  open records by chain: {dict(by_chain)}")
+    import datetime
+    for p in opens:
+        opened = datetime.datetime.fromtimestamp(p.get("opened_ts", 0), tz=datetime.timezone.utc).isoformat()
+        print(f"    OPEN {p.get('chain')} {p.get('token')} opened {opened} total_usd={p.get('total_usd')} "
+              f"filled_tokens={p.get('filled_amount_tokens')} tx={str(p.get('tx_signature'))[:20]}")
+        for name, st in (p.get("stages") or {}).items():
+            print(f"      {name}: usd={st.get('usd_amount')} buy_status={st.get('buy_status')} "
+                  f"reason={st.get('reason')} fail={st.get('fail_reason')}")
+    log = state.get_trade_log(limit=20)
+    print(f"  trade log entries (latest 20): {len(log)}")
+    for t in log[:10]:
+        print(f"    {str({k: v for k, v in t.items() if k not in ('raw',)})[:220]}")
     feed = state.get_alert_feed(limit=150)
     ab = []
     for item in feed:
@@ -213,10 +225,10 @@ def section_execution():
         if "band A" in tag or "band B" in tag:
             ab.append(item)
     print(f"  band A/B alerts in feed: {len(ab)}")
-    verdicts = state.get_autobuy_verdicts([a.get("token") or a.get("address") for a in ab])
+    verdicts = state.get_autobuy_verdicts([a.get("token_address") for a in ab])
     outcome = Counter()
     for a in ab[:40]:
-        tok = a.get("token") or a.get("address")
+        tok = a.get("token_address")
         v = verdicts.get(tok)
         chain = (a.get("tags") or {}).get("Chain", "?")
         if v:
