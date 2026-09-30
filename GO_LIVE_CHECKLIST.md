@@ -36,7 +36,7 @@ target is a number we measure against every week — not something assumed.
 
 - [x] **1.1 ALI** — Approve merging `claude/kind-mayer-1ydst8` into `main` (say "open the PR"). DONE-WHEN: merged; cron-job.org runs include the fixes. — approved Sept 30
 - [x] **1.2 CLAUDE** — Open the PR, keep CI green, merge on your OK. DONE-WHEN: PR merged. — PR #1 merged as `9053bd2`
-- [ ] **1.3 ALI** — On the PC: `git pull`, then double-click **`setup_pc.bat`** (does 1.3 + 1.4 safely: backs up .env, removes test lines, asks your wallet size, disables any duplicate old MadeOnSol task, registers the 15-min job). DONE-WHEN: System tab shows `poll-madeonsol … (local-pc)` under 30 min old.
+- [x] **1.3 ALI** — On the PC: `git pull`, then double-click **`setup_pc.bat`** (does 1.3 + 1.4 safely: backs up .env, removes test lines, asks your wallet size, disables any duplicate old MadeOnSol task, registers the 15-min job). DONE-WHEN: System tab shows `poll-madeonsol … (local-pc)` under 30 min old. — done Sept 30: diagnostic 12:37 UTC shows `poll-madeonsol last cycle 2m ago (local-pc) madeonsol_calls=7`.
 - [x] **1.4 ALI** — (done automatically by `setup_pc.bat`) Delete the `STAGE1_POSITION_USD=3`, `STAGE2_POSITION_USD=3`, `TOTAL_WALLET_USD=7` test lines from the PC `.env`. DONE-WHEN: lines gone. — done Sept 30 17:28 PKT via setup_pc.bat (backup `.env.backup-20260930-172801`, 3 test lines removed, TOTAL_WALLET_USD=100)
 - [x] **1.5 ALI** — Add GitHub Secret `TOTAL_WALLET_USD` = real trading-wallet size in USD. DONE-WHEN: diagnostic shows it SET. NOTE: poll-fast/poll-slow did not pass this secret through until `TOTAL_WALLET_USD` was added to both workflows (Sept 30) — set it to 100 to match the PC. — done Sept 30: diagnostic 12:35 UTC shows stage1 $30 / budget $60 (= $100 wallet) on GitHub runs.
 - [ ] **1.6 BOTH** — Run "Live diagnostic (read-only)" after 1 hour. DONE-WHEN: all 3 runners fresh, orphan records repaired, band A/B alerts show an Auto-buy verdict.
@@ -78,6 +78,7 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - [ ] **5.4 CLAUDE** — **Upstash usage check**: measure commands/day vs free-tier limit; batch/cache further if near it. DONE-WHEN: number logged, headroom ≥ 2x.
 - [ ] **5.5 CLAUDE** — **Telegram alert on every real trade + every failed trade + stalled runner** (dashboard already shows it; phone alert so nothing is missed). DONE-WHEN: tested message received.
 - [ ] **5.6 CLAUDE** — **Daily summary**: trades, win rate, P&L, API credits left — to Telegram once a day. DONE-WHEN: first one received.
+- [ ] **5.7 CLAUDE** — **MadeOnSol budget pacing**: at 12:37 UTC 160 of 190 daily calls were already used (one PC cycle ≈ 7 calls; every 15 min ≈ 670/day, so the budget runs out by mid-day and those layers go blind until 5 AM PKT). Spread the 190 calls across 24 h (per-hour allowance, priority to real candidates over routine scans) and show calls-left on the System tab. DONE-WHEN: budget lasts the full day in the diagnostic.
 
 ## Phase 6 — First real money (Solana only)
 
@@ -113,3 +114,4 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - Sept 30 2026 12:24 UTC — live diagnostic on main: poll-fast + poll-slow running the new code (heartbeats 3-4 min old); the 2 Sept-24 orphan records auto-repaired (budget freed); first Auto-buy verdict recorded. NOT yet: no `poll-madeonsol` heartbeat (PC task is the old Sept 28 one, running pre-merge code -> 1.3/1.4 still open); `TOTAL_WALLET_USD` secret missing (1.5); fomoapi.io still 0 credits, governor backing off correctly (1.7).
 - Sept 30 2026 17:28 PKT — PC: stash of old local layer13 edits (`pc-local-edits-before-sept30`), pull to 4fe41d0, setup_pc.bat OK, task re-registered; 1.4 done; 1.3 waiting on first `poll-madeonsol` heartbeat.
 - Sept 30 2026 12:35 UTC — 1.5 done. No PC heartbeat yet 7 min after the 17:28 PKT run; PC log was buffered (only header visible) -> run_poll_madeonsol.bat now runs `python -u` and writes a `finished ... exit code` line.
+- Sept 30 2026 12:37 UTC — 1.3 done (first PC heartbeat). Found: MadeOnSol 160/190 used by mid-day -> added 5.7.
