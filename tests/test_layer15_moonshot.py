@@ -85,7 +85,7 @@ def test_handler_real_buy_when_enabled(monkeypatch):
                         lambda c, t, usd, stage=None: calls.append((c, t, usd, stage)) or {"ok": True})
     monkeypatch.setattr(ep.triggers, "_concurrency_block", lambda: None)
     res = ep.handle_moonshot_candidate("solana", "MOON2", "B", 800_000, 400_000, 70, {"signals": 1})
-    assert res["fired"] and calls == [("solana", "MOON2", 5.0, "moonshot")]
+    assert res["fired"] and calls == [("solana", "MOON2", 17.5, "moonshot")]   # $50 test wallet: 35% cap
     assert ep.position_state.get_position("solana", "MOON2")["exit_profile"] == "moonshot"
     # band C never gets real money
     res = ep.handle_moonshot_candidate("solana", "MOON3", "C", 800_000, 400_000, 70, {"signals": 1})
@@ -114,3 +114,27 @@ def test_scheduler_screen_alerts_once(monkeypatch):
     assert "moonshot:solana:MOON" in pl._open()
     scheduler._run_moonshot_screen("solana", items)          # cooldown: no repeat alert
     assert len(sent) == 1
+
+
+def test_moonshot_stake_ladder(monkeypatch):
+    monkeypatch.delenv("MOONSHOT_POSITION_USD", raising=False)
+    assert ep.moonshot_position_usd(100) == 30.0        # starts at $30, not $5
+    assert ep.moonshot_position_usd(350) == 40.0
+    assert ep.moonshot_position_usd(700) == 60.0         # ~7x the start
+    assert ep.moonshot_position_usd(5_000) == 400.0      # 8% of equity
+    assert ep.moonshot_position_usd(100_000) == 2000.0   # liquidity cap
+    assert ep.moonshot_position_usd(60) == 21.0          # never more than 35% of a shrunken account
+    monkeypatch.setenv("MOONSHOT_POSITION_USD", "45")
+    assert ep.moonshot_position_usd(100) == 45.0
+
+
+def test_one_moonshot_at_a_time_on_small_account(monkeypatch):
+    monkeypatch.delenv("MOONSHOT_MAX_OPEN", raising=False)
+    assert ep.moonshot_max_open(100) == 1 and ep.moonshot_max_open(500) == 2
+    monkeypatch.setenv("MOONSHOT_ENABLED", "true")
+    monkeypatch.setattr(ep, "_attempt_buy_and_record_fill",
+                        lambda c, t, usd, stage=None: ep.position_state.record_fill(c, t, 1000.0) or {"ok": True})
+    monkeypatch.setattr(ep.triggers, "_concurrency_block", lambda: None)
+    assert ep.handle_moonshot_candidate("solana", "M1", "B", 800_000, 400_000, 70, {"signals": 1})["fired"]
+    res = ep.handle_moonshot_candidate("solana", "M2", "B", 800_000, 400_000, 70, {"signals": 1})
+    assert not res["fired"] and "at risk" in res["reason"]
