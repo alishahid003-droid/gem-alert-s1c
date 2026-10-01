@@ -73,3 +73,15 @@ def test_fomo_buy_archive_dedupes(tmp_path, monkeypatch):
     state.append_fomo_buy_archive([{"trader": "a", "chain": "solana", "token_address": "M", "ts": now},
                                    {"trader": "b", "chain": "solana", "token_address": "M", "ts": now}])
     assert len(state.get_fomo_buy_archive()) == 2
+
+
+def test_launch_archive(tmp_path, monkeypatch):
+    import state
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "la.json"))
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    state.append_launch_archive("solana", [{"address": "A", "pool_created_at": now_iso, "liquidity_usd": 9000},
+                                           {"address": "A", "pool_created_at": now_iso},
+                                           {"address": "B", "pool_created_at": None}])
+    arch = state.get_launch_archive()
+    assert [a["token_address"] for a in arch] == ["A"] and arch[0]["chain"] == "solana"

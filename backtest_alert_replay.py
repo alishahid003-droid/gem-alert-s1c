@@ -152,7 +152,8 @@ def report(results, skipped):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-coins", type=int, default=120)
-    ap.add_argument("--source", choices=["alerts", "fomo"], default="alerts",
+    ap.add_argument("--min-launch-liq", type=float, default=3000.0)
+    ap.add_argument("--source", choices=["alerts", "fomo", "launches"], default="alerts",
                     help="alerts = the system's own alerts; fomo = every Fomo trader's buy (copy-trade test)")
     ap.add_argument("--min-age-hours", type=float, default=4.0,
                     help="only alerts at least this old, so trades have had time to play out")
@@ -160,7 +161,11 @@ def main():
                     help="stop replaying and print the report after this long")
     args = ap.parse_args()
 
-    if args.source == "fomo":
+    if args.source == "launches":
+        # Buy-at-launch test: every new pool, entered 2 min after it was created.
+        feed = [dict(b, tags={"Score": "0/100 (band B)"}) for b in state.get_launch_archive()
+                if (b.get("liquidity_usd") or 0) >= args.min_launch_liq]
+    elif args.source == "fomo":
         # Copy-trade test: every Fomo trader's buy, scored as if we copied it.
         feed = [dict(b, tags={"Score": "0/100 (band B)"}) for b in state.get_fomo_buy_archive()]
     else:

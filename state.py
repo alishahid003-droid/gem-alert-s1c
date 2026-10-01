@@ -485,6 +485,34 @@ def append_fomo_buy_archive(items: list):
     set_value(FOMO_BUY_ARCHIVE_KEY, [a for a in arch if (a.get("ts") or 0) >= cutoff][-REPLAY_ARCHIVE_MAX_ITEMS:])
 
 
+LAUNCH_ARCHIVE_KEY = "launch_archive"
+
+
+def append_launch_archive(chain: str, items: list):
+    """New pools as first seen (address, pool creation time, liquidity)."""
+    from datetime import datetime
+    arch = get_value(LAUNCH_ARCHIVE_KEY) or []
+    seen = {a.get("token_address") for a in arch[-4000:]}
+    for it in items or []:
+        addr, created = it.get("address"), it.get("pool_created_at")
+        if not addr or addr in seen or not created:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+        arch.append({"chain": chain, "token_address": addr, "ts": ts,
+                     "liquidity_usd": it.get("liquidity_usd"), "fdv_usd": it.get("fdv_usd")})
+        seen.add(addr)
+    cutoff = time.time() - REPLAY_ARCHIVE_MAX_AGE_SECONDS
+    set_value(LAUNCH_ARCHIVE_KEY, [a for a in arch if (a.get("ts") or 0) >= cutoff][-REPLAY_ARCHIVE_MAX_ITEMS:])
+
+
+def get_launch_archive() -> list:
+    v = get_value(LAUNCH_ARCHIVE_KEY)
+    return v if isinstance(v, list) else []
+
+
 def get_fomo_buy_archive() -> list:
     v = get_value(FOMO_BUY_ARCHIVE_KEY)
     return v if isinstance(v, list) else []

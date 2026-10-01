@@ -1529,6 +1529,11 @@ def _run_geckoterminal_fallback(chain: str, board) -> int:
     # layer0_scoring.select_gt_candidates for the live finding behind this.
     trending = _safe(fetch_geckoterminal_trending_pools, gt_network)
     raw = _safe(fetch_geckoterminal_new_pools, gt_network)
+    # Launch archive (Oct 1 2026): every NEW pool, unfiltered, so the replay
+    # can test buying early (at launch) without the hindsight bias of the
+    # trending list -- see backtest_alert_replay.py --source launches.
+    if isinstance(raw, dict) and raw.get("ok"):
+        _safe(state.append_launch_archive, chain, flatten_geckoterminal_pools(raw.get("json")))
     ok_sources = [r for r in (trending, raw) if isinstance(r, dict) and r.get("ok")]
     if not ok_sources:
         detail = raw.get("reason") if isinstance(raw, dict) else describe_fetch_failure({"raw": raw})
