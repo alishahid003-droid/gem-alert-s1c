@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "alerts (system alerts) or fomo (copy-trade test on every Fomo trader's buys)"
+        description: "alerts (system alerts), fomo (copy every Fomo trader's buys) or launches (buy every new coin at launch)"
         required: false
         default: "alerts"
   schedule:
