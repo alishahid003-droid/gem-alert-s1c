@@ -62,3 +62,14 @@ def test_replay_archive_keeps_first_alert_per_coin(tmp_path, monkeypatch):
     state.log_full_alert("layer0b", "base", "Y", "0xB", "h", {"Chain": "base"})     # no band: not archived
     arch = state.get_replay_archive()
     assert [a["token_address"] for a in arch] == ["0xA"] and "band B" in arch[0]["tags"]["Score"]
+
+
+def test_fomo_buy_archive_dedupes(tmp_path, monkeypatch):
+    import time as _t
+    import state
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "fa.json"))
+    now = _t.time()
+    state.append_fomo_buy_archive([{"trader": "a", "chain": "solana", "token_address": "M", "ts": now}])
+    state.append_fomo_buy_archive([{"trader": "a", "chain": "solana", "token_address": "M", "ts": now},
+                                   {"trader": "b", "chain": "solana", "token_address": "M", "ts": now}])
+    assert len(state.get_fomo_buy_archive()) == 2

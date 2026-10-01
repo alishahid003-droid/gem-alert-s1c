@@ -514,6 +514,7 @@ def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool =
     convergence = {}
     buyers_by_handle = {}
     roster_sells = []
+    buy_archive = []
     learned = state.get_fomo_handle_map()
     promoted = state.get_fomo_promoted()
     seen = state.fomo_signal_ids()
@@ -527,6 +528,11 @@ def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool =
         mint = a.get("tokenAddress") or a.get("address") or a.get("mint")
         if alert_type == "buy" and handle and mint:
             buyers_by_handle.setdefault(handle, []).append((chain, mint))
+            # Every trader's buy (roster or not) goes to a 7-day archive so the
+            # replay can measure WHICH Fomo traders are profitable to copy
+            # (backtest_alert_replay.py --source fomo). No extra API calls.
+            buy_archive.append({"trader": handle, "chain": chain, "token_address": mint,
+                                "ts": alert_ts_seconds(a) or time.time()})
         roster_name = _match_roster(handle, display, learned=learned, promoted=promoted)
         if alert_type == "sell":
             # Checklist 4.5: a roster trader's sell feeds executor.copy_exit
@@ -570,6 +576,8 @@ def detect_roster_buys_and_theses(alerts: List[dict], allow_paid_scoring: bool =
                 thesis_link=(links[0] or {}).get("link") if links and isinstance(links[0], dict) else None,
                 **common)
             theses_recorded += 1
+    if buy_archive:
+        state.append_fomo_buy_archive(buy_archive)
     if unmatched:
         state.note_fomo_unmatched_handles(unmatched)
     return {"buys_recorded": buys_recorded, "theses_recorded": theses_recorded,

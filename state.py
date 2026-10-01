@@ -471,6 +471,25 @@ def log_full_alert(layer: str, chain: str, token_symbol: str, token_address: str
             set_value(REPLAY_ARCHIVE_KEY, [a for a in arch if a["ts"] >= cutoff7][-REPLAY_ARCHIVE_MAX_ITEMS:])
 
 
+FOMO_BUY_ARCHIVE_KEY = "fomo_buy_archive"
+
+
+def append_fomo_buy_archive(items: list):
+    arch = get_value(FOMO_BUY_ARCHIVE_KEY) or []
+    seen = {(a.get("trader"), a.get("token_address")) for a in arch[-3000:]}
+    for it in items:
+        if (it.get("trader"), it.get("token_address")) not in seen:
+            arch.append(it)
+            seen.add((it.get("trader"), it.get("token_address")))
+    cutoff = time.time() - REPLAY_ARCHIVE_MAX_AGE_SECONDS
+    set_value(FOMO_BUY_ARCHIVE_KEY, [a for a in arch if (a.get("ts") or 0) >= cutoff][-REPLAY_ARCHIVE_MAX_ITEMS:])
+
+
+def get_fomo_buy_archive() -> list:
+    v = get_value(FOMO_BUY_ARCHIVE_KEY)
+    return v if isinstance(v, list) else []
+
+
 def get_replay_archive() -> list:
     v = get_value(REPLAY_ARCHIVE_KEY)
     return v if isinstance(v, list) else []
