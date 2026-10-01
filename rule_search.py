@@ -111,3 +111,19 @@ def run(samples: list, top: int = 12) -> list:
         print(f"  confirm +{c * 100:.0f}% in {w} min, TP +{(tp - 1) * 100:.0f}%, SL -{sl * 100:.0f}%, {tm} min "
               f"-> all {r['all']['n']} trades, {r['all']['win'] * 100:.0f}% wins, {r['all']['exp'] * 100:+.1f}% avg")
     return ranked
+
+
+def by_trader(samples: list, rule: tuple, min_trades: int = 3):
+    """Copy-trade test: per Fomo trader, the result of copying their buys
+    with the given rule -- who is actually worth following."""
+    c, w, tp, sl, tm = rule
+    per = {}
+    for s in samples:
+        r = sim(s["cs"], s["idx"], s["cost"], c, w, tp, sl, tm)
+        if r is not None and s.get("trader"):
+            per.setdefault(s["trader"], []).append(r)
+    rows = sorted(((t, _stats(v)) for t, v in per.items() if len(v) >= min_trades), key=lambda x: -x[1]["exp"])
+    print(f"\nCOPY-TRADE BY TRADER (rule {rule}), traders with >= {min_trades} copied buys:")
+    for t, st in rows[:20]:
+        print(f"  {t:24s} {st['n']:>3} buys  {st['win'] * 100:>4.0f}% wins  {st['exp'] * 100:+6.1f}% avg")
+    return rows

@@ -152,20 +152,26 @@ def report(results, skipped):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-coins", type=int, default=120)
+    ap.add_argument("--source", choices=["alerts", "fomo"], default="alerts",
+                    help="alerts = the system's own alerts; fomo = every Fomo trader's buy (copy-trade test)")
     ap.add_argument("--min-age-hours", type=float, default=4.0,
                     help="only alerts at least this old, so trades have had time to play out")
     ap.add_argument("--budget-minutes", type=float, default=18.0,
                     help="stop replaying and print the report after this long")
     args = ap.parse_args()
 
-    feed = state.get_alert_feed(limit=300) + state.get_replay_archive()
+    if args.source == "fomo":
+        # Copy-trade test: every Fomo trader's buy, scored as if we copied it.
+        feed = [dict(b, tags={"Score": "0/100 (band B)"}) for b in state.get_fomo_buy_archive()]
+    else:
+        feed = state.get_alert_feed(limit=300) + state.get_replay_archive()
     min_ts = time.time() - args.min_age_hours * 3600
     seen, alerts = set(), []
     for it in sorted(feed, key=lambda x: x.get("ts", 0)):          # first alert per coin
         tok, chain = it.get("token_address"), it.get("chain")
-        if not tok or chain not in GT_NET or tok in seen or _band(it) is None or it.get("ts", 0) > min_ts:
+        if not tok or chain not in GT_NET or (tok, it.get("trader")) in seen or _band(it) is None or it.get("ts", 0) > min_ts:
             continue
-        seen.add(tok)
+        seen.add((tok, it.get("trader")))
         alerts.append(it)
     # Band B first (the real-money band), newest first, then band C.
     alerts = sorted(alerts, key=lambda a: (_band(a) != "B", -a.get("ts", 0)))[:args.max_coins]
@@ -202,7 +208,7 @@ def main():
                   f"({(time.time() - a['ts']) / 60:.0f} min ago)")
             continue
         cost = estimate_round_trip_cost_pct(chain, POSITION_USD, liq)
-        samples.append({"cs": cs, "idx": idx, "cost": cost, "chain": chain, "ts": a["ts"]})
+        samples.append({"cs": cs, "idx": idx, "cost": cost, "chain": chain, "ts": a["ts"], "trader": a.get("trader")})
         v = verdicts.get(tok) or {}
         gate = "WOULD BUY" if v.get("fired") else ("refused" if v else "no verdict")
         for strat, fn in (("stage", sim_stage), ("scalper", sim_scalper)):
@@ -217,7 +223,9 @@ def main():
     report(results, skipped)
     if samples:
         import rule_search
-        rule_search.run(samples)
+        ranked = rule_search.run(samples)
+        if args.source == "fomo" and ranked:
+            rule_search.by_trader(samples, ranked[0]["rule"])
 
 if __name__ == "__main__":
     main()
