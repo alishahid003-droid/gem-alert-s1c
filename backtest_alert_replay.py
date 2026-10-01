@@ -181,6 +181,7 @@ def main():
     print(f"DexScreener found pools for {len(pools)}/{len(alerts)} coins\n")
 
     results, skipped = [], defaultdict(int)
+    samples = []
     deadline = time.time() + args.budget_minutes * 60
     for n, a in enumerate(alerts):
         if time.time() > deadline:
@@ -201,6 +202,7 @@ def main():
                   f"({(time.time() - a['ts']) / 60:.0f} min ago)")
             continue
         cost = estimate_round_trip_cost_pct(chain, POSITION_USD, liq)
+        samples.append({"cs": cs, "idx": idx, "cost": cost, "chain": chain, "ts": a["ts"]})
         v = verdicts.get(tok) or {}
         gate = "WOULD BUY" if v.get("fired") else ("refused" if v else "no verdict")
         for strat, fn in (("stage", sim_stage), ("scalper", sim_scalper)):
@@ -213,6 +215,9 @@ def main():
               f"{st['how']:22s} scalper {sc['pnl'] / POSITION_USD * 100:+6.0f}% {sc['how']}")
 
     report(results, skipped)
+    if samples:
+        import rule_search
+        rule_search.run(samples)
 
 if __name__ == "__main__":
     main()
