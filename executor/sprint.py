@@ -66,6 +66,10 @@ def lane_allowed() -> Tuple[bool, str]:
     at least LANE_MIN_WIN_RATE (50%) to keep trading."""
     if (os.environ.get("SPRINT_MOMENTUM", "true") or "").strip().lower() == "false":
         return False, "momentum lane switched off (SPRINT_MOMENTUM=false)"
+    from executor import paper_ledger
+    ok, why = paper_ledger.signal_allowed("momentum_lane")
+    if not ok:
+        return False, f"momentum lane paused by its paper record: {why}"
     from executor import compound_scalper as cs
     trades = [t for t in cs._get_pool().get("trades", []) if t.get("profile") == "quick"
               and t.get("exit_type") != "take_profit_partial"]
