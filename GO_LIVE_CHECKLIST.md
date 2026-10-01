@@ -195,3 +195,66 @@ The single biggest lever for 80%: stop guessing, measure every would-buy.
 - Oct 1 2026 — PR #19: sprint momentum lane (3.0h); paper evidence starts now.
 - Oct 1 2026 — PR #20: sprint milestones + dashboard Modules panel (3.0i).
 - Oct 1 2026 — PR #23: price-glitch filter, paper stats reset, lane gated by paper record, Fomo candidate lookups 10→3 (T13).
+
+---
+
+## Phase 9 — Finding a REAL edge (Oct 1 2026)
+
+Honest basis: the rule search (T13+) showed all 560 entry/exit rules LOSE on
+the coins the system alerts on. The problem is WHICH coins get picked, not
+the exits. The system filters for SAFETY (won't rug) when it should filter
+for DEMAND (who is buying). The only early signal that separates the ~1
+pump.fun survivor from the ~99 that die is "a proven smart wallet is buying
+it" — the same mechanism Fomo copy-traders use, applied at launch. This
+phase is the plan to get that signal. NONE of it is a path to a 24-hour
+miracle; it is the honest path to a system with a real chance over time.
+
+### 9A — Signals that actually predict a pump (ranked)
+- [ ] **9.1 CLAUDE** — **Smart-wallet-buying signal (THE signal).** Build/curate a
+      list of wallets that repeatedly bought early into coins that graduated,
+      and alert/buy when ≥2 of them hit a fresh coin. Per-platform (Fomo list
+      ≠ pump.fun list ≠ StonkFun list). DONE-WHEN: list exists, back-tested, wired.
+- [ ] **9.2 CLAUDE** — **Distinct-buyer velocity.** Count UNIQUE buyer wallets in
+      the first 2–5 min and whether the rate is accelerating — real demand, not
+      total volume. DONE-WHEN: computed live + in the score.
+- [ ] **9.3 CLAUDE** — **Anti-bot / fake-traction filter (Ali's point).** A dev can
+      run many wallets to fake "many buyers". Overcome it by FUNDING-SOURCE
+      clustering: trace each buyer's funding wallet (Layer 10 already does
+      first-funder). Many independent funders (CEX withdrawals, varied
+      sources) = organic; all tracing to 1–2 funders, brand-new wallets,
+      identical buy sizes/timing = one bot farm → REJECT. DONE-WHEN: distinct-
+      funder count + new-wallet ratio in the score, tested on known bot rugs.
+- [ ] **9.4 CLAUDE** — **Dev/sniper concentration cap.** Reject when dev + first
+      bundles hold > ~20–30% (built to dump). DONE-WHEN: enforced + tested.
+- [ ] **9.5 CLAUDE** — **Deployer track record** (have it, Layer 1) — weight it more.
+- [ ] **9.6 ALI decide** — **Narrative / attention (X, call channels).** Memecoins
+      run on attention; we have almost none. Needs a social data source. Big
+      lift, deferred.
+
+### 9B — Data tier (the real question: can we even SEE 9.1–9.3 in time?)
+- [ ] **9.7 ALI decide** — **Real-time data: Helius vs MadeOnSol PRO.**
+      - **Helius (~$50/mo, has a FREE tier to start):** real-time Solana
+        transaction STREAM (sub-second). This is the unlock for 9.1–9.3 —
+        see a launch and which wallets buy it the moment it happens, not 10
+        min later. Solana ONLY (covers pump.fun; NOT StonkFun/Robinhood).
+      - **MadeOnSol PRO (~$45/mo):** more holder/bundle data but POLLING, not
+        streaming — helps 9.3/9.4, does NOT give real-time 9.1. Solana only.
+      - **Verdict: neither ALONE is enough.** Helius gives the DATA; you still
+        need the curated wallet list (9.1) to act on it. Recommended order:
+        start on Helius FREE tier + build the wallet list from the Fomo
+        copy-trade archive; pay the ~$50 only once the list proves out.
+      - **Least capital:** $0 to start (Helius free tier + our existing
+        MadeOnSol 190/day), ~$50/mo only after 9.1 shows a real edge.
+- [ ] **9.8 ALI decide** — **StonkFun / Robinhood Chain:** Helius & MadeOnSol are
+      SOLANA-only, so they do NOT cover StonkFun. StonkFun needs its own
+      Robinhood-chain RPC/websocket or indexer for the same 9.1–9.3 signals.
+      Separate build; defer until the Solana path is proven.
+
+### 9C — Prove it before a cent
+- [ ] **9.9 CLAUDE** — Back-test 9.1–9.4 on the launch archive (`--source
+      launches`) and the Fomo archive (`--source fomo`) before any real money.
+      DONE-WHEN: a signal set shows positive expectancy on the UNSEEN half.
+
+Reality check (not negotiable): even fully built, this competes with bots on
+faster machines; it improves odds, it does not guarantee wins or 80%, and it
+is a build of days–weeks, not a 24-hour fix.
