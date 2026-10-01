@@ -564,6 +564,9 @@ def check_and_manage(current_mcap_usd: Optional[float]) -> Optional[dict]:
     if not pos:
         return None
 
+    from executor.price_sanity import accept
+    if current_mcap_usd and not accept(pos["chain"], pos["token"], current_mcap_usd):
+        return {"exit_decision": None, "sell_attempted": False, "skipped": "price glitch filtered"}
     entry_mcap = pos.get("entry_mcap")
     if current_mcap_usd and entry_mcap:
         mult = current_mcap_usd / entry_mcap

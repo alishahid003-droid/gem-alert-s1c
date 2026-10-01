@@ -162,6 +162,9 @@ def check_and_exit(chain: str, token: str, current_mcap: Optional[float],
     if not pos or pos.get("status") != "open" or not pos.get("amount_tokens"):
         return None  # nothing actually held (execution off, or buy never filled)
     now_ts = now_ts if now_ts is not None else time.time()
+    from executor.price_sanity import accept
+    if not accept(chain, token, current_mcap):
+        return None             # data glitch filtered -- never sell on a fake spike or dip
     peak = position_state.update_peak_mcap(chain, token, current_mcap)
     remaining = position_state.remaining_pct(chain, token)
     cost = estimate_round_trip_cost_pct(chain, pos.get("total_usd") or 0, liquidity_usd)

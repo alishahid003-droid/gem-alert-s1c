@@ -1394,7 +1394,7 @@ def poll_layer13_fomo_copytrade() -> dict:
         if isinstance(lb, dict) and lb.get("ok"):
             traders = lb.get("traders") or []
             learned = learn_handles_from_leaderboard(traders)
-            cands = find_new_trader_candidates(traders, min_balance_usd=5000.0, max_checked=10,
+            cands = find_new_trader_candidates(traders, min_balance_usd=5000.0, max_checked=3,
                                                buyers_by_handle=out.get("buyers_by_handle"))
             out.update({"handles_learned": learned, "candidates_checked": cands["checked"],
                         "candidates_found": cands["candidates_found"], "promoted": cands["promoted"]})

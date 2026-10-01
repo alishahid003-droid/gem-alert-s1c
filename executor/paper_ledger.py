@@ -82,7 +82,9 @@ def _closed_raw() -> list:
 # dashboard showed 8 closed at 0% wins / -49.5%, with -93..-96% "stops" on
 # coins whose real candles were only -5%. They are kept (for history) but
 # excluded from every win-rate number and the auto-disable gate.
-STATS_SINCE_TS = float(os.environ.get("PAPER_STATS_SINCE_TS", "1790782800"))
+# Oct 1 2026 ~05:45 UTC: moved again -- trades before the price-jump filter
+# (executor/price_sanity.py) include fake +2,000% "wins" from data glitches.
+STATS_SINCE_TS = float(os.environ.get("PAPER_STATS_SINCE_TS", "1790833500"))
 
 
 def _closed() -> list:
@@ -219,12 +221,15 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 pos["entry_mcap_original"] = pos["entry_mcap"]
                 pos["entry_mcap"] = mcap
                 pos["peak_mcap"] = mcap
-        pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
         if liq is not None and liq < DEAD_LIQUIDITY_USD:
             _sell(pos, pos["remaining"], mcap, "liquidity collapsed", now)
             closed_now.append(_close(pos, "rug_liquidity", f"liquidity ${liq:,.0f}", now))
             del book[pid]
             continue
+        from executor.price_sanity import accept_dict
+        if not accept_dict(pos, mcap):
+            continue            # data glitch (pair/field switch), not a real move -- see price_sanity
+        pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
 
         if pos.get("strategy") == "runner":
             d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
