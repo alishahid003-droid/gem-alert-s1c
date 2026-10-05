@@ -1,0 +1,30 @@
+# Alert replay -- source: alerts -- 2026-10-05_1324Z -- run 37316458018 (workflow_dispatch)
+
+Job status when this file was written: success
+
+```
+[state] UPSTASH BLOCKED -- ERR max requests limit exceeded. Limit: 500000, Usage: 500000. See https://upstash.com/docs/redis/troubleshooting/max_requests_limit for details  (no calls for 300s; real buys refused until it reads again)
+Alert replay: 0 unique alerted coins from the live feed (bands {'A': 0, 'B': 0, 'C': 0, 'D': 0})
+
+DexScreener found pools for 0/0 coins
+
+
+==========================================================================================
+STAGE    ALL            -
+         band A         -
+         band B         -
+         band C         -
+         band D         -
+         exits: {}
+------------------------------------------------------------------------------------------
+SCALPER  ALL            -
+         band A         -
+         band B         -
+         band C         -
+         band D         -
+         exits: {}
+------------------------------------------------------------------------------------------
+GeckoTerminal non-OK replies by status: {}
+skipped: {}; trades still open at data end (marked to last candle): 0
+Limits: last-24h live alerts only; open trades marked to market; entry = alert time + 2 min.
+```
