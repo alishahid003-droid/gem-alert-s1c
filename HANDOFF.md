@@ -16,6 +16,24 @@ then run the tests (`python -m pytest -q`, 778 pass)._
   positive on data it has never seen (see Phase 9 / §4).**
 - This is NOT a path to $90k by any near deadline. Honest, not hopeful.
 
+## 0b. Oct 5 2026 incident -- Upstash free tier exhausted (READ THIS)
+- The free Upstash DB (500K commands/MONTH) hit its cap: 908K reads / 86K writes.
+  Upstash then answers every call with HTTP 400 "max requests limit exceeded";
+  reads looked empty, so the dashboard showed "never"/0 everywhere and nothing
+  was recorded. Check: `python -c "..."` printing `/dbsize` body, or the
+  console Usage tab. Data is retained; access returns after reset/upgrade.
+- Measured (counting fake Upstash): idle fast-watch tick 10 cmds, dashboard
+  refresh 25, discovery cycle floor 58. Fix pushed in `f741699`: read cache,
+  quota guard (stops calls + refuses real BUYS while blocked), throttled
+  cycles (poll-fast ~30 min, poll-slow ~60 min, madeonsol ~30 min via
+  `POLL_FAST_/POLL_SLOW_/MADEONSOL_MIN_INTERVAL_SECONDS`), fast-watch idle 180 s,
+  dashboard refreshes only while visible (3 min). Heartbeat note now shows the
+  REAL commands/min per runner -- watch it; target < 16K/day total.
+- Ali's PC `.env` had `EXECUTION_ENABLED=true` + a Solana key (contradicts §0);
+  must be confirmed/turned off while real money has no proven edge.
+- To restore service: new/upgraded Upstash DB, update `UPSTASH_REDIS_REST_URL/TOKEN`
+  in the PC `.env` AND the GitHub Secrets, then `update.bat`.
+
 ## 1. Where everything lives
 - **Code of record:** GitHub `main` (all PRs #1–#26 merged; working branch has
   nothing unmerged).
