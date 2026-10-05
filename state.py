@@ -1432,10 +1432,46 @@ def get_fomo_last_run() -> Optional[dict]:
 RUNNER_HEARTBEATS_KEY = "runner_heartbeats"
 
 
+UPSTASH_DAILY_COMMAND_BUDGET = 16000   # 500K/month free tier / ~31 days
+_CMD_FLUSHED = {"n": 0}
+
+
+def _cmd_usage_key(now: Optional[float] = None) -> str:
+    return "cmd_usage:" + time.strftime("%Y-%m-%d", time.gmtime(now if now is not None else time.time()))
+
+
+def flush_command_usage(now: Optional[float] = None):
+    """Oct 5 2026 (checklist 10.6): add this process's not-yet-reported command
+    count into today's shared total (UTC day). Called once per heartbeat, so it
+    costs 2 commands per runner cycle. Several runners can race on the
+    read-add-write and drop a few counts; this is a gauge, not an invoice."""
+    if backend() != "upstash" or upstash_blocked():
+        return
+    delta = COMMAND_COUNTER["n"] - _CMD_FLUSHED["n"]
+    if delta <= 0:
+        return
+    key = _cmd_usage_key(now)
+    cur = get_value(key)
+    cur = cur if isinstance(cur, (int, float)) else 0
+    if set_value(key, int(cur) + delta) is not False:
+        _CMD_FLUSHED["n"] += delta
+
+
+def command_usage_today(now: Optional[float] = None) -> dict:
+    v = get_value(_cmd_usage_key(now))
+    used = int(v) if isinstance(v, (int, float)) else 0
+    return {"used": used, "budget": UPSTASH_DAILY_COMMAND_BUDGET,
+            "pct": round(100.0 * used / UPSTASH_DAILY_COMMAND_BUDGET)}
+
+
 def record_runner_heartbeat(name: str, where: str = "", note: str = "", ts: Optional[float] = None):
     beats = get_value(RUNNER_HEARTBEATS_KEY) or {}
     beats[name] = {"ts": ts if ts is not None else time.time(), "where": where, "note": note}
     set_value(RUNNER_HEARTBEATS_KEY, beats)
+    try:
+        flush_command_usage()
+    except Exception:
+        pass
 
 
 def get_runner_heartbeats() -> dict:

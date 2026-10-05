@@ -135,6 +135,11 @@ def daily_summary_text(now: Optional[float] = None) -> str:
         f"MadeOnSol: {ms.get('used')}/{ms.get('budget')} calls today",
     ]
     try:
+        cu = state.command_usage_today(now)
+        lines.append(f"Database commands today: {cu['used']:,}/{cu['budget']:,} ({cu['pct']}% of daily free-tier pace)")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         from executor.sprint import status_line
         sl = status_line()
         if sl:

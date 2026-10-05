@@ -333,6 +333,7 @@ def _health() -> dict:
         "fomo_unmatched": [{"handle": h, "count": v.get("count")} for h, v in top_unmatched],
         "fomo_promoted": list(state.get_fomo_promoted().values()),
         "madeonsol": state.madeonsol_pacing_status(),
+        "db_commands": state.command_usage_today(),
     }
 
 
@@ -924,6 +925,8 @@ function render(data) {
       ${h.fomo_backoff ? ' &middot; <span class="neg-pnl">OUT OF CREDITS -- paused, retrying every 6h</span>' : ''}</p>
     <p>MadeOnSol calls today: <strong>${h.madeonsol ? h.madeonsol.used : '?'}</strong> of ${h.madeonsol ? h.madeonsol.budget : '?'}
       (paced across the day -- routine scans allowed so far: ${h.madeonsol ? h.madeonsol.routine_allowance_now : '?'}, resets 5:00 AM PKT)</p>
+    <p>Database commands today (UTC): <strong>${h.db_commands ? Number(h.db_commands.used).toLocaleString() : '?'}</strong> of ${h.db_commands ? Number(h.db_commands.budget).toLocaleString() : '?'}/day budget
+      (${h.db_commands ? h.db_commands.pct : '?'}%${h.db_commands && h.db_commands.pct >= 100 ? ' -- OVER the free-tier daily pace' : ''})</p>
     <p>Auto-promoted traders: ${(h.fomo_promoted || []).map(p => esc(p.display_name)).join(", ") || 'none yet'}</p>
     <p>Most active Fomo traders NOT on your roster: ${(h.fomo_unmatched || []).map(u => esc(u.handle) + ' (' + u.count + ')').join(", ") || 'none recorded yet'}</p>`;
 
