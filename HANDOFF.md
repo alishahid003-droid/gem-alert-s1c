@@ -29,6 +29,13 @@ then run the tests (`python -m pytest -q`, 778 pass)._
   `POLL_FAST_/POLL_SLOW_/MADEONSOL_MIN_INTERVAL_SECONDS`), fast-watch idle 180 s,
   dashboard refreshes only while visible (3 min). Heartbeat note now shows the
   REAL commands/min per runner -- watch it; target < 16K/day total.
+- Oct 5 follow-ups: `eebc58a` daily DB-command counter (dashboard System tab +
+  Telegram daily summary, key `cmd_usage:<UTC day>`, budget 16K/day);
+  `e4e7543` alert-replay workflow commits results to `replay_results/`.
+  Offline idle cost: poll-fast 14 / poll-slow 9 / madeonsol 10 commands per
+  cycle. Per-coin trim (checklist 10.5) waits for live data + the new counter.
+- STILL OPEN (Ali): 10.1 new/upgraded Upstash + .env + 2 GitHub Secrets +
+  update.bat; 10.2 confirm EXECUTION_ENABLED + wallet balance; 10.3 replays.
 - Ali's PC `.env` had `EXECUTION_ENABLED=true` + a Solana key (contradicts §0);
   must be confirmed/turned off while real money has no proven edge.
 - To restore service: new/upgraded Upstash DB, update `UPSTASH_REDIS_REST_URL/TOKEN`
