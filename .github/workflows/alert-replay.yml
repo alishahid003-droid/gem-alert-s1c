@@ -20,6 +20,11 @@ jobs:
   replay:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Oct 5 2026 (checklist 10.4): the run saves its own result into the repo
+    # (replay_results/) so any session can read it -- GitHub's log download is
+    # not reachable from Claude's sandbox.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,4 +37,31 @@ jobs:
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           SOURCE: ${{ github.event.inputs.source || 'alerts' }}
-        run: timeout 1380 python -u backtest_alert_replay.py --max-coins 120 --source "$SOURCE"
+        run: |
+          set -o pipefail
+          timeout 1380 python -u backtest_alert_replay.py --max-coins 120 --source "$SOURCE" 2>&1 | tee replay_output.txt
+      - name: Save result into the repo (replay_results/)
+        if: always() && github.event_name != 'push'
+        env:
+          SOURCE: ${{ github.event.inputs.source || 'alerts' }}
+        run: |
+          mkdir -p replay_results
+          STAMP="$(date -u +%Y-%m-%d_%H%MZ)"
+          OUT="replay_results/${SOURCE}-latest.md"
+          {
+            echo "# Alert replay -- source: ${SOURCE} -- ${STAMP} -- run ${{ github.run_id }} (${{ github.event_name }})"
+            echo
+            echo "Job status when this file was written: ${{ job.status }}"
+            echo
+            echo '```'
+            if [ -f replay_output.txt ]; then tail -n 150 replay_output.txt | cut -c1-300; else echo "(no output captured)"; fi
+            echo '```'
+          } > "$OUT"
+          cp "$OUT" "replay_results/${SOURCE}-${STAMP}.md"
+          # keep only the 14 newest dated files per source
+          ls -1t replay_results/${SOURCE}-2*.md 2>/dev/null | tail -n +15 | xargs -r rm -f
+          git config user.name "gem-alert replay"
+          git config user.email "noreply@github.com"
+          git add replay_results
+          git commit -m "replay_results: ${SOURCE} ${STAMP} [skip ci]" || exit 0
+          for i in 1 2 3; do git pull --rebase -q origin "${GITHUB_REF_NAME}" && git push -q origin "HEAD:${GITHUB_REF_NAME}" && break || sleep 5; done
