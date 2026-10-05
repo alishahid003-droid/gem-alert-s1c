@@ -258,3 +258,20 @@ miracle; it is the honest path to a system with a real chance over time.
 Reality check (not negotiable): even fully built, this competes with bots on
 faster machines; it improves odds, it does not guarantee wins or 80%, and it
 is a build of days–weeks, not a 24-hour fix.
+
+---
+
+## Phase 10 — Oct 5 2026 incident: Upstash free tier exhausted (open items)
+
+Cause: the free DB hit 500K commands/month (908K reads); Upstash then rejects every call (HTTP 400), reads look empty, dashboard blank, nothing recorded. Code fix shipped in `f741699` (read cache, quota guard, buy refusal while blocked, throttled cycles, lighter dashboard). These remain:
+
+- [ ] **10.1 ALI** — Restore the data store: create a NEW free Upstash DB (or upgrade); put its REST URL + token in the PC `.env` (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`) AND the two GitHub Secrets of the same names; run `update.bat`. DONE-WHEN: dashboard System tab shows all 4 runners fresh and no "DATA STORE BLOCKED" banner. If Upstash refuses a 2nd free DB -> **CLAUDE** builds the local-file mode (discovery on the PC, no Upstash).
+- [ ] **10.2 ALI** — Real-money switch: PC `.env` showed `EXECUTION_ENABLED=true` + `EXECUTION_SOLANA_PRIVATE_KEY` set, contradicting "real money OFF". Confirm it was deliberate and tell Claude the wallet balance, or set `EXECUTION_ENABLED=false` and run `restart_fast_watch.bat`. DONE-WHEN: decision logged here.
+- [ ] **10.3 BOTH** — Run the two never-run replays: GitHub Actions -> "Alert replay" -> source `fomo`, then source `launches` (daily scheduled replay already runs; Oct 1–4 succeeded but Claude cannot read the log). DONE-WHEN: results pasted/saved and Phase 9 direction chosen from them.
+- [ ] **10.4 CLAUDE** — Make the replay workflow commit its results to the repo (e.g. `replay_results/latest.md`) so any session can read them without log access. DONE-WHEN: file updates after a run.
+- [ ] **10.5 CLAUDE** — After 10.1: read each runner's REAL commands/min from the heartbeat notes, find the per-coin consumers (mc/holder history writes, pump.fun roster get/set, Fomo + launch archives), and tune cadences/batching to stay under ~16K commands/day. DONE-WHEN: a full day shows < 16K in the Upstash Usage tab.
+- [ ] **10.6 CLAUDE** — Add a daily command-usage line to the Telegram summary + dashboard System tab (commands today vs 16K/day budget) so the cap is never a surprise again. DONE-WHEN: visible and tested.
+- [ ] **10.7 ALI (optional)** — Check the Upstash Usage tab for the monthly reset date. If the free DB is still blocked, old data returns on reset.
+
+### Change log (Oct 5)
+- Oct 5 2026 — `f741699`: Upstash quota fix (790 tests). Cause + measurements in HANDOFF.md §0b.
