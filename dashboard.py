@@ -311,7 +311,9 @@ def _health() -> dict:
     now = time.time()
     beats = state.get_runner_heartbeats()
     runners = []
-    for name, expect_min in (("poll-fast", 30), ("poll-slow", 60), ("poll-madeonsol", 45), ("fast-watch", 3)):
+    # Oct 5 2026: cycles are throttled to save Upstash commands (poll-fast ~30 min,
+    # poll-slow ~60 min, madeonsol ~30 min, fast-watch idle 3 min), so "stale" limits grew.
+    for name, expect_min in (("poll-fast", 70), ("poll-slow", 130), ("poll-madeonsol", 70), ("fast-watch", 8)):
         b = beats.get(name) or {}
         ts = b.get("ts")
         age_min = (now - ts) / 60 if ts else None
@@ -454,6 +456,8 @@ def build_data() -> dict:
         "realized_pnl": realized,
         "unrealized_pnl_usd": unrealized_total,
         "state_backend": state.backend() if hasattr(state, "backend") else "?",
+        "state_blocked": bool(state.upstash_blocked()) if hasattr(state, "upstash_blocked") else False,
+        "state_blocked_reason": state.upstash_block_reason() if hasattr(state, "upstash_block_reason") else "",
         "compound_scalper": scalper_status,
         "fomo_signals": fomo_signals,
         "fomo_candidates": fomo_candidates,
@@ -699,6 +703,9 @@ function renderAttentionAndHighlights(data) {
   if (items.some(i => i.level === "bad")) overallLevel = "bad";
   else if (items.some(i => i.level === "warn")) overallLevel = "warn";
 
+  if (data.state_blocked) {
+    items.unshift({ level: "bad", text: `DATA STORE BLOCKED -- Upstash is rejecting requests (${esc(data.state_blocked_reason || "request limit")}). Numbers below are NOT real; real buys are refused until it reads again.` });
+  }
   const hh = data.health || {};
   const staleRunners = (hh.runners || []).filter(r => r.stale).map(r => r.name);
   if (staleRunners.length) {
@@ -1010,8 +1017,21 @@ if ("Notification" in window && Notification.permission !== "granted" && Notific
 } else if ("Notification" in window && Notification.permission === "granted") {
   __notifyReady = true;
 }
-poll();
-setInterval(poll, 30000);  // 30 s (was 10 s): each refresh costs ~20 Upstash commands (checklist 5.4)
+// Oct 5 2026: the Upstash free tier is 500K commands a MONTH and one refresh
+// costs ~25 (measured), so a tab left open at 30 s burned ~72K/day by itself.
+// Now: refresh only while the tab is visible, every 3 min, plus once when you
+// come back to the tab if the data is older than a minute.
+let __lastPollAt = 0;
+async function pollIfVisible(force) {
+  if (document.hidden && !force) return;
+  __lastPollAt = Date.now();
+  await poll();
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && Date.now() - __lastPollAt > 60000) pollIfVisible(true);
+});
+pollIfVisible(true);
+setInterval(() => pollIfVisible(false), 180000);
 </script>
 </body></html>
 """
@@ -1030,7 +1050,7 @@ setInterval(poll, 30000);  // 30 s (was 10 s): each refresh costs ~20 Upstash co
 # still gets new data every real poll cycle.
 _last_data_cache = {"data": None, "built_at": 0.0}
 _last_data_lock = threading.Lock()
-_DATA_CACHE_TTL_SECONDS = 25.0
+_DATA_CACHE_TTL_SECONDS = 120.0   # Oct 5 2026: was 25 s (each rebuild costs ~25 Upstash commands)
 
 
 def _build_data_cached() -> dict:

@@ -179,6 +179,37 @@ def _runner_where() -> str:
     return "github-actions" if IS_GITHUB_ACTIONS else "local-pc"
 
 
+# --- Oct 5 2026: command-budget throttle -----------------------------------
+# The Upstash free tier allows 500K commands a MONTH (~16K a day). Measured
+# floor of one discovery cycle with an EMPTY database is ~58 commands, and
+# cron-job.org dispatches poll-fast every 10 min / poll-slow every 20 min,
+# which cron-job.org's own settings (outside this repo) control. So each
+# entry point asks "is a cycle due?" first: one cached read, and a skipped
+# dispatch costs ~1 command instead of a full cycle. Tune per runner with
+# POLL_FAST_MIN_INTERVAL_SECONDS / POLL_SLOW_MIN_INTERVAL_SECONDS /
+# MADEONSOL_MIN_INTERVAL_SECONDS (0 = no throttle). Only applies to the
+# Upstash backend; local runs and tests are never throttled.
+def _cycle_due(name: str, env_var: str, default_seconds: float) -> bool:
+    try:
+        min_s = float(os.environ.get(env_var, default_seconds))
+    except ValueError:
+        min_s = float(default_seconds)
+    if min_s <= 0 or state.backend() != "upstash":
+        return True
+    if state.upstash_blocked():
+        print(f"[throttle] {name}: Upstash is rejecting requests ({state.upstash_block_reason()[:80]}) "
+              f"-- skipping this cycle, nothing could be saved", flush=True)
+        return False
+    now = time.time()
+    last = state.get_value(f"cycle_last:{name}")
+    if isinstance(last, (int, float)) and now - last < min_s:
+        print(f"[throttle] {name}: last cycle {(now - last) / 60:.0f} min ago, "
+              f"min interval {min_s / 60:.0f} min -- skipping (saves Upstash commands)", flush=True)
+        return False
+    state.set_value(f"cycle_last:{name}", now)
+    return True
+
+
 # --- Cycle summary (Ali, Sept 28 2026) -----------------------------------
 # Ali's ask: the verbose per-line [layerX] prints below are real and stay
 # (still needed to actually debug a broken layer), but he shouldn't have to
@@ -946,7 +977,7 @@ def _run_soft_fail_watch_cycle() -> int:
     return queued
 
 
-FAST_WATCH_OWNERSHIP_SECONDS = 120
+FAST_WATCH_OWNERSHIP_SECONDS = 420   # Oct 5 2026: idle ticks are 180 s now (was 60 s / 120 s)
 
 
 def fast_watch_owns_management(now: "float | None" = None) -> bool:
@@ -2666,11 +2697,14 @@ if __name__ == "__main__":
     elif args.poll_fast:
         run_poll_fast_loop()
     elif args.poll_fast_once:
-        run_poll_fast()
+        if _cycle_due("poll-fast", "POLL_FAST_MIN_INTERVAL_SECONDS", 1500):
+            run_poll_fast()
     elif args.poll_slow:
-        run_poll_slow()
+        if _cycle_due("poll-slow", "POLL_SLOW_MIN_INTERVAL_SECONDS", 3000):
+            run_poll_slow()
     elif args.poll_madeonsol:
-        run_poll_madeonsol()
+        if _cycle_due("poll-madeonsol", "MADEONSOL_MIN_INTERVAL_SECONDS", 1500):
+            run_poll_madeonsol()
     elif args.poll:
         run_poll()
     elif args.seed_pumpfun_wallets:

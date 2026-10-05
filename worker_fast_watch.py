@@ -44,7 +44,7 @@ from layers.layer0_scoring import fetch_dexscreener_snapshot  # noqa: E402
 from layers.layer11_social_buzz import fetch_boost_board  # noqa: E402
 
 FAST_INTERVAL_SECONDS = 20.0   # while real money is in a position / the scalper holds a coin
-IDLE_INTERVAL_SECONDS = 60.0   # otherwise (checklist 5.4: Upstash command budget)
+IDLE_INTERVAL_SECONDS = 180.0  # otherwise (Oct 5 2026: was 60 s -- an idle tick costs ~10 Upstash commands; free tier = ~16K/day)
 
 
 def busy() -> bool:

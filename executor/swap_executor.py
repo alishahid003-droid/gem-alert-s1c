@@ -189,6 +189,17 @@ def _refuse_unless_ready(chain: str) -> Optional[ExecutionResult]:
     return None
 
 
+def _refuse_buy_if_state_unreadable(chain: str) -> Optional[ExecutionResult]:
+    """Oct 5 2026: when Upstash is rejecting us (quota), every state read
+    looks empty -- the bot cannot see its open positions, budget or "already
+    bought" records, so a BUY could double-spend. Sells stay allowed (exits
+    must still work); only new buys are refused."""
+    if state.upstash_blocked():
+        return ExecutionResult(False, "refused: state store (Upstash) is rejecting requests "
+                                      f"({state.upstash_block_reason()[:80]}) -- cannot verify positions/budget")
+    return None
+
+
 def _int_or_none(v) -> Optional[int]:
     try:
         return int(v)
@@ -239,6 +250,9 @@ def price_impact_refusal(price_impact_pct) -> Optional[str]:
 
 def execute_buy_solana(token_mint: str, usd_amount: float) -> ExecutionResult:
     guard = _refuse_unless_ready("solana")
+    if guard:
+        return guard
+    guard = _refuse_buy_if_state_unreadable("solana")
     if guard:
         return guard
 
@@ -480,6 +494,9 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
     guard = _refuse_unless_ready("bsc")
     if guard:
         return guard
+    guard = _refuse_buy_if_state_unreadable("bsc")
+    if guard:
+        return guard
     try:
         from web3 import Web3  # type: ignore
         from eth_account import Account  # type: ignore
@@ -710,6 +727,9 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
     Do not fund a wallet against this path without first running one
     small real test buy."""
     guard = _refuse_unless_ready("robinhood_chain")
+    if guard:
+        return guard
+    guard = _refuse_buy_if_state_unreadable("robinhood_chain")
     if guard:
         return guard
     try:

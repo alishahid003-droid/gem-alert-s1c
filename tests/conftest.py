@@ -36,6 +36,18 @@ _SAFE_STAGE2_POSITION_USD = round(_SAFE_STAGE1_POSITION_USD * 0.85, 2)
 
 
 @pytest.fixture(autouse=True)
+def _clean_state_cache():
+    """Oct 5 2026: state.py now keeps a short-TTL read cache and an Upstash
+    quota-block flag at module level; neither may leak between tests."""
+    import state as _state
+    _state._READ_CACHE.clear()
+    _state._UPSTASH_BLOCK.update({"until": 0.0, "reason": "", "last_print": 0.0})
+    yield
+    _state._READ_CACHE.clear()
+    _state._UPSTASH_BLOCK.update({"until": 0.0, "reason": "", "last_print": 0.0})
+
+
+@pytest.fixture(autouse=True)
 def _clean_shared_singletons(monkeypatch):
     monkeypatch.setattr(CONFIG, "upstash_redis_rest_url", None)
     monkeypatch.setattr(CONFIG, "upstash_redis_rest_token", None)

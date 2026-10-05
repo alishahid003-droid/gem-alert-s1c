@@ -43,55 +43,109 @@ def _upstash_headers():
     return {"Authorization": f"Bearer {CONFIG.upstash_redis_rest_token}"}
 
 
-def _upstash_get_raw(key: str) -> Optional[str]:
+# --- Oct 5 2026: Upstash free-tier quota guard -----------------------------
+# Real incident: the database hit its 500K commands/month cap and Upstash
+# answered every request with HTTP 400 "max requests limit exceeded". Every
+# read then silently came back as None, so the dashboard looked empty and the
+# bot could not see its own open positions. Rejected calls ALSO count toward
+# usage, so hammering a blocked database only digs the hole deeper. Now: the
+# first limit error flips a flag for UPSTASH_BLOCK_SECONDS, during which no
+# network call is made (one probe after that), and real BUYS are refused
+# (see executor/swap_executor.py) because the bot cannot see its state.
+UPSTASH_BLOCK_SECONDS = 300
+_UPSTASH_BLOCK = {"until": 0.0, "reason": "", "last_print": 0.0}
+
+
+def _note_upstash_failure(result) -> None:
+    try:
+        if result.get("ok") or result.get("status_code") not in (400, 403, 429):
+            return
+        err = str((result.get("json") or {}).get("error") or "")
+        low = err.lower()
+        if "limit" in low or "quota" in low or "exceeded" in low:
+            now = time.time()
+            _UPSTASH_BLOCK["until"] = now + UPSTASH_BLOCK_SECONDS
+            _UPSTASH_BLOCK["reason"] = err[:200]
+            if now - _UPSTASH_BLOCK["last_print"] > 300:
+                _UPSTASH_BLOCK["last_print"] = now
+                print(f"[state] UPSTASH BLOCKED -- {err[:200]}  (no calls for {UPSTASH_BLOCK_SECONDS}s; "
+                      f"real buys refused until it reads again)", flush=True)
+    except Exception:  # noqa: BLE001 -- diagnostics must never break a cycle
+        pass
+
+
+def upstash_blocked() -> bool:
+    """True while Upstash is rejecting us for quota -- state reads are NOT
+    trustworthy (they look empty), so callers must not act on them."""
+    return backend() == "upstash" and time.time() < _UPSTASH_BLOCK["until"]
+
+
+def upstash_block_reason() -> str:
+    return _UPSTASH_BLOCK["reason"] if upstash_blocked() else ""
+
+
+def _upstash_get_raw_ex(key: str):
+    """-> (ok, raw). ok=False means the call failed (unreachable / rejected),
+    so a None raw is NOT a real "key missing" and must not be cached."""
+    if upstash_blocked():
+        return False, None
     try:
         result = get_json(f"{CONFIG.upstash_redis_rest_url}/get/{key}", headers=_upstash_headers())
     except ApiUnreachable:
-        return None
+        return False, None
     if not result["ok"]:
-        return None
+        _note_upstash_failure(result)
+        return False, None
     body = result.get("json") or {}
-    return body.get("result")  # Upstash wraps the value as {"result": "<value or null>"}
+    return True, body.get("result")  # Upstash wraps the value as {"result": "<value or null>"}
+
+
+def _upstash_get_raw(key: str) -> Optional[str]:
+    return _upstash_get_raw_ex(key)[1]
 
 
 def _upstash_set_raw(key: str, value_str: str) -> bool:
+    if upstash_blocked():
+        return False
     try:
         result = post_json(f"{CONFIG.upstash_redis_rest_url}/set/{key}",
                             headers=_upstash_headers(), data=value_str)
     except ApiUnreachable:
         return False
+    if not result["ok"]:
+        _note_upstash_failure(result)
     return result["ok"]
 
 
-def _upstash_get_many_raw(keys: List[str]) -> dict:
+def _upstash_get_many_raw_ex(keys: List[str]):
     """Batch GET via Upstash's /pipeline endpoint -- ONE HTTP round trip
-    for however many keys, instead of one round trip per key (Ali, Sept 30
-    2026: the dashboard's /api/data was hanging for minutes because
-    position_state.list_open_positions()/list_closed_positions() did a
-    sequential state.get_value() per position in the index -- with dozens
-    of positions accumulated from weeks of testing, that's dozens of
-    sequential HTTP calls, each subject to utils/http.py's own retry/
-    backoff stack, easily compounding into minutes on any single slow or
-    dropped call. This collapses all of them into one pipelined request.
-    Falls back to per-key calls if Upstash is unreachable or the pipeline
-    call itself fails, so behavior degrades rather than breaks."""
+    for however many keys (see Sept 30 note: sequential per-key reads made
+    the dashboard hang for minutes). -> (ok, {key: raw}); ok=True only when
+    the pipeline itself succeeded, so callers know None means "missing"."""
     if not keys:
-        return {}
+        return True, {}
+    if upstash_blocked():
+        return False, {k: None for k in keys}
     try:
         result = post_json(f"{CONFIG.upstash_redis_rest_url}/pipeline",
                             headers=_upstash_headers(),
                             json=[["GET", k] for k in keys])
     except ApiUnreachable:
-        return {k: _upstash_get_raw(k) for k in keys}
+        return False, {k: _upstash_get_raw(k) for k in keys}
     if not result["ok"]:
-        return {k: _upstash_get_raw(k) for k in keys}
+        _note_upstash_failure(result)
+        return False, {k: _upstash_get_raw(k) for k in keys}
     body = result.get("json")
     if not isinstance(body, list) or len(body) != len(keys):
-        return {k: _upstash_get_raw(k) for k in keys}
+        return False, {k: _upstash_get_raw(k) for k in keys}
     out = {}
     for k, item in zip(keys, body):
         out[k] = (item or {}).get("result") if isinstance(item, dict) else None
-    return out
+    return True, out
+
+
+def _upstash_get_many_raw(keys: List[str]) -> dict:
+    return _upstash_get_many_raw_ex(keys)[1]
 
 
 def _local_load_all() -> dict:
@@ -123,38 +177,74 @@ def commands_per_minute() -> float:
     return COMMAND_COUNTER["n"] / mins
 
 
+# Oct 5 2026: short-TTL read cache (Upstash backend only). Measured with a
+# counting fake Upstash: an idle fast-watch tick cost 10 commands (the same
+# key read up to 4x inside one tick) and a dashboard refresh cost 25. The
+# cache holds the raw JSON string and re-decodes on every hit, so callers
+# that mutate what they read can never corrupt it. Writes go through to the
+# cache, so a process always sees its own writes. Cross-process staleness is
+# bounded by the TTL (default 20 s; STATE_READ_CACHE_TTL_SECONDS=0 turns the
+# cache off). Failed calls are never cached.
+_READ_CACHE: dict = {}
+
+
+def _cache_ttl() -> float:
+    try:
+        return max(0.0, float(os.environ.get("STATE_READ_CACHE_TTL_SECONDS", "20")))
+    except ValueError:
+        return 20.0
+
+
+def _decode(raw):
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
 def get_value(key: str):
-    _count()
     if backend() == "upstash":
-        raw = _upstash_get_raw(key)
-        if raw is None:
-            return None
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return None
+        ttl = _cache_ttl()
+        if ttl > 0:
+            hit = _READ_CACHE.get(key)
+            if hit is not None and time.time() - hit[0] < ttl:
+                return _decode(hit[1])
+        _count()
+        ok, raw = _upstash_get_raw_ex(key)
+        if ok and ttl > 0:
+            _READ_CACHE[key] = (time.time(), raw)
+        return _decode(raw)
+    _count()
     return _local_load_all().get(key)
 
 
 def get_values(keys: List[str]) -> dict:
-    _count()
     """Batch version of get_value() -- returns {key: decoded_value_or_None}.
     Uses one pipelined Upstash call instead of len(keys) separate ones (see
-    _upstash_get_many_raw's docstring). Local-file backend already has
-    everything in memory, so it just does the equivalent dict lookups."""
+    _upstash_get_many_raw_ex's docstring). Cached keys are served from the
+    read cache; only the rest go to Upstash. The command counter counts every
+    key in the pipeline (Upstash bills one command per key)."""
     if backend() == "upstash":
-        raw_map = _upstash_get_many_raw(keys)
-        out = {}
+        ttl = _cache_ttl()
+        now = time.time()
+        raw_map, missing = {}, []
         for k in keys:
-            raw = raw_map.get(k)
-            if raw is None:
-                out[k] = None
-                continue
-            try:
-                out[k] = json.loads(raw)
-            except ValueError:
-                out[k] = None
-        return out
+            hit = _READ_CACHE.get(k) if ttl > 0 else None
+            if hit is not None and now - hit[0] < ttl:
+                raw_map[k] = hit[1]
+            else:
+                missing.append(k)
+        if missing:
+            _count(len(missing))
+            ok, fetched = _upstash_get_many_raw_ex(missing)
+            for k, raw in fetched.items():
+                raw_map[k] = raw
+                if ok and ttl > 0:
+                    _READ_CACHE[k] = (now, raw)
+        return {k: _decode(raw_map.get(k)) for k in keys}
+    _count()
     data = _local_load_all()
     return {k: data.get(k) for k in keys}
 
@@ -163,7 +253,12 @@ def set_value(key: str, value) -> bool:
     _count()
     encoded = json.dumps(value)
     if backend() == "upstash":
-        return _upstash_set_raw(key, encoded)
+        ok = _upstash_set_raw(key, encoded)
+        if ok and _cache_ttl() > 0:
+            _READ_CACHE[key] = (time.time(), encoded)
+        else:
+            _READ_CACHE.pop(key, None)
+        return ok
     data = _local_load_all()
     data[key] = value
     _local_save_all(data)
@@ -849,12 +944,15 @@ def get_adanos_quota() -> Optional[dict]:
 def _upstash_set_raw_opts(key: str, value_str: str, query: str) -> Optional[dict]:
     """Low-level SET with Upstash REST query-string options (EX=, NX=, etc).
     Returns the parsed response body, or None if unreachable."""
+    if upstash_blocked():
+        return None
     try:
         url = f"{CONFIG.upstash_redis_rest_url}/set/{key}?{query}"
         result = post_json(url, headers=_upstash_headers(), data=value_str)
     except ApiUnreachable:
         return None
     if not result["ok"]:
+        _note_upstash_failure(result)
         return None
     return result.get("json") or {}
 
