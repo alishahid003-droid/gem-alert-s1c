@@ -276,3 +276,7 @@ Cause: the free DB hit 500K commands/month (908K reads); Upstash then rejects ev
 
 ### Change log (Oct 5)
 - Oct 5 2026 — `f741699`: Upstash quota fix (790 tests). Cause + measurements in HANDOFF.md §0b.
+
+## Phase 11 -- Two-target setup (Oct 6 2026)
+- [x] **11.1 CLAUDE** — Sprint retargeted to $90k in 168 h (finishes when banked + pool >= `SPRINT_TARGET_USD`; locks 3500:1500, 20000:5000). Marathon tracker for $1M over `MARATHON_DAYS` (default 150) with path/pace in the daily summary + dashboard. `SPRINT_ONLY=false` in runner workflows so both run. See TARGETS.md. 795 tests.
+- [ ] **11.2 ALI** — Put `SPRINT_MODE=true`, `MOONSHOT_ENABLED=true`, `SPRINT_ONLY=false`, `COMPOUND_SEED_USD=100`, `TOTAL_WALLET_USD=100` in PC `.env` and the GitHub Secrets (only after 10.1/10.2; real money stays off until you decide).

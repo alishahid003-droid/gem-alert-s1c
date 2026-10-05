@@ -334,7 +334,24 @@ def _health() -> dict:
         "fomo_promoted": list(state.get_fomo_promoted().values()),
         "madeonsol": state.madeonsol_pacing_status(),
         "db_commands": state.command_usage_today(),
+        "campaigns": _campaigns(),
     }
+
+
+def _campaigns() -> dict:
+    out = {}
+    try:
+        from executor.targets import marathon_status
+        out["marathon"] = marathon_status()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from executor import sprint
+        out["sprint_target"] = sprint.target_usd()
+        out["sprint_line"] = sprint.status_line()
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def build_data() -> dict:
@@ -927,6 +944,11 @@ function render(data) {
       (paced across the day -- routine scans allowed so far: ${h.madeonsol ? h.madeonsol.routine_allowance_now : '?'}, resets 5:00 AM PKT)</p>
     <p>Database commands today (UTC): <strong>${h.db_commands ? Number(h.db_commands.used).toLocaleString() : '?'}</strong> of ${h.db_commands ? Number(h.db_commands.budget).toLocaleString() : '?'}/day budget
       (${h.db_commands ? h.db_commands.pct : '?'}%${h.db_commands && h.db_commands.pct >= 100 ? ' -- OVER the free-tier daily pace' : ''})</p>
+    <p>Sprint: ${esc((h.campaigns && h.campaigns.sprint_line) || 'n/a')}</p>
+    <p>Marathon: ${(h.campaigns && h.campaigns.marathon && h.campaigns.marathon.started)
+      ? ('equity $' + Number(h.campaigns.marathon.equity).toLocaleString() + ' of $' + Number(h.campaigns.marathon.target).toLocaleString()
+         + ' -- day ' + h.campaigns.marathon.elapsed_days + '/' + h.campaigns.marathon.days
+         + (h.campaigns.marathon.on_pace ? ' (ahead of path)' : ' (behind path)')) : 'waiting for wallet equity'}</p>
     <p>Auto-promoted traders: ${(h.fomo_promoted || []).map(p => esc(p.display_name)).join(", ") || 'none yet'}</p>
     <p>Most active Fomo traders NOT on your roster: ${(h.fomo_unmatched || []).map(u => esc(u.handle) + ' (' + u.count + ')').join(", ") || 'none recorded yet'}</p>`;
 

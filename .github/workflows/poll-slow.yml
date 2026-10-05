@@ -45,6 +45,7 @@ jobs:
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           EXECUTION_ENABLED: ${{ secrets.EXECUTION_ENABLED }}
           SPRINT_MODE: ${{ secrets.SPRINT_MODE }}
+          SPRINT_ONLY: "false"   # Oct 6: sprint pool AND moonshot module run side by side (two $100 campaigns)
           COMPOUND_SCALPER_ENABLED: ${{ secrets.COMPOUND_SCALPER_ENABLED }}
           COMPOUND_SEED_USD: ${{ secrets.COMPOUND_SEED_USD }}
           MOONSHOT_ENABLED: ${{ secrets.MOONSHOT_ENABLED }}

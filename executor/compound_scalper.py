@@ -198,7 +198,7 @@ class CompoundScalperConfig:
 
     # Session window, hours -- Ali's own stated range ("24 to 48 hours").
     # Default to the wide end; narrower is one env var away.
-    session_hours: float = field(default_factory=lambda: _env_float("COMPOUND_SESSION_HOURS", _sd(48.0, 120.0)))
+    session_hours: float = field(default_factory=lambda: _env_float("COMPOUND_SESSION_HOURS", _sd(48.0, 168.0)))
 
     # Sanity ceiling only, not a target -- Ali said "tens to hundreds"; this
     # just stops a bug (or an unexpectedly fast market) from spinning the

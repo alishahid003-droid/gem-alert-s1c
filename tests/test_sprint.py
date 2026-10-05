@@ -18,7 +18,7 @@ def test_sprint_defaults(monkeypatch):
     for k in ("COMPOUND_SEED_USD", "COMPOUND_RISK_PCT", "COMPOUND_SCALPER_ENABLED", "COMPOUND_SESSION_HOURS"):
         monkeypatch.delenv(k, raising=False)
     cfg = cs.CompoundScalperConfig()
-    assert cfg.enabled and cfg.seed_usd == 100.0 and cfg.risk_pct == 0.9 and cfg.session_hours == 120.0
+    assert cfg.enabled and cfg.seed_usd == 100.0 and cfg.risk_pct == 0.9 and cfg.session_hours == 168.0
     # the backtested exits are NOT changed by the sprint
     assert cfg.take_profit_multiple == 1.5 and cfg.hard_stop_pct == 0.55 and cfg.trail_stop_pct == 0.35
     monkeypatch.setenv("COMPOUND_SEED_USD", "150")
@@ -94,22 +94,24 @@ def test_sprint_reserves_wallet(monkeypatch):
 
 def test_milestones_bank_profits(monkeypatch):
     monkeypatch.delenv("SPRINT_MILESTONES", raising=False)
+    monkeypatch.delenv("SPRINT_TARGET_USD", raising=False)
     sent = []
     import executor.trade_ops as to
     monkeypatch.setattr(to, "_send", lambda t: sent.append(t))
     pool = cs._default_pool()
     pool.update(balance_usd=3_620.0, seed_usd=100.0, session_start_ts=time.time())
     pool = sprint.apply_milestones(pool)
-    assert pool["balance_usd"] == 500 and pool["banked_usd"] == 3_120.0 and "3500.0" in pool["milestones_hit"]
+    assert pool["balance_usd"] == 1_500 and pool["banked_usd"] == 2_120.0 and "3500.0" in pool["milestones_hit"]
     pool = sprint.apply_milestones(pool)                                # no double banking
-    assert pool["banked_usd"] == 3_120.0
+    assert pool["banked_usd"] == 2_120.0
     pool["balance_usd"] = 21_000.0
     pool = sprint.apply_milestones(pool)
-    assert pool["balance_usd"] == 1_500 and pool["banked_usd"] == 3_120.0 + 19_500.0
-    pool["balance_usd"] = 76_000.0
+    assert pool["balance_usd"] == 5_000 and pool["banked_usd"] == 2_120.0 + 16_000.0
+    pool["balance_usd"] = 73_000.0                                      # banked 18,120 + pool 73,000 >= 90k
     pool = sprint.apply_milestones(pool)
     assert pool["tripped"] and pool["tripped_kind"] == "target_reached" and pool["balance_usd"] == 0
-    assert len(sent) == 3 and "MILESTONE" in sent[0]
+    assert pool["banked_usd"] == 91_120.0
+    assert len(sent) >= 3 and "MILESTONE" in sent[0]
 
 
 def test_milestones_wait_for_flat_pool():

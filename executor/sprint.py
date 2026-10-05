@@ -21,7 +21,7 @@ are taken and HOW MUCH compounds:
             (a 5-day window can't wait for a manual restart) -- unless the
             pool is below 25% of the seed ($25), then it stays stopped;
             75% session loss -> stopped for good;
-  window    120 hours from the first entry signal, up to 400 trades;
+  window    168 hours (one week) from the first entry signal, up to 400 trades;
   start     automatic once SPRINT_MODE=true (that switch is the decision).
 
 Honest expectation, printed in the daily Telegram summary: every trade and
@@ -112,9 +112,18 @@ def status_line() -> Optional[str]:
     day = (time.time() - (pool.get("session_start_ts") or time.time())) / 86400 + 1
     trades = pool.get("trades", [])
     wins = sum(1 for t in trades if (t.get("pnl_usd") or 0) > 0)
-    return (f"Sprint day {min(day, 5):.0f}/5: pool ${st.get('balance_usd') or 0:,.2f}, "
-            f"banked ${pool.get('banked_usd') or 0:,.2f}, {len(trades)} exits, {wins} wins"
+    total = (pool.get("banked_usd") or 0) + (st.get("balance_usd") or 0)
+    return (f"Sprint day {min(day, 7):.0f}/7: pool ${st.get('balance_usd') or 0:,.2f}, "
+            f"banked ${pool.get('banked_usd') or 0:,.2f}, total ${total:,.2f} of ${target_usd():,.0f} target "
+            f"({100 * total / target_usd():.1f}%), {len(trades)} exits, {wins} wins"
             + (f", PAUSED: {st.get('tripped_reason')}" if st.get("tripped") else ""))
+
+
+def target_usd() -> float:
+    """Oct 6 2026 (Ali: one-week attempt on $90k). The sprint is finished when
+    banked profit + the live pool reach this total; the milestone locks below
+    only protect partial wins on the way."""
+    return _f("SPRINT_TARGET_USD", 90000.0)
 
 
 def milestones() -> list:
@@ -122,7 +131,7 @@ def milestones() -> list:
     Oct 1 2026: "$100 -> $3,500, extract $3,000; $500 -> $20,000, extract
     $18,500; $1,500 -> $75,000"). keep 0 on the last one = target reached,
     sprint stops and everything is banked."""
-    raw = os.environ.get("SPRINT_MILESTONES", "3500:500,20000:1500,75000:0")
+    raw = os.environ.get("SPRINT_MILESTONES", "3500:1500,20000:5000")
     out = []
     for part in raw.split(","):
         try:
@@ -162,6 +171,19 @@ def apply_milestones(pool: dict, now: Optional[float] = None) -> dict:
             from executor.trade_ops import _send
             _send(f"🏁 SPRINT MILESTONE ${target:,.0f} reached: banked ${banked:,.2f}, "
                   f"trading on with ${keep:,.2f}. Total banked ${pool['banked_usd']:,.2f}.")
+        except Exception:  # noqa: BLE001
+            pass
+    total = (pool.get("banked_usd") or 0) + (pool.get("balance_usd") or 0)
+    if total >= target_usd() and not pool.get("tripped"):
+        pool["banked_usd"] = round(total, 2)
+        pool["balance_usd"] = 0.0
+        pool["tripped"] = True
+        pool["tripped_kind"] = "target_reached"
+        pool["tripped_reason"] = f"sprint target ${target_usd():,.0f} reached (banked + pool ${total:,.2f})"
+        changed = True
+        try:
+            from executor.trade_ops import _send
+            _send(f"🏆 SPRINT TARGET ${target_usd():,.0f} REACHED: ${total:,.2f} banked. Sprint stopped.")
         except Exception:  # noqa: BLE001
             pass
     if changed:
