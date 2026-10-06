@@ -35,6 +35,7 @@ then run the tests (`python -m pytest -q`, 778 pass)._
   Offline idle cost: poll-fast 14 / poll-slow 9 / madeonsol 10 commands per
   cycle. Per-coin trim (checklist 10.5) waits for live data + the new counter.
 - Oct 6: two-target setup -- see TARGETS.md (sprint $90k/168 h, marathon $1M/150 d, `executor/targets.py`).
+- Oct 6: LOCAL MODE (no Upstash) built -- LOCAL_MODE.md, `local_runner.py`, `start_local_mode.bat`; state.py local backend is multi-process safe.
 - STILL OPEN (Ali): 10.1 new/upgraded Upstash + .env + 2 GitHub Secrets +
   update.bat; 10.2 confirm EXECUTION_ENABLED + wallet balance; 10.3 replays.
 - Ali's PC `.env` had `EXECUTION_ENABLED=true` + a Solana key (contradicts §0);

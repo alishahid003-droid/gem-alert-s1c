@@ -148,19 +148,123 @@ def _upstash_get_many_raw(keys: List[str]) -> dict:
     return _upstash_get_many_raw_ex(keys)[1]
 
 
-def _local_load_all() -> dict:
-    if not os.path.exists(LOCAL_STATE_FILE):
-        return {}
+# --- Oct 6 2026: local-file backend made safe for MANY processes ------------
+# Local mode is the fallback when Upstash is unavailable (no money / quota):
+# fast-watch, the discovery runners and the dashboard then all run on one PC
+# and share ONE file. The old version re-read and re-wrote the whole JSON file
+# with no locking and a non-atomic write, so two processes could lose each
+# other's updates or read a half-written file (which silently looked empty).
+# Now: every write holds a cross-process file lock, re-reads the latest file
+# first, and replaces it atomically (temp file + os.replace); reads reuse a
+# parsed copy until the file changes (stat signature), and callers always get
+# a private deep copy so mutating a returned list cannot corrupt the cache.
+import copy
+import contextlib
+import tempfile
+
+_LOCAL_CACHE = {"path": None, "sig": None, "data": {}}
+
+
+def _local_sig(path):
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+@contextlib.contextmanager
+def _local_file_lock(timeout: float = 15.0):
+    lock_path = LOCAL_STATE_FILE + ".lock"
+    fh = open(lock_path, "a+")
+    deadline = time.time() + timeout
+    locked = False
+    try:
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except OSError:
+                if time.time() > deadline:
+                    break            # proceed unlocked rather than hang the bot forever
+                time.sleep(0.02)
+        yield
+    finally:
+        if locked:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
+
+
+def _local_read_file() -> dict:
     try:
         with open(LOCAL_STATE_FILE) as f:
-            return json.load(f)
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
     except (ValueError, OSError):
         return {}
 
 
+def _local_load_all() -> dict:
+    """Parsed state dict (shared with the cache: treat as read-only)."""
+    sig = _local_sig(LOCAL_STATE_FILE)
+    if sig is None:
+        return {}
+    if _LOCAL_CACHE["path"] == LOCAL_STATE_FILE and _LOCAL_CACHE["sig"] == sig:
+        return _LOCAL_CACHE["data"]
+    data = _local_read_file()
+    _LOCAL_CACHE.update(path=LOCAL_STATE_FILE, sig=_local_sig(LOCAL_STATE_FILE), data=data)
+    return data
+
+
 def _local_save_all(data: dict):
-    with open(LOCAL_STATE_FILE, "w") as f:
-        json.dump(data, f)
+    directory = os.path.dirname(os.path.abspath(LOCAL_STATE_FILE))
+    fd, tmp = tempfile.mkstemp(prefix=".gem_state_", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(40):          # Windows: os.replace fails while another process has the file open
+            try:
+                os.replace(tmp, LOCAL_STATE_FILE)
+                break
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.05)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    _LOCAL_CACHE.update(path=LOCAL_STATE_FILE, sig=_local_sig(LOCAL_STATE_FILE), data=data)
+
+
+def _local_get(key: str):
+    return copy.deepcopy(_local_load_all().get(key))
+
+
+def _local_set(key: str, value) -> bool:
+    with _local_file_lock():
+        data = dict(_local_read_file())          # always start from the newest file contents
+        data[key] = value
+        _local_save_all(data)
+    return True
 
 
 # Checklist 5.4 (Sept 30 2026): per-process count of state commands, so each
@@ -217,7 +321,7 @@ def get_value(key: str):
             _READ_CACHE[key] = (time.time(), raw)
         return _decode(raw)
     _count()
-    return _local_load_all().get(key)
+    return _local_get(key)
 
 
 def get_values(keys: List[str]) -> dict:
@@ -246,7 +350,7 @@ def get_values(keys: List[str]) -> dict:
         return {k: _decode(raw_map.get(k)) for k in keys}
     _count()
     data = _local_load_all()
-    return {k: data.get(k) for k in keys}
+    return {k: copy.deepcopy(data.get(k)) for k in keys}
 
 
 def set_value(key: str, value) -> bool:
@@ -259,10 +363,7 @@ def set_value(key: str, value) -> bool:
         else:
             _READ_CACHE.pop(key, None)
         return ok
-    data = _local_load_all()
-    data[key] = value
-    _local_save_all(data)
-    return True
+    return _local_set(key, value)
 
 
 # --- Layer 6: wallet holdings snapshot ---
@@ -957,13 +1058,25 @@ def _upstash_set_raw_opts(key: str, value_str: str, query: str) -> Optional[dict
     return result.get("json") or {}
 
 
+def _local_acquire_lock(key: str, ttl_seconds: int, owner: str) -> bool:
+    """Local-file equivalent of SET key owner EX ttl NX: grants the lock only if
+    nobody holds an unexpired one (checked under the cross-process file lock)."""
+    with _local_file_lock():
+        data = dict(_local_read_file())
+        cur = data.get(key)
+        if isinstance(cur, dict) and (cur.get("_lock_exp") or 0) > time.time():
+            return False
+        data[key] = {"_lock_owner": owner, "_lock_exp": time.time() + int(ttl_seconds)}
+        _local_save_all(data)
+    return True
+
+
 def acquire_lock(key: str, ttl_seconds: int, owner: str = "1") -> bool:
     """True if the lock was newly acquired (key didn't already exist).
-    Local-file backend has no cross-process concept of this, so it always
-    grants the lock there -- local mode is never the overlapping-schedule
-    case this exists for."""
+    Local-file backend (Oct 6 2026) now honours it across processes via the
+    state file lock, because local mode runs several runners on one PC."""
     if backend() != "upstash":
-        return True
+        return _local_acquire_lock(key, ttl_seconds, owner)
     body = _upstash_set_raw_opts(key, owner, f"EX={int(ttl_seconds)}&NX=true")
     if body is None:
         # Upstash unreachable -- fail open rather than silently never polling;
@@ -977,6 +1090,10 @@ def refresh_lock(key: str, ttl_seconds: int, owner: str = "1") -> bool:
     False on any failure to reach Upstash -- caller should treat that as
     lock-lost and stop looping rather than assume it still holds."""
     if backend() != "upstash":
+        with _local_file_lock():
+            data = dict(_local_read_file())
+            data[key] = {"_lock_owner": owner, "_lock_exp": time.time() + int(ttl_seconds)}
+            _local_save_all(data)
         return True
     body = _upstash_set_raw_opts(key, owner, f"EX={int(ttl_seconds)}")
     return body is not None
@@ -984,6 +1101,11 @@ def refresh_lock(key: str, ttl_seconds: int, owner: str = "1") -> bool:
 
 def release_lock(key: str):
     if backend() != "upstash":
+        with _local_file_lock():
+            data = dict(_local_read_file())
+            if key in data:
+                data.pop(key)
+                _local_save_all(data)
         return
     try:
         get_json(f"{CONFIG.upstash_redis_rest_url}/del/{key}", headers=_upstash_headers())

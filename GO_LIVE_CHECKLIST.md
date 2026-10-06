@@ -280,3 +280,6 @@ Cause: the free DB hit 500K commands/month (908K reads); Upstash then rejects ev
 ## Phase 11 -- Two-target setup (Oct 6 2026)
 - [x] **11.1 CLAUDE** — Sprint retargeted to $90k in 168 h (finishes when banked + pool >= `SPRINT_TARGET_USD`; locks 3500:1500, 20000:5000). Marathon tracker for $1M over `MARATHON_DAYS` (default 150) with path/pace in the daily summary + dashboard. `SPRINT_ONLY=false` in runner workflows so both run. See TARGETS.md. 795 tests.
 - [ ] **11.2 ALI** — Put `SPRINT_MODE=true`, `MOONSHOT_ENABLED=true`, `SPRINT_ONLY=false`, `COMPOUND_SEED_USD=100`, `TOTAL_WALLET_USD=100` in PC `.env` and the GitHub Secrets (only after 10.1/10.2; real money stays off until you decide).
+- [x] **11.3 CLAUDE** — **Local mode (no Upstash)**: state.py local backend made multi-process safe (file lock, atomic writes, change-aware read cache, private copies, real cross-process locks); `local_runner.py` + `start_local_mode.bat` run fast watcher + poll-fast/slow/madeonsol + dashboard on the PC; GitHub runners skip when no Upstash state. 802 tests incl. a 4-process write test. See LOCAL_MODE.md.
+- [ ] **11.4 ALI** — Pick ONE: (a) restore Upstash (10.1), or (b) local mode now: blank the two Upstash lines in `.env`, run `start_local_mode.bat`, disable the old poll-madeonsol Task Scheduler job.
+

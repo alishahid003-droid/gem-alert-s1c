@@ -189,6 +189,19 @@ def _runner_where() -> str:
 # POLL_FAST_MIN_INTERVAL_SECONDS / POLL_SLOW_MIN_INTERVAL_SECONDS /
 # MADEONSOL_MIN_INTERVAL_SECONDS (0 = no throttle). Only applies to the
 # Upstash backend; local runs and tests are never throttled.
+def _skip_local_state_on_actions(name: str) -> bool:
+    """Oct 6 2026 (local-file fallback): a GitHub runner with no Upstash
+    credentials would start from an EMPTY local state every run (nothing
+    persists between runs), re-alerting everything it sees. When Upstash is
+    off, the PC's local_runner.py does these cycles instead, so the runner
+    just exits. Returns True when this cycle must be skipped."""
+    if IS_GITHUB_ACTIONS and CONFIG.state_backend() != "upstash":
+        print(f"[{name}] SKIPPED on GitHub Actions: no Upstash state configured -- "
+              f"the PC runs this cycle in local mode (see LOCAL_MODE.md)", flush=True)
+        return True
+    return False
+
+
 def _cycle_due(name: str, env_var: str, default_seconds: float) -> bool:
     try:
         min_s = float(os.environ.get(env_var, default_seconds))
@@ -2697,13 +2710,13 @@ if __name__ == "__main__":
     elif args.poll_fast:
         run_poll_fast_loop()
     elif args.poll_fast_once:
-        if _cycle_due("poll-fast", "POLL_FAST_MIN_INTERVAL_SECONDS", 1500):
+        if not _skip_local_state_on_actions("poll-fast") and _cycle_due("poll-fast", "POLL_FAST_MIN_INTERVAL_SECONDS", 1500):
             run_poll_fast()
     elif args.poll_slow:
-        if _cycle_due("poll-slow", "POLL_SLOW_MIN_INTERVAL_SECONDS", 3000):
+        if not _skip_local_state_on_actions("poll-slow") and _cycle_due("poll-slow", "POLL_SLOW_MIN_INTERVAL_SECONDS", 3000):
             run_poll_slow()
     elif args.poll_madeonsol:
-        if _cycle_due("poll-madeonsol", "MADEONSOL_MIN_INTERVAL_SECONDS", 1500):
+        if not _skip_local_state_on_actions("poll-madeonsol") and _cycle_due("poll-madeonsol", "MADEONSOL_MIN_INTERVAL_SECONDS", 1500):
             run_poll_madeonsol()
     elif args.poll:
         run_poll()
