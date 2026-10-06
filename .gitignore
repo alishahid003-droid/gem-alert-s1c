@@ -4,3 +4,6 @@ __pycache__/
 .env
 logs/
 .env.backup-*
+
+.gem_alert_state.json*
+.gem_state_*.tmp
