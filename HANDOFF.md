@@ -36,6 +36,7 @@ then run the tests (`python -m pytest -q`, 778 pass)._
   cycle. Per-coin trim (checklist 10.5) waits for live data + the new counter.
 - Oct 6: two-target setup -- see TARGETS.md (sprint $90k/168 h, marathon $1M/150 d, `executor/targets.py`).
 - Oct 6: LOCAL MODE (no Upstash) built -- LOCAL_MODE.md, `local_runner.py`, `start_local_mode.bat`; state.py local backend is multi-process safe.
+- Oct 6 ~9:20 AM PKT: Ali is RUNNING IN LOCAL MODE on the PC (Upstash lines blank, old Task Scheduler jobs disabled, `start_local_mode.bat` started). Dashboard verified on `local_json`; poll-* first heartbeats pending. Starts with EMPTY state (old Upstash data unreadable). `EXECUTION_ENABLED=true` still in his `.env` -- advised `false` until the dashboard looks right.
 - STILL OPEN (Ali): 10.1 new/upgraded Upstash + .env + 2 GitHub Secrets +
   update.bat; 10.2 confirm EXECUTION_ENABLED + wallet balance; 10.3 replays.
 - Ali's PC `.env` had `EXECUTION_ENABLED=true` + a Solana key (contradicts §0);
