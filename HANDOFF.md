@@ -1,6 +1,6 @@
 # S1c — Handoff & Status (single source of truth)
 
-_Last updated: Oct 1 2026. Point of truth for continuity = this file + GitHub `main`.
+_Last updated: Oct 9 2026 (verified against GitHub `main`; no code changes since Oct 6 -- see section 0c). Point of truth for continuity = this file + GitHub `main`.
 Not Notion. A new Claude / Cowork session: read this, then `GO_LIVE_CHECKLIST.md`,
 then run the tests (`python -m pytest -q`, 778 pass)._
 
@@ -15,6 +15,14 @@ then run the tests (`python -m pytest -q`, 778 pass)._
 - **Do NOT turn on `SPRINT_MODE` / `EXECUTION_ENABLED` until a signal proves
   positive on data it has never seen (see Phase 9 / §4).**
 - This is NOT a path to $90k by any near deadline. Honest, not hopeful.
+
+## 0c. Status as of Oct 9 2026 (verified)
+- **Last real code/doc commit: Oct 6 2026 (`35e7ce6`).** Everything after it is the automatic daily `replay_results` commit (Oct 6, 7, 8). No new build work Oct 7-9.
+- **Real money still OFF. No proven edge.** Unchanged from section 0.
+- **GitHub Actions replay is blind:** the Oct 8 `replay_results/alerts-2026-10-08_1319Z.md` shows `UPSTASH BLOCKED -- max requests limit exceeded` and 0 alerts, because the GitHub Secrets still point at the exhausted Upstash DB. Daily replay results are empty until the Secrets are updated or the workflow is moved to local mode. These commits carry no information.
+- **PC runs LOCAL MODE** (`start_local_mode.bat`, folder `Downloads\gem-alert-s1c_6`). Local working copy has uncommitted changes (`.gem_alert_state.json`, `.github/workflows/alert-replay.yml`, plus line-ending churn on ~30 files) -- do not commit them blindly.
+- **Open for Ali:** (1) set `EXECUTION_ENABLED=false` in the PC `.env` (was `true`); (2) Fomo tab DNS fix (`fix_dns.bat`, checklist 11.6); (3) decide Upstash upgrade vs permanent local mode and fix/disable the GitHub replay workflow; (4) confirm which PC folder is the real S1c copy (several `gem-alert-s1c*` copies exist in Downloads).
+- Superseded docs removed Oct 9 (`NEXT_STEPS.md`, `TASKS_LEFT_*.md`, `FINAL_CHECKLIST_2026-09-27.md`); they remain in git history. `GO_LIVE_CHECKLIST.md` is the only live checklist.
 
 ## 0b. Oct 5 2026 incident -- Upstash free tier exhausted (READ THIS)
 - The free Upstash DB (500K commands/MONTH) hit its cap: 908K reads / 86K writes.

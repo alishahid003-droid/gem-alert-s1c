@@ -1,10 +1,9 @@
 # S1c — Go-Live & 80% Win-Rate Checklist (single source of truth)
 
-_Created Sept 30 2026. Every item has an OWNER and a DONE-WHEN. When an item
+_Created Sept 30 2026. Last reviewed Oct 9 2026 (no new work since Oct 6; see HANDOFF.md 0c). Every item has an OWNER and a DONE-WHEN. When an item
 is finished it is ticked `[x]` in the SAME commit that finished it, with the
 commit id. Nothing counts as done on "the code exists" alone — only on its
-DONE-WHEN being met. Older checklists (FINAL_CHECKLIST_2026-09-27.md,
-TASKS_LEFT_*.md, NEXT_STEPS.md) are history; this file supersedes them._
+DONE-WHEN being met. Older checklists were removed Oct 9 2026 (still in git history); this file supersedes them._
 
 Owners: **ALI** = needs you (money, keys, your PC, a decision) · **CLAUDE** = I build it · **BOTH** = I build, you run/confirm.
 
@@ -62,7 +61,7 @@ target is a number we measure against every week — not something assumed.
 - Paper ledger → dashboard Positions tab (by signal / chain / band / source incl. `moonshot`, `runner`).
 - First Telegram daily summary → confirms 5.6.
 
-**Superseded files (history only — don't work from them):** `FINAL_CHECKLIST_2026-09-27.md`, `TASKS_LEFT_*.md`, `NEXT_STEPS.md`.
+**Superseded files removed Oct 9 2026** (`FINAL_CHECKLIST_2026-09-27.md`, `TASKS_LEFT_*.md`, `NEXT_STEPS.md`); recover from git history only if needed.
 
 ---
 
