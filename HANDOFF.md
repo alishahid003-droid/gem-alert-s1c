@@ -17,6 +17,7 @@ then run the tests (`python -m pytest -q`, 778 pass)._
 - This is NOT a path to $90k by any near deadline. Honest, not hopeful.
 
 ## 0c. Status as of Oct 9 2026 (verified)
+- **Oct 9 (later):** Phase 9 buyer-quality layer built (`layers/layer15_buyer_quality.py`, entry-guard hooks, buyer archive, `backtest_buyer_signals.py`; 9.9 verdict INSUFFICIENT DATA until the archive fills). Fomo DNS fixed; Fomo now blocked by HTTP 402 (credits exhausted). 815 tests pass. Real money still OFF.
 - **Last real code/doc commit: Oct 6 2026 (`35e7ce6`).** Everything after it is the automatic daily `replay_results` commit (Oct 6, 7, 8). No new build work Oct 7-9.
 - **Real money still OFF. No proven edge.** Unchanged from section 0.
 - **GitHub Actions replay is blind:** the Oct 8 `replay_results/alerts-2026-10-08_1319Z.md` shows `UPSTASH BLOCKED -- max requests limit exceeded` and 0 alerts, because the GitHub Secrets still point at the exhausted Upstash DB. Daily replay results are empty until the Secrets are updated or the workflow is moved to local mode. These commits carry no information.
