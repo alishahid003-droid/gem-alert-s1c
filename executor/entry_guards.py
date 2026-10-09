@@ -13,6 +13,7 @@ already knows about the coin in `ctx`:
                   and (non-momentum only) 1-h change <= GUARD_MAX_H1_PCT.
   3.5 snipers     sniper/bundler share < GUARD_MAX_SNIPER_PCT when known.
   3.6 band        real money needs at least REAL_MONEY_MIN_BAND.
+  9.3/9.4         dev+sniper share < GUARD_MAX_DEV_SNIPER_PCT; bot_farm demand verdict blocks.
   3.1 confluence  optional (REQUIRE_CONFLUENCE=true): >= 2 independent signals.
 
 Unknown data never blocks (it's already weighed by the scorer's real-data
@@ -72,6 +73,14 @@ def check(score_band: Optional[str], position_usd: float, ctx: Optional[dict] = 
     sn = ctx.get("sniper_pct")
     if sn is not None and sn >= _f("GUARD_MAX_SNIPER_PCT", 0.25):
         return False, f"snipers/bundlers hold {sn * 100:.0f}%"
+
+    # 9.4 combined dev + sniper cap, 9.3 bot-farm demand (layers/layer15_buyer_quality.py)
+    dev = ctx.get("dev_pct")
+    if dev is not None and sn is not None:
+        if dev + sn >= _f("GUARD_MAX_DEV_SNIPER_PCT", 0.30):
+            return False, f"dev + snipers hold {(dev + sn) * 100:.0f}% (cap {_f('GUARD_MAX_DEV_SNIPER_PCT', 0.30) * 100:.0f}%)"
+    if ctx.get("demand_verdict") == "bot_farm":
+        return False, "buyers look like one bot farm (few funders / identical sizes)"
 
     if os.environ.get("REQUIRE_CONFLUENCE", "").strip().lower() == "true":
         if int(ctx.get("signals") or 1) < 2:

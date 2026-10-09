@@ -43,7 +43,11 @@ def test_preserve_tier_gates_on_conviction_score():
         assert bankroll_tier(w)["min_conviction_score"] == 0
 
 
-def test_default_50_wallet_sizes_at_the_real_seed_tier_rate():
+def test_default_50_wallet_sizes_at_the_real_seed_tier_rate(monkeypatch):
+    # The test machine's real .env sets TOTAL_WALLET_USD (e.g. 100); this test
+    # is about the code DEFAULT, so clear anything the environment sets.
+    for k in ("TOTAL_WALLET_USD", "STAGE1_POSITION_USD", "STAGE2_POSITION_USD"):
+        monkeypatch.delenv(k, raising=False)
     # Real starting capital is $50 (Ali), seed tier is 30% (Ali, Sept 23
     # 2026 -- bumped from 20%/$10 to 30%/$15, wants bigger per-trade
     # swings while there's little capital to protect yet).

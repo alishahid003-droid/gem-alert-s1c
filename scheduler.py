@@ -674,7 +674,7 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
                 convergence_count=0, entry_mcap=mc,
                 signal_coverage=getattr(sr, "signal_coverage", None),
                 liquidity_usd=(scored.get("raw") or {}).get("liquidity_usd"),
-                entry_ctx=_entry_ctx(scored),
+                entry_ctx=_with_demand(_entry_ctx(scored), chain, mint, deployer_wallet),
             )
         # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
         # 2026, Ali: "would these trades have been executed?") -- the real
@@ -1456,6 +1456,29 @@ def poll_layer13_fomo_copytrade() -> dict:
 LAYER2B_MAX_SIGNATURES_PER_CYCLE = 20  # honest call-budget cap -- see poll_layer2b docstring
 
 
+def _with_demand(ctx, chain, mint, deployer_wallet):
+    """Layer 15 (9.1-9.5): adds the buyer-quality verdict to the entry-guard ctx.
+    Only pump.fun/Solana mints we have archived buyers for get a verdict; otherwise
+    ctx is returned unchanged (unknown never blocks). Never raises."""
+    try:
+        if chain != "solana" or not mint:
+            return ctx
+        from layers.layer15_buyer_quality import assess_mint
+        from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
+        rep = state.get_deployer_reputation(deployer_wallet) if deployer_wallet else None
+        a = assess_mint(mint, get_smart_money_roster(), (ctx or {}).get("dev_pct"),
+                        (ctx or {}).get("sniper_pct"), rep)
+        if a:
+            ctx = dict(ctx or {})
+            ctx["demand_verdict"] = a["verdict"]
+            ctx["demand_score"] = a["score"]
+            print(f"[layer15] {mint[:8]} demand={a['verdict']} score={a['score']} ({'; '.join(a['reasons'])})")
+        return ctx
+    except Exception as e:
+        print(f"[layer15] demand check skipped: {e}")
+        return ctx
+
+
 def poll_layer2b_pumpfun_smart_money() -> dict:
     """One getSignaturesForAddress call against pump.fun's program, then up
     to LAYER2B_MAX_SIGNATURES_PER_CYCLE getTransaction calls to decode them
@@ -1498,6 +1521,11 @@ def poll_layer2b_pumpfun_smart_money() -> dict:
         if trade["direction"] == "buy":
             decoded_buys.append(trade)
 
+    try:  # 9.9: record who bought what so buyer signals can be back-tested later
+        from layers.layer15_buyer_quality import archive_buys
+        archive_buys(decoded_buys)
+    except Exception as e:
+        print(f"[layer15] buyer archive skipped: {e}")
     convergence_events = detect_pumpfun_convergence(decoded_buys) if decoded_buys else []
     single_events = single_wallet_buy_events(decoded_buys) if decoded_buys else []
     return {"ok": True, "checked": len(signatures), "decoded": len(decoded_buys),

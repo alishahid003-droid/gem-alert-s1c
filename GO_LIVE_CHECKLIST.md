@@ -213,9 +213,11 @@ miracle; it is the honest path to a system with a real chance over time.
       list of wallets that repeatedly bought early into coins that graduated,
       and alert/buy when ≥2 of them hit a fresh coin. Per-platform (Fomo list
       ≠ pump.fun list ≠ StonkFun list). DONE-WHEN: list exists, back-tested, wired.
+      **STATUS (Oct 9): CODE BUILT + TESTED, NOT PROVEN. layers/layer15_buyer_quality.smart_wallet_hits (>=2 roster wallets). Roster = 13 pump.fun wallets today. Not back-tested (see 9.9), so stays open. Per-platform lists for Fomo/StonkFun still to do.**
 - [ ] **9.2 CLAUDE** — **Distinct-buyer velocity.** Count UNIQUE buyer wallets in
       the first 2–5 min and whether the rate is accelerating — real demand, not
       total volume. DONE-WHEN: computed live + in the score.
+      **STATUS (Oct 9): CODE BUILT + TESTED. buyer_velocity (unique buyers, 1st vs 2nd half of 5 min) feeds the demand score; computed live from the buyer archive. Not proven to predict profit.**
 - [ ] **9.3 CLAUDE** — **Anti-bot / fake-traction filter (Ali's point).** A dev can
       run many wallets to fake "many buyers". Overcome it by FUNDING-SOURCE
       clustering: trace each buyer's funding wallet (Layer 10 already does
@@ -223,9 +225,12 @@ miracle; it is the honest path to a system with a real chance over time.
       sources) = organic; all tracing to 1–2 funders, brand-new wallets,
       identical buy sizes/timing = one bot farm → REJECT. DONE-WHEN: distinct-
       funder count + new-wallet ratio in the score, tested on known bot rugs.
+      **STATUS (Oct 9): CODE BUILT + TESTED on synthetic bot-farm / organic cases. Uses Layer 10 first-funder (cached, 8 fresh RPC lookups/call). NOT yet tested on real known bot rugs; thresholds are first-pass guesses. A bot_farm verdict BLOCKS the buy in executor/entry_guards.**
 - [ ] **9.4 CLAUDE** — **Dev/sniper concentration cap.** Reject when dev + first
       bundles hold > ~20–30% (built to dump). DONE-WHEN: enforced + tested.
+      **STATUS (Oct 9): CODE BUILT + TESTED. entry_guards blocks when dev% + sniper% >= GUARD_MAX_DEV_SNIPER_PCT (0.30). Only active when both values are in the entry ctx; the scheduler does not pass dev% into ctx yet, so today only the older sniper-only guard (3.5) is live.**
 - [ ] **9.5 CLAUDE** — **Deployer track record** (have it, Layer 1) — weight it more.
+      **STATUS (Oct 9): CODE BUILT + TESTED. deployer_weight adds/subtracts demand-score points from state.get_deployer_reputation.**
 - [ ] **9.6 ALI decide** — **Narrative / attention (X, call channels).** Memecoins
       run on attention; we have almost none. Needs a social data source. Big
       lift, deferred.
@@ -264,6 +269,7 @@ is a build of days–weeks, not a 24-hour fix.
 
 Cause: the free DB hit 500K commands/month (908K reads); Upstash then rejects every call (HTTP 400), reads look empty, dashboard blank, nothing recorded. Code fix shipped in `f741699` (read cache, quota guard, buy refusal while blocked, throttled cycles, lighter dashboard). These remain:
 
+      **STATUS (Oct 9): TOOL BUILT (backtest_buyer_signals.py), RESULT: INSUFFICIENT DATA. The old launch archive (202 rows) has no buyers/outcomes, so nothing can be tested yet. The pump.fun poller now archives buyers (state key buyer_archive); rerun after a few days. Needs 40+ coins; judges only the unseen half.**
 - [ ] **10.1 ALI** — Restore the data store: create a NEW free Upstash DB (or upgrade); put its REST URL + token in the PC `.env` (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`) AND the two GitHub Secrets of the same names; run `update.bat`. DONE-WHEN: dashboard System tab shows all 4 runners fresh and no "DATA STORE BLOCKED" banner. If Upstash refuses a 2nd free DB -> **CLAUDE** builds the local-file mode (discovery on the PC, no Upstash).
 - [ ] **10.2 ALI** — Real-money switch: PC `.env` showed `EXECUTION_ENABLED=true` + `EXECUTION_SOLANA_PRIVATE_KEY` set, contradicting "real money OFF". Confirm it was deliberate and tell Claude the wallet balance, or set `EXECUTION_ENABLED=false` and run `restart_fast_watch.bat`. DONE-WHEN: decision logged here.
 - [ ] **10.3 BOTH** — Run the two never-run replays: GitHub Actions -> "Alert replay" -> source `fomo`, then source `launches` (daily scheduled replay already runs; Oct 1–4 succeeded but Claude cannot read the log). DONE-WHEN: results pasted/saved and Phase 9 direction chosen from them.
