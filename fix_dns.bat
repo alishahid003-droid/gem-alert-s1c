@@ -7,7 +7,7 @@ if %errorlevel% neq 0 (
   pause
   exit /b 1
 )
-powershell -NoProfile -Command "Get-NetAdapter | Where-Object Status -eq Up | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses (1.1.1.1,8.8.8.8); Write-Host (DNS set on:  + $_.Name) }"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fix_dns.ps1"
 ipconfig /flushdns
 echo.
 echo Testing the Fomo API host:
