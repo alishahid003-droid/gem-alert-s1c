@@ -254,6 +254,9 @@ miracle; it is the honest path to a system with a real chance over time.
       Robinhood-chain RPC/websocket or indexer for the same 9.1–9.3 signals.
       Separate build; defer until the Solana path is proven.
 
+### 9D — Rug-check filters from the Oct 12 review (Google AI rug-pull checklist)
+- [x] **9.10 CLAUDE** — Mapped each check to what S1c does. LP burned/locked: already scored (layer0, LP lock = >=50% of LP locked/burned; the guide's stricter 95% is NOT enforced). Honeypot/mint/freeze: already scored via GoPlus/MadeOnSol (Solana RugCheck not integrated). Dev-funded wash trading / one master funder: Layer 15 (9.3), pump.fun archive only. **Liquidity-to-market-cap ratio: was MISSING, added Oct 12** (`layer0_scoring.liq_mcap_check`): liquidity < 1% of mcap (mcap >= $250k) forces band D; < 2% (mcap >= $1M) demotes band A to B; skipped when data is unknown and on pump.fun curve coins. Thresholds are a rule of thumb, NOT measured on our data; env: LIQ_MCAP_MIN_MCAP / LIQ_MCAP_KILL_RATIO / LIQ_MCAP_CAP_RATIO. 4 new tests, 819 pass.
+
 ### 9C — Prove it before a cent
 - [ ] **9.9 CLAUDE** — Back-test 9.1–9.4 on the launch archive (`--source
       launches`) and the Fomo archive (`--source fomo`) before any real money.

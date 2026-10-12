@@ -25,6 +25,7 @@ docs.mobula.io as of Sep 2026).
 """
 from dataclasses import dataclass
 from typing import List, Optional, Literal, Tuple
+import os
 import time
 
 from config import CONFIG
@@ -49,6 +50,7 @@ class RawSignals:
     bundler_sniper_pct: Optional[float] = None         # 0-1, lower is better
     price_drawdown_from_peak_pct: Optional[float] = None  # Birdeye real launch-window shape, e.g. -80.0 = -80% off peak; None if unavailable/RHC
     liquidity_usd: Optional[float] = None
+    mcap_usd: Optional[float] = None                   # market cap (or FDV) in USD -- for the liquidity/mcap ratio check
     is_pregraduation_solana: bool = False
     # DexScreener real txn-count activity-decay ratio (added Sept 30 2026,
     # checklist item C) -- h1 tx rate / 24h-average tx rate. 1.0 = steady
@@ -90,6 +92,33 @@ TYPICAL_POSITION_USD = 500.0
 # else, per spec.
 PREGRAD_SOL_BANDS = {"A": 80, "B": 65, "C": 45}   # else D
 GRADUATED_OR_OTHER_BANDS = {"A": 70, "B": 50, "C": 30}  # else D
+
+
+def liq_mcap_check(liquidity_usd, mcap_usd, is_pregraduation: bool = False):
+    """Liquidity-to-market-cap ratio (Oct 12 2026, rug-pull 'fake liquidity' check).
+    A coin with a big market cap but a tiny pool cannot be sold into: the cap is
+    an artifact of one small buy at a high price. Returns (ratio, verdict) with
+    verdict in {"ok", "thin", "fake", "n/a"}:
+      fake  ratio < LIQ_MCAP_KILL_RATIO (default 1%)  and mcap >= LIQ_MCAP_MIN_MCAP -> band D
+      thin  ratio < LIQ_MCAP_CAP_RATIO  (default 2%)  and mcap >= $1M -> band capped at B
+    HONEST BASIS: the 1% / 2% figures are a rule of thumb from general rug-check
+    guidance ("a $10M coin with under $100k liquidity: avoid"), NOT measured on this
+    system's data. They only ever move a band DOWN, never on missing data, and never
+    on pump.fun bonding-curve coins (their 'liquidity' is virtual). Env-tunable."""
+    if is_pregraduation or not liquidity_usd or not mcap_usd or mcap_usd <= 0:
+        return None, "n/a"
+    def _f(k, d):
+        try:
+            v = os.environ.get(k, "").strip()
+            return float(v) if v else d
+        except ValueError:
+            return d
+    ratio = liquidity_usd / mcap_usd
+    if mcap_usd >= _f("LIQ_MCAP_MIN_MCAP", 250_000) and ratio < _f("LIQ_MCAP_KILL_RATIO", 0.01):
+        return ratio, "fake"
+    if mcap_usd >= 1_000_000 and ratio < _f("LIQ_MCAP_CAP_RATIO", 0.02):
+        return ratio, "thin"
+    return ratio, "ok"
 
 
 def score_token(sig: RawSignals) -> ScoreResult:
@@ -322,6 +351,19 @@ def score_token(sig: RawSignals) -> ScoreResult:
                             f"-- band {band} -> D")
             band = "D"
 
+    # Liquidity-to-market-cap override (Oct 12 2026) -- see liq_mcap_check's
+    # docstring. Down-only, skipped on unknown data and on bonding-curve coins.
+    _ratio, _verdict = liq_mcap_check(sig.liquidity_usd, sig.mcap_usd, sig.is_pregraduation_solana)
+    if _verdict == "fake" and band != "D":
+        reasons.append(f"OVERRIDE: liquidity is only {_ratio*100:.2f}% of market cap "
+                       f"(${sig.liquidity_usd:,.0f} vs ${sig.mcap_usd:,.0f}) -- cap is not sellable -- band {band} -> D")
+        band = "D"
+    elif _verdict == "thin" and band == "A":
+        reasons.append(f"GATE: liquidity only {_ratio*100:.2f}% of market cap -- band A -> B")
+        band = "B"
+    elif _ratio is not None:
+        reasons.append(f"liquidity/mcap {_ratio*100:.1f}%")
+
     # Multi-signal agreement gate for band A, added Sept 29 2026 (Ali's
     # "80%+ precision" push, checklist item #2). Real failure mode this
     # closes: a blended average score can clear band A off several
@@ -380,7 +422,8 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
                                  goplus_lp_locked: Optional[bool] = None,
                                  price_drawdown_from_peak_pct: Optional[float] = None,
                                  rpc_top10_holder_pct: Optional[float] = None,
-                                 txn_activity_decay_ratio: Optional[float] = None) -> RawSignals:
+                                 txn_activity_decay_ratio: Optional[float] = None,
+                                 mcap_usd: Optional[float] = None) -> RawSignals:
     """risk_json from GET /tokens/{mint}/risk, holders_json from
     /tokens/{mint}/holders, bundle_json from /tokens/{mint}/bundle.
 
@@ -460,6 +503,7 @@ def signals_from_madeonsol_risk(risk_json: dict, holders_json: dict, bundle_json
         bundler_sniper_pct=(bundle_json.get("bundle", {}) or {}).get("held_pct_of_supply") if bundle_json else None,
         price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
         liquidity_usd=liquidity_usd,
+        mcap_usd=mcap_usd,
         is_pregraduation_solana=is_pregraduation,
         txn_activity_decay_ratio=txn_activity_decay_ratio,
     )
@@ -666,7 +710,12 @@ def fetch_dexscreener_vol_liq(chain: str, address: str) -> dict:
     if isinstance(h24, dict) and h24.get("buys") is not None and h24.get("sells") is not None:
         txns_h24_total = h24["buys"] + h24["sells"]
 
-    return {"ok": True, "volume_24h": volume_24h, "liquidity_usd": liquidity_usd,
+    mcap_raw = best.get("marketCap") if best.get("marketCap") is not None else best.get("fdv")
+    try:
+        mcap_usd = float(mcap_raw) if mcap_raw is not None else None
+    except (TypeError, ValueError):
+        mcap_usd = None
+    return {"ok": True, "volume_24h": volume_24h, "liquidity_usd": liquidity_usd, "mcap_usd": mcap_usd,
             "launch_ts_ms": launch_ts_ms, "txns_h1_total": txns_h1_total,
             "txns_h24_total": txns_h24_total}
 
@@ -982,6 +1031,7 @@ def signals_from_mobula_pulse(pulse_item: dict, chain: str = None,
         holder_growth_rate_per_hr=holder_growth_rate_per_hr,
         bundler_sniper_pct=bundler_sniper_pct,
         liquidity_usd=pulse_item.get("liquidity"),
+        mcap_usd=pulse_item.get("marketCap") or pulse_item.get("market_cap"),
         is_pregraduation_solana=False,
     )
 
@@ -1754,6 +1804,7 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
         holder_growth_rate_per_hr=holder_growth_rate_per_hr,
         bundler_sniper_pct=None,  # no sniper/bundler-wallet signal in either GeckoTerminal or GoPlus
         liquidity_usd=item.get("liquidity_usd"),
+        mcap_usd=item.get("market_cap_usd") or item.get("fdv_usd"),
         is_pregraduation_solana=False,
         price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
         txn_activity_decay_ratio=compute_activity_decay_ratio(item.get("txns_h1_total"),
@@ -1913,9 +1964,11 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
     # vol_to_liq_ratio/liquidity_usd at None exactly as before this existed.
     vol_to_liq_ratio = None
     liquidity_usd = None
+    dex_mcap_usd = None
     dex = fetch_dexscreener_vol_liq(chain, mint)
     if dex.get("ok"):
         liquidity_usd = dex["liquidity_usd"]
+        dex_mcap_usd = dex.get("mcap_usd")
         if liquidity_usd:
             vol_to_liq_ratio = dex["volume_24h"] / liquidity_usd
 
@@ -1998,6 +2051,7 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
         price_drawdown_from_peak_pct=price_drawdown_from_peak_pct,
         rpc_top10_holder_pct=rpc_top10_holder_pct,
         txn_activity_decay_ratio=txn_activity_decay_ratio,
+        mcap_usd=dex_mcap_usd,
     )
     return {"chain": chain, "address": mint, "score": score_token(sig)}
 

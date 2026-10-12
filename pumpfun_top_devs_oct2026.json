@@ -1,0 +1,206 @@
+{
+ "source": "Social-media post by 'cryptoaxe' (screenshot, slide 2/3 'The real winners this cycle weren't traders. It was devs'), captured Oct 10 2026",
+ "status": "UNVERIFIED claims from a screenshot. Addresses were transcribed by Claude from an image; PnL/deploy numbers are the poster's, not checked. Run verify_dev_wallets.py before use.",
+ "wallets": [
+  {
+   "address": "bwamJzztZsepfkteWRChggmXuiiCQvpLqPietdNfSXa",
+   "claimed_pnl_usd": 34782510,
+   "claimed_deploys": 171195,
+   "claimed_graduated": 1749,
+   "best_token": "COPPERINU",
+   "best_token_ath": "18.5M"
+  },
+  {
+   "address": "whamNNP9tHoxLg92yHvJPdYhghEoCg1qYTsh5a2oLbx",
+   "claimed_pnl_usd": 9688472,
+   "claimed_deploys": 27103,
+   "claimed_graduated": 404,
+   "best_token": "ZIGGY",
+   "best_token_ath": "2.1M"
+  },
+  {
+   "address": "7naFFwuEJWeWwWYQUkgAWHsxYKg3KctEuUj42JdAMidP",
+   "claimed_pnl_usd": 8364806,
+   "claimed_deploys": 25215,
+   "claimed_graduated": 242,
+   "best_token": "EAGLE",
+   "best_token_ath": "3.5M"
+  },
+  {
+   "address": "GpTXmkdvrTajqkzX1fBmC4BUjSboF9dHgfnqPqj8WAc4",
+   "claimed_pnl_usd": 7988459,
+   "claimed_deploys": 28632,
+   "claimed_graduated": 242,
+   "best_token": "ICM",
+   "best_token_ath": "1.9M"
+  },
+  {
+   "address": "5FqUo9aBjsp7QeeyN6Vi2ZmF2fjS4H5EU7wnAQwPy17z",
+   "claimed_pnl_usd": 7866591,
+   "claimed_deploys": 23104,
+   "claimed_graduated": 247,
+   "best_token": "ALOKA",
+   "best_token_ath": "1.8M"
+  },
+  {
+   "address": "8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP",
+   "claimed_pnl_usd": 7342072,
+   "claimed_deploys": 16683,
+   "claimed_graduated": 281,
+   "best_token": "SC",
+   "best_token_ath": "16.3M"
+  },
+  {
+   "address": "AV7PjXHL5JXZ1YoYRoN9Dsstg1x2UciBupMCXcJP8gUz",
+   "claimed_pnl_usd": 6430238,
+   "claimed_deploys": 20002,
+   "claimed_graduated": 378,
+   "best_token": "SI",
+   "best_token_ath": "825K"
+  },
+  {
+   "address": "D9gQ6RhKEpnobPBUdWY5bPQt2p3zGk3iVz6ChpUi2ArA",
+   "claimed_pnl_usd": 4890274,
+   "claimed_deploys": 22392,
+   "claimed_graduated": 448,
+   "best_token": "CATE",
+   "best_token_ath": "122M"
+  },
+  {
+   "address": "EBx24uAPtaS1SvHwRhKEktSgzaXdiVEyHuSVpAMVwrcD",
+   "claimed_pnl_usd": 4437301,
+   "claimed_deploys": 17083,
+   "claimed_graduated": 158,
+   "best_token": "TRUMP2028",
+   "best_token_ath": "1.1M"
+  },
+  {
+   "address": "Aqje5DsN4u2PHmQxGF9PKfpsDGwQRCBhWeLKHCFhSMXk",
+   "claimed_pnl_usd": 3467200,
+   "claimed_deploys": 29675,
+   "claimed_graduated": 239,
+   "best_token": "7",
+   "best_token_ath": "3.9M"
+  },
+  {
+   "address": "8i5U2uNBEuTc4zskYP14zbebDg2RSwrrG8REhEnJb97K",
+   "claimed_pnl_usd": 3338923,
+   "claimed_deploys": 17192,
+   "claimed_graduated": 286,
+   "best_token": "MEMELESS",
+   "best_token_ath": "3.6M"
+  },
+  {
+   "address": "GdRSPexhxbQz5H2zFQrNN2BAZUqEjAULBigTPvQ6oDMP",
+   "claimed_pnl_usd": 3192016,
+   "claimed_deploys": 14717,
+   "claimed_graduated": 217,
+   "best_token": "Prometheus",
+   "best_token_ath": "1.3M"
+  },
+  {
+   "address": "8NJ7Ujpji8uMF2675mqaTSEm2DCbfJA7fiRKtiaqkaLN",
+   "claimed_pnl_usd": 3178124,
+   "claimed_deploys": 23390,
+   "claimed_graduated": 213,
+   "best_token": "Skyline",
+   "best_token_ath": "493K"
+  },
+  {
+   "address": "GeUnv1jmtviRbR7Gu1JnXSGkUMUgFVBHuEVQVpTaUX1W",
+   "claimed_pnl_usd": 3157532,
+   "claimed_deploys": 13477,
+   "claimed_graduated": 80,
+   "best_token": "nothing",
+   "best_token_ath": "1.4M"
+  },
+  {
+   "address": "DC99qH3jXiq5pPWQd6PjjJcCxTV593s58CLPxWGpEywt",
+   "claimed_pnl_usd": 2657204,
+   "claimed_deploys": 14932,
+   "claimed_graduated": 116,
+   "best_token": "BAAD",
+   "best_token_ath": "29.1M"
+  },
+  {
+   "address": "GZVSEAajExLJEvACHHQcujBw7nJq98GWUEZtood9LM9b",
+   "claimed_pnl_usd": 2410753,
+   "claimed_deploys": 26041,
+   "claimed_graduated": 287,
+   "best_token": "GOR",
+   "best_token_ath": "54M"
+  },
+  {
+   "address": "7GhWwhaMgbKiRWxF93Bud6HnHMci6NCLTJyTxG8zFH51",
+   "claimed_pnl_usd": 2246407,
+   "claimed_deploys": 28094,
+   "claimed_graduated": 186,
+   "best_token": "MACROHARD",
+   "best_token_ath": "5.3M"
+  },
+  {
+   "address": "G7NvZKjoVqBDWciSYtWWgUPB7DA1iJavdvH5jty2FAmM",
+   "claimed_pnl_usd": 2079861,
+   "claimed_deploys": 28692,
+   "claimed_graduated": 183,
+   "best_token": "Memes",
+   "best_token_ath": "2.1M"
+  },
+  {
+   "address": "MNhBbrscBPmeid54buiqSgyWa4D8PY6uKHoK2wJsTJN",
+   "claimed_pnl_usd": 1917574,
+   "claimed_deploys": 44567,
+   "claimed_graduated": 370,
+   "best_token": "trump pig",
+   "best_token_ath": "16M"
+  },
+  {
+   "address": "B9Zbs2W9VK22AHnCWiK4PqBueDFzN17RNAFu5uFozLMJ",
+   "claimed_pnl_usd": 1782513,
+   "claimed_deploys": 22614,
+   "claimed_graduated": 163,
+   "best_token": "AP",
+   "best_token_ath": "18M"
+  },
+  {
+   "address": "36DWP52MVRDooYNrcRVDyoCh2R1fPXCYqKJQYg9pFQoE",
+   "claimed_pnl_usd": 1551200,
+   "claimed_deploys": 28304,
+   "claimed_graduated": 227,
+   "best_token": "TD",
+   "best_token_ath": "31M"
+  },
+  {
+   "address": "83QQFLxcEzuJZaejBnzAiW5tyfyaRHMLZnkhJbRPRWtf",
+   "claimed_pnl_usd": 1446522,
+   "claimed_deploys": 26369,
+   "claimed_graduated": 213,
+   "best_token": "LIGMA",
+   "best_token_ath": "327M"
+  },
+  {
+   "address": "5Hyf6srdbrrD1HLjqxcFbXJRFBHgnwoZc7aZRj8vDuk5",
+   "claimed_pnl_usd": 1358770,
+   "claimed_deploys": 22719,
+   "claimed_graduated": 124,
+   "best_token": "suchir",
+   "best_token_ath": "1.3M"
+  },
+  {
+   "address": "D3sovmjANgA8V27e5rnQft8kV3mocSH8gw9zwth3Ba9g",
+   "claimed_pnl_usd": 1321579,
+   "claimed_deploys": 36003,
+   "claimed_graduated": 129,
+   "best_token": "SOL$120",
+   "best_token_ath": "44.1M"
+  },
+  {
+   "address": "6d22FozaKK239PoBYVffkYKA1QPQZE8fC7AQkpmHQfjp",
+   "claimed_pnl_usd": 1285701,
+   "claimed_deploys": 32775,
+   "claimed_graduated": 158,
+   "best_token": "rudi",
+   "best_token_ath": "16.2M"
+  }
+ ]
+}
