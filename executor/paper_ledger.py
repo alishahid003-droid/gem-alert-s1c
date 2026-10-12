@@ -174,6 +174,7 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
 
 
 EARLY_RULES = {
+    "sprint": ({2: 0.35, 4: 0.30, 10: 0.20}, 0.55, 0.55),
     # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
     "core2": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.55),
     "core1": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),

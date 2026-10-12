@@ -3,8 +3,9 @@ timeline (where it has one), and its own stake sizing (Ali, Oct 12 2026:
 "balance is split ... each runs on its own pace and compounds on its own
 balance toward its target").
 
-  core1     moonshot book  $100 -> $125,000 in ~60 days   (CORE1_*)
-  core2     moonshot book  $100 -> $1,000,000 in ~150 days (CORE2_*, stretch $1.5M)
+  sprint    moonshot book  $100 -> $10,000 in 96 hours     (SPRINT_*)  [Ali Oct 13: first target once live]
+  core1     moonshot book  $100 -> $125,000 in ~30 days    (CORE1_*)
+  core2     moonshot book  $100 -> $1,000,000 in ~180 days (CORE2_*, stretch $1.5M)
   compound  daily-profit book: small steady gains, daily goal (COMPOUND_DAILY_GOAL_PCT)
   fomo_followers / fomo_new / leaderboard / dev_list: copy books, no target, own P&L
 
@@ -23,10 +24,12 @@ BOOKS_KEY = "books_v1"
 
 # id -> defaults. seed/target/days overridable via env <ID>_SEED_USD etc.
 BOOKS: Dict[str, dict] = {
-    "core1": {"name": "Core 1", "kind": "moonshot", "seed": 100.0, "target": 125_000.0, "days": 60.0,
-              "shot_pct": 0.20, "max_share": 0.35},
-    "core2": {"name": "Core 2", "kind": "moonshot", "seed": 100.0, "target": 1_000_000.0, "days": 150.0,
-              "shot_pct": 0.10, "max_share": 0.25},
+    "sprint": {"name": "Sprint 96h", "kind": "moonshot", "seed": 100.0, "target": 10_000.0, "days": 4.0,
+               "shot_pct": 0.30, "max_share": 0.45, "bank_pct": 0.20},
+    "core1": {"name": "Core 1", "kind": "moonshot", "seed": 100.0, "target": 125_000.0, "days": 30.0,
+              "shot_pct": 0.20, "max_share": 0.35, "bank_pct": 0.25},
+    "core2": {"name": "Core 2", "kind": "moonshot", "seed": 100.0, "target": 1_000_000.0, "days": 180.0,
+              "shot_pct": 0.10, "max_share": 0.25, "bank_pct": 0.25},
     "compound": {"name": "Compound", "kind": "daily", "seed": 100.0, "target": None, "days": None,
                  "shot_pct": 0.50, "max_share": 0.60, "daily_goal_pct": 5.0},
     "fomo_followers": {"name": "Fomo Followers", "kind": "copy", "seed": 50.0, "target": None, "days": None,
@@ -59,6 +62,7 @@ def cfg(book_id: str) -> dict:
         b["target"] = _f(f"{p}_TARGET_USD", b["target"])
         b["days"] = _f(f"{p}_DAYS", b["days"])
         b["shot_pct"] = _f(f"{p}_SHOT_PCT", b["shot_pct"])
+    b["bank_pct"] = _f(f"{p}_BANK_PCT", b.get("bank_pct", 0.30 if b["kind"] == "daily" else 0.0))
     if b["kind"] == "daily":
         b["daily_goal_pct"] = _f("COMPOUND_DAILY_GOAL_PCT", b["daily_goal_pct"])
     return b
@@ -73,9 +77,23 @@ def realized_pnl(book_id: str) -> float:
     return round(sum(float(r.get("pnl_usd") or 0.0) for r in _rows(book_id)), 2)
 
 
-def equity(book_id: str) -> float:
-    """Book balance: seed + realized paper P&L (never below 0)."""
+def total_value(book_id: str) -> float:
+    """Everything the book has made: seed + realized paper P&L (trading balance + banked vault)."""
     return max(0.0, round(cfg(book_id)["seed"] + realized_pnl(book_id), 2))
+
+
+def banked(book_id: str) -> float:
+    """Profit taken OUT of play (the vault). Once realized profit passes BANK_AFTER_MULT x seed
+    (default 3x), bank_pct of the profit above that line is locked away and no longer staked.
+    Stateless: derived from realized P&L, so it never gets out of sync."""
+    c = cfg(book_id)
+    line = float(os.environ.get("BANK_AFTER_MULT", "3")) * c["seed"]
+    return round(max(0.0, (c.get("bank_pct") or 0.0) * (realized_pnl(book_id) - line)), 2)
+
+
+def equity(book_id: str) -> float:
+    """TRADING balance (staked from): total value minus the banked vault."""
+    return max(0.0, round(total_value(book_id) - banked(book_id), 2))
 
 
 def _start(book_id: str, now: float) -> float:
@@ -91,7 +109,7 @@ def pace(book_id: str, now: Optional[float] = None, eq: Optional[float] = None) 
     """Target progress for a book that has one: path_now, on_pace, needed daily growth."""
     now = now if now is not None else time.time()
     c = cfg(book_id)
-    eq = equity(book_id) if eq is None else eq
+    eq = total_value(book_id) if eq is None else eq      # progress counts banked profit too
     if not c.get("target") or not c.get("days"):
         return {"has_target": False}
     start_ts = _start(book_id, now)
@@ -148,7 +166,7 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
             if eq >= lo:
                 floor = usd
         base = max(base, min(floor, eq * c["max_share"]))
-        p = pace(book_id, now, eq)
+        p = pace(book_id, now)
         r = p.get("ratio_to_path")
         if r is not None and r < 0.75:
             base *= 1.25
@@ -180,9 +198,10 @@ def status(book_id: str, now: Optional[float] = None) -> dict:
     c = cfg(book_id)
     eq = equity(book_id)
     out = {"id": book_id, "name": c["name"], "kind": c["kind"], "seed": c["seed"], "equity": eq,
+           "banked": banked(book_id), "total_value": total_value(book_id),
            "realized_pnl": realized_pnl(book_id), "open": open_count(book_id),
            "stake_next": stake_usd(book_id, now), "max_open": max_open(book_id, eq)}
-    out.update(pace(book_id, now, eq))
+    out.update(pace(book_id, now))
     if c["kind"] == "daily":
         goal = round(eq * c["daily_goal_pct"] / 100.0, 2)
         today = daily_pnl(book_id, now)
@@ -194,7 +213,7 @@ def status(book_id: str, now: Optional[float] = None) -> dict:
 def line(book_id: str) -> str:
     s = status(book_id)
     if s.get("has_target"):
-        return (f"{s['name']}: ${s['equity']:,.2f} of ${s['target']:,.0f} (day {s['elapsed_days']:.0f}/{s['days']:.0f}, "
+        return (f"{s['name']}: ${s['total_value']:,.2f} (vault ${s['banked']:,.2f}) of ${s['target']:,.0f} (day {s['elapsed_days']:.0f}/{s['days']:.0f}, "
                 f"{'ahead of' if s['on_pace'] else 'behind'} path ${s['path_now']:,.2f}, needs +{s['needed_daily_growth_pct']}%/day)")
     if s["kind"] == "daily":
         return f"{s['name']}: ${s['equity']:,.2f}, today {s['today_pnl']:+.2f} vs goal {s['daily_goal_usd']:+.2f}"

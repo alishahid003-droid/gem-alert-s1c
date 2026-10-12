@@ -11,11 +11,14 @@ from typing import Dict, List, Optional
 # id -> definition. Order = display order on the dashboard.
 MODULES: List[Dict] = [
     # ---- trading books (own balance) ----
+    {"id": "sprint", "kind": "book", "emoji": "⚡", "short": "SPRINT 96H", "name": "Sprint 96h — $100 → $10,000",
+     "blurb": "Most aggressive compounding book: takes the strongest early entries with bigger stakes, banks 20% of profit above 3x, reinvests the rest. 4-day target.",
+     "layers": ["early_sprint"], "sources": ["early_sprint"], "signals": []},
     {"id": "core1", "kind": "book", "emoji": "🚀", "short": "CORE 1", "name": "Moonshot Core 1 — $100 → $125K",
-     "blurb": "Early-entry moonshot book (first ~20 min of a launch, >= 2 confirmations): 10x-50x plays, runners ride. ~60-day target.",
+     "blurb": "Early-entry moonshot book (first ~20 min of a launch, >= 2 confirmations): 10x-50x plays, runners ride. ~30-day target.",
      "layers": ["layer15_core1", "early_core1"], "sources": ["core1", "early_core1"], "signals": []},
     {"id": "core2", "kind": "book", "emoji": "🌙", "short": "CORE 2", "name": "Moonshot Core 2 — $100 → $1M-$1.5M",
-     "blurb": "Pre-early moonshot book: first minutes of a launch, small shots, 100x+ potential, runners ride. ~150-day target.",
+     "blurb": "Pre-early moonshot book: first minutes of a launch, small shots, 100x+ potential, runners ride. ~180-day target.",
      "layers": ["layer15_core2", "layer15_moonshot", "early_core2"], "sources": ["core2", "moonshot", "early_core2"], "signals": []},
     {"id": "compound", "kind": "book", "emoji": "💰", "short": "COMPOUND", "name": "Compound Aggregator — daily profit",
      "blurb": "Daily-profit book: also enters EARLY (strong-evidence launches), takes 2x-10x profits quickly, compounds every day.",

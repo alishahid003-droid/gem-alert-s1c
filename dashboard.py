@@ -474,7 +474,7 @@ def _module_cards(feed: list, fomo_signals: list, fomo_candidates: list, board: 
                 "paper_open": paper.get("open", 0), "paper_n": st.get("n", 0), "paper_wins": st.get("wins", 0),
                 "paper_win_rate": st.get("win_rate"), "paper_pnl_usd": st.get("total_pnl_usd"),
                 "real": (board_by.get(mid) or {}).get("real"), "status": (board_by.get(mid) or {}).get("status")}
-        if mid in ("core1", "core2", "compound", "dev_list", "leaderboard"):
+        if mid in ("sprint", "core1", "core2", "compound", "dev_list", "leaderboard"):
             card["status"] = card["status"] or early_txt
         cards.append(card)
     return cards
@@ -1108,7 +1108,7 @@ function render(data) {
       </div>
       ${c.status ? `<div class="mstatus">${esc(c.status)}</div>` : ''}
       ${c.wait ? `<div class="mstatus">${esc(c.wait)}</div>` : ''}
-      ${c.book ? `<div class="mbook">Balance <b>$${Number(c.book.equity).toLocaleString(undefined,{maximumFractionDigits:2})}</b> (seed $${c.book.seed})
+      ${c.book ? `<div class="mbook">Balance <b>$${Number(c.book.equity).toLocaleString(undefined,{maximumFractionDigits:2})}</b> (seed $${c.book.seed}) &middot; vault <b>$${Number(c.book.banked||0).toLocaleString(undefined,{maximumFractionDigits:2})}</b> &middot; total <b>$${Number(c.book.total_value||c.book.equity).toLocaleString(undefined,{maximumFractionDigits:2})}</b>
         ${c.book.has_target ? ` &middot; target <b>$${Number(c.book.target).toLocaleString()}</b> &middot; day <b>${c.book.elapsed_days}/${c.book.days}</b> &middot; ${c.book.on_pace ? '<span class="pos-pnl">ahead of path</span>' : '<span class="neg-pnl">behind path</span>'} ($${Number(c.book.path_now).toLocaleString()}) &middot; needs <b>+${c.book.needed_daily_growth_pct}%/day</b>` : ''}
         ${c.book.daily_goal_usd !== undefined ? ` &middot; today <b>${c.book.today_pnl >= 0 ? '+' : ''}$${c.book.today_pnl}</b> vs goal $${c.book.daily_goal_usd} ${c.book.goal_hit ? '<span class="pos-pnl">hit</span>' : ''}` : ''}
         &middot; next stake <b>$${c.book.stake_next}</b></div>` : ''}

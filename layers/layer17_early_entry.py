@@ -197,6 +197,8 @@ class EarlyTracker:
             lanes.append("core2")
         elif age <= c1_age and r.mcap_sol <= c1_mc and len(conf) >= 2:
             lanes.append("core1")
+        if ("core1" in lanes or "core2" in lanes) and age <= _f("EARLY_SPRINT_MAX_AGE_S", 600):
+            lanes.append("sprint")           # same strong early entry also feeds the 96-hour compounding book
         if len(conf) >= 3 and r.mcap_sol <= _f("EARLY_COMPOUND_MAX_MCAP_SOL", 90):
             lanes.append("compound")         # strong evidence: also a quick-profit position
         if not lanes and conf == ["smart_wallet"] and age >= _f("EARLY_LEADERBOARD_AFTER_S", 60) \

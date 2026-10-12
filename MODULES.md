@@ -6,8 +6,9 @@ Telegram alerts start with the module label; dashboard **Modules** tab = one car
 ## Books (each has its own balance; real money stays OFF, all paper)
 | Book | Seed | Target | Window | What goes in |
 |---|---|---|---|---|
-| 🚀 Core 1 | $100 | $125,000 (`CORE1_TARGET_USD`) | 60 d (`CORE1_DAYS`) | early moonshots: first ~20 min of a launch, >= 2 confirmations (10x-50x) |
-| 🌙 Core 2 | $100 | $1,000,000 (`CORE2_TARGET_USD`, stretch $1.5M) | 150 d (`CORE2_DAYS`) | pre-early: first ~4 min of a launch, >= 2 confirmations (100x+) |
+| ⚡ Sprint 96h | $100 | $10,000 (`SPRINT_TARGET_USD`) | 4 d (`SPRINT_DAYS`) | strongest early entries (same signals as Core 1/2), bigger stakes, 35/30/20% take-profits at 2x/4x/10x, banks 20% above 3x |
+| 🚀 Core 1 | $100 | $125,000 (`CORE1_TARGET_USD`) | 30 d (`CORE1_DAYS`) | early moonshots: first ~20 min of a launch, >= 2 confirmations (10x-50x) |
+| 🌙 Core 2 | $100 | $1,000,000 (`CORE2_TARGET_USD`, stretch $1.5M) | 180 d (`CORE2_DAYS`) | pre-early: first ~4 min of a launch, >= 2 confirmations (100x+) |
 | 💰 Compound | $100 | daily goal 5%/day (`COMPOUND_DAILY_GOAL_PCT`) | daily | 2x-13x swings: band A/B, momentum, listing-ladder pops |
 | 🏆 Leaderboard Copy | $50 | none | - | pump.fun/StonkFun/tracked-wallet copies |
 | 👥 Fomo Followers | $50 | none | - | followed traders' buys, convergence |
@@ -33,3 +34,10 @@ Market cap is NOT how a coin picks a book. Every book enters EARLY; they differ 
 - 🧭 Context: news, buzz, mega-alerts (a view).
 
 Caveat: pace is a gauge of what the target needs (Core 1 ~ +12%/day, Core 2 ~ +6%/day), not growth the strategy has shown. Pre-early entries are high-variance (most launches rug or die); the paper record decides whether the confirmation rules work. Paper fills assume you got the entry price; real fills on a 30-second-old curve coin will be worse.
+
+## Capital engine (how $100 is meant to grow) -- Oct 13 2026
+- Every book stakes a % of its TRADING balance, so wins automatically increase the next stake (compounding) and losses shrink it.
+- Exits per entry: partial take-profits at 2x / 4x / 10x (cash goes back into the book), hard stop, trailing stop on the remaining "moon bag" (~15-25%) so a runner can ride to 50x-100x+.
+- VAULT: once a book's realized profit passes `BANK_AFTER_MULT` x seed (default 3x), `<BOOK>_BANK_PCT` of the profit above that line (Sprint 20%, Core 1/2 25%, Compound 30%) is banked out of play. Progress toward the target counts banked profit.
+- Pace gauge: stakes x1.25 when >25% behind the target path, x0.8 when >50% ahead.
+- What each target REQUIRES (compounded): Sprint $100 -> $10K in 4 days = 100x = +216%/day; Core 1 $100 -> $125K in 30 days = 1,250x = +27%/day; Core 2 $100 -> $1M in 180 days = 10,000x = +5.2%/day. These are what the targets demand, not what the strategy has shown. Sprint is a lottery-ticket target: it needs roughly 3 consecutive ~4.6x wins or one big runner; most attempts will lose the stake.

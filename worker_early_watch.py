@@ -93,7 +93,7 @@ def make_tracker() -> EarlyTracker:
 
 
 # every sniper entry uses the early exit engine (paper_ledger._manage_early); the profile is the lane name
-_PROFILE = {k: ("early", k) for k in ("core1", "core2", "compound", "dev_list", "leaderboard")}
+_PROFILE = {k: ("early", k) for k in ("core1", "core2", "sprint", "compound", "dev_list", "leaderboard")}
 _RECORDER = None
 
 

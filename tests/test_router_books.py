@@ -30,8 +30,10 @@ def test_router_lanes():
 
 def test_core_targets_and_defaults():
     c1, c2 = books.cfg("core1"), books.cfg("core2")
-    assert c1["target"] == 125_000 and c1["days"] == 60
-    assert c2["target"] == 1_000_000 and c2["days"] == 150
+    assert c1["target"] == 125_000 and c1["days"] == 30
+    assert c2["target"] == 1_000_000 and c2["days"] == 180
+    s = books.cfg("sprint")
+    assert s["target"] == 10_000 and s["days"] == 4
     assert books.equity("core1") == 100.0
 
 
@@ -119,3 +121,24 @@ def test_radar_candidate_routing(monkeypatch):
     lad = {"kind": "ladder", "chain": "solana", "token": "Lad", "mcap": 500_000_000, "liquidity": 9_000_000, "paper": True, "symbol": "L", "reason": "x", "profile": "quick"}
     r.route_candidate(lad)
     assert lad["lane"] == "compound"
+
+
+def test_vault_banks_profit_above_3x_and_compounds_the_rest(monkeypatch):
+    monkeypatch.setattr(books, "realized_pnl", lambda b: 900.0)       # seed 100 -> total 1,000
+    # line = 3 x 100 = 300; banked = 25% of (900 - 300) = 150 (core1)
+    assert books.banked("core1") == 150.0
+    assert books.total_value("core1") == 1000.0 and books.equity("core1") == 850.0
+    monkeypatch.setattr(books, "realized_pnl", lambda b: 200.0)       # below the 3x line: nothing banked
+    assert books.banked("core1") == 0.0 and books.equity("core1") == 300.0
+
+
+def test_sprint_lane_added_for_strong_early_entry():
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker(dev_list={"D"}, smart_fn=lambda: {"w1"})
+    t.on_create({"txType": "create", "mint": "S", "traderPublicKey": "D", "initialBuy": 1e6, "solAmount": .03,
+                 "marketCapSol": 30}, now=100.0)
+    d = None
+    for i in range(12):
+        d = d or t.on_trade({"txType": "buy", "mint": "S", "traderPublicKey": "w1" if i == 0 else f"b{i}",
+                             "solAmount": 1, "marketCapSol": 32}, now=101.0 + i * 3)
+    assert d and "core2" in d["lanes"] and "sprint" in d["lanes"]
