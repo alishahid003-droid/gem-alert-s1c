@@ -24,11 +24,11 @@ BOOKS_KEY = "books_v1"
 
 # id -> defaults. seed/target/days overridable via env <ID>_SEED_USD etc.
 BOOKS: Dict[str, dict] = {
-    "sprint": {"name": "Sprint 96h", "kind": "moonshot", "seed": 100.0, "target": 10_000.0, "days": 4.0,
-               "shot_pct": 0.30, "max_share": 0.45, "bank_pct": 0.20},
-    "core1": {"name": "Core 1", "kind": "moonshot", "seed": 100.0, "target": 125_000.0, "days": 30.0,
+    "sprint": {"name": "Core 1 (Sprint 96h)", "kind": "moonshot", "seed": 100.0, "target": 10_000.0, "days": 4.0,
+               "shot_pct": 0.30, "max_share": 0.45, "bank_pct": 0.20, "cashout": True},
+    "core1": {"name": "Core 2", "kind": "moonshot", "seed": 100.0, "target": 125_000.0, "days": 30.0,
               "shot_pct": 0.20, "max_share": 0.35, "bank_pct": 0.25},
-    "core2": {"name": "Core 2", "kind": "moonshot", "seed": 100.0, "target": 1_000_000.0, "days": 180.0,
+    "core2": {"name": "Core 3", "kind": "moonshot", "seed": 100.0, "target": 1_000_000.0, "days": 180.0,
               "shot_pct": 0.10, "max_share": 0.25, "bank_pct": 0.25},
     "compound": {"name": "Compound", "kind": "daily", "seed": 100.0, "target": None, "days": None,
                  "shot_pct": 0.50, "max_share": 0.60, "daily_goal_pct": 5.0},
@@ -73,8 +73,45 @@ def _rows(book_id: str) -> list:
     return paper_ledger.module_rows(book_id, include_runners=True)
 
 
+CASHOUT_KEY = "books_cashouts_v1"
+
+
+def cashouts(book_id: str) -> list:
+    rec = state.get_value(CASHOUT_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    return list(rec.get(book_id) or [])
+
+
+def withdrawn(book_id: str) -> float:
+    return round(sum(float(c.get("amount") or 0.0) for c in cashouts(book_id)), 2)
+
+
 def realized_pnl(book_id: str) -> float:
-    return round(sum(float(r.get("pnl_usd") or 0.0) for r in _rows(book_id)), 2)
+    """Paper P&L of the current cycle (cashed-out profit is subtracted: it left the book)."""
+    gross = sum(float(r.get("pnl_usd") or 0.0) for r in _rows(book_id))
+    return round(gross - withdrawn(book_id), 2)
+
+
+def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
+    """Sprint-style books: when total value reaches the target, CASH OUT everything above the
+    reseed (SPRINT_RESEED_USD, default $200), log it, restart the cycle. Ali withdraws the money."""
+    c = cfg(book_id)
+    if not BOOKS[book_id].get("cashout") or not c.get("target"):
+        return None
+    if total_value(book_id) < c["target"]:
+        return None
+    now = now if now is not None else time.time()
+    reseed = _f(f"{book_id.upper()}_RESEED_USD", 200.0)
+    amount = round(total_value(book_id) - reseed, 2)
+    rec = state.get_value(CASHOUT_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec.setdefault(book_id, []).append({"ts": now, "amount": amount, "reseed": reseed})
+    state.set_value(CASHOUT_KEY, rec)
+    starts = state.get_value(BOOKS_KEY)
+    starts = starts if isinstance(starts, dict) else {}
+    starts[book_id] = {"start_ts": now}
+    state.set_value(BOOKS_KEY, starts)
+    return rec[book_id][-1]
 
 
 def total_value(book_id: str) -> float:
@@ -177,6 +214,7 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
 
 
 def can_open(book_id: str) -> tuple:
+    check_cashout(book_id)
     eq = equity(book_id)
     if eq < 5.0:
         return False, f"{book_id} book is empty (${eq:.2f})"
@@ -195,10 +233,11 @@ def daily_pnl(book_id: str, now: Optional[float] = None) -> float:
 
 def status(book_id: str, now: Optional[float] = None) -> dict:
     now = now if now is not None else time.time()
+    check_cashout(book_id, now)
     c = cfg(book_id)
     eq = equity(book_id)
     out = {"id": book_id, "name": c["name"], "kind": c["kind"], "seed": c["seed"], "equity": eq,
-           "banked": banked(book_id), "total_value": total_value(book_id),
+           "banked": banked(book_id), "cashed_out": withdrawn(book_id), "cashouts": cashouts(book_id), "total_value": total_value(book_id),
            "realized_pnl": realized_pnl(book_id), "open": open_count(book_id),
            "stake_next": stake_usd(book_id, now), "max_open": max_open(book_id, eq)}
     out.update(pace(book_id, now))

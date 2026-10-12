@@ -142,3 +142,14 @@ def test_sprint_lane_added_for_strong_early_entry():
         d = d or t.on_trade({"txType": "buy", "mint": "S", "traderPublicKey": "w1" if i == 0 else f"b{i}",
                              "solAmount": 1, "marketCapSol": 32}, now=101.0 + i * 3)
     assert d and "core2" in d["lanes"] and "sprint" in d["lanes"]
+
+
+def test_sprint_cashout_resets_to_reseed(monkeypatch):
+    from executor import books, paper_ledger
+    monkeypatch.setattr(paper_ledger, "module_rows", lambda *a, **k: [{"pnl_usd": 10_500.0}])
+    got = books.check_cashout("sprint", now=1000.0)
+    assert got and got["amount"] == 10_400.0
+    assert books.total_value("sprint") == 200.0
+    assert books.withdrawn("sprint") == 10_400.0
+    assert books.check_cashout("sprint") is None
+    assert books.check_cashout("core1") is None   # only the sprint book cashes out

@@ -41,3 +41,7 @@ Caveat: pace is a gauge of what the target needs (Core 1 ~ +12%/day, Core 2 ~ +6
 - VAULT: once a book's realized profit passes `BANK_AFTER_MULT` x seed (default 3x), `<BOOK>_BANK_PCT` of the profit above that line (Sprint 20%, Core 1/2 25%, Compound 30%) is banked out of play. Progress toward the target counts banked profit.
 - Pace gauge: stakes x1.25 when >25% behind the target path, x0.8 when >50% ahead.
 - What each target REQUIRES (compounded): Sprint $100 -> $10K in 4 days = 100x = +216%/day; Core 1 $100 -> $125K in 30 days = 1,250x = +27%/day; Core 2 $100 -> $1M in 180 days = 10,000x = +5.2%/day. These are what the targets demand, not what the strategy has shown. Sprint is a lottery-ticket target: it needs roughly 3 consecutive ~4.6x wins or one big runner; most attempts will lose the stake.
+
+## Naming + cash-out (Oct 13, per Ali)
+- Core 1 = Sprint 96h ($100 -> $10,000, id `sprint`); Core 2 = $125,000 in 30 days (id `core1`); Core 3 = $1M-$1.5M in 180 days (id `core2`). IDs are unchanged internally; only the names changed.
+- CASH-OUT: when Core 1 (Sprint) reaches $10,000 the system logs a cash-out of everything above `SPRINT_RESEED_USD` (default $200), restarts the Sprint cycle with that reseed, and the dashboard shows "CASHED OUT $X -- withdraw it". Ali withdraws the money himself. Core 2 and Core 3 run as their own separate books on their own $100-$200 seeds.
