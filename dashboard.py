@@ -377,7 +377,8 @@ def _module_cards(feed: list, fomo_signals: list, fomo_candidates: list, board: 
         if isinstance(es, dict) and now - float(es.get("ts") or 0) < 180:
             early_txt = (f"Launch sniper LIVE: {es.get('created', 0):,} launches seen, {es.get('tracked_now', 0)} tracked, "
                          f"{es.get('entries', 0)} entries, last event {es.get('last_event_ago')}s ago"
-                         + (f" -- {es.get('error')}" if es.get("error") else ""))
+                         + (f" -- {es.get('error')}" if es.get("error") else "")
+                         + (" | TRADE FEED OFF: only dev-list launches can enter until PUMPPORTAL_API_KEY is set" if es.get("trades_blocked") else ""))
         else:
             early_txt = "Launch sniper NOT running (start_local_mode.bat starts it; diag_early_stream.py checks the feed)"
     except Exception:  # noqa: BLE001

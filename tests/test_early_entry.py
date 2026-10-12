@@ -183,3 +183,23 @@ def test_early_entry_modules_registered():
     from layers import modules
     assert modules.for_layer("early_core2") == "core2" and modules.for_paper("early_compound") == "compound"
     assert modules.for_paper("early_dev_list") == "dev_list"
+
+
+def test_dev_list_enters_at_creation_without_trade_feed():
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker(dev_list={"DEV1"})
+    t.feed_off = True
+    ev = {"txType": "create", "mint": "M1", "traderPublicKey": "DEV1", "initialBuy": 1000000, "solAmount": 0.03,
+          "marketCapSol": 28, "name": "x", "symbol": "X"}
+    assert t.on_create(ev, now=100.0)
+    d = t.evaluate("M1", now=101.0)
+    assert d and d["lane"] == "dev_list" and d["lanes"] == ["dev_list"]
+
+
+def test_non_dev_needs_buyers_without_feed():
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker(dev_list=set())
+    ev = {"txType": "create", "mint": "M2", "traderPublicKey": "NOBODY", "initialBuy": 1000000, "solAmount": 0.03,
+          "marketCapSol": 28, "name": "x", "symbol": "X"}
+    t.on_create(ev, now=100.0)
+    assert t.evaluate("M2", now=101.0) is None

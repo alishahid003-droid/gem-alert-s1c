@@ -22,7 +22,10 @@ WS_URL = "wss://pumpportal.fun/api/data"
 class EarlyStream:
     def __init__(self, on_event: Callable[[dict], None], url: str = WS_URL, connect: Optional[Callable] = None):
         self.on_event = on_event
-        self.url = url
+        import os
+        key = os.environ.get("PUMPPORTAL_API_KEY", "").strip()
+        self.url = url + (("?api-key=" + key) if key and "api-key=" not in url else "")
+        self.trades_blocked = False          # PumpPortal: per-coin trade feed needs an API key funded >= 0.02 SOL
         self._connect = connect
         self.ws = None
         self.watched: set = set()
@@ -75,6 +78,10 @@ class EarlyStream:
                         if not isinstance(evt, dict):
                             continue
                         self.last_event_ts = time.time()
+                        msg = str(evt.get("message") or "")
+                        if "only available" in msg or "API key" in msg:
+                            self.trades_blocked = True
+                            continue
                         res = self.on_event(evt)
                         if res:
                             await self.subscribe_trades(res)

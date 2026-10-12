@@ -163,7 +163,14 @@ async def main_async():
         counters["events"] += 1
         kind = (e.get("txType") or "").lower()
         if kind == "create":
-            return [e["mint"]] if tracker.on_create(e) else None
+            if not tracker.on_create(e):
+                return None
+            tracker.feed_off = stream.trades_blocked
+            dec = tracker.evaluate(e["mint"])        # dev-list launches enter at creation, no trade feed needed
+            if dec:
+                counters["entries"] += 1
+                loop.run_in_executor(None, act, dec)
+            return [e["mint"]]
         if kind in ("buy", "sell"):
             dec = tracker.on_trade(e)
             if dec:
@@ -181,12 +188,13 @@ async def main_async():
                 if gone:
                     await stream.unsubscribe_trades(gone)
                 snap = dict(tracker.stats, tracked_now=len(tracker.recs), events=counters["events"],
-                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error,
+                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error, trades_blocked=stream.trades_blocked,
                             last_event_ago=round(time.time() - stream.last_event_ts, 1) if stream.last_event_ts else None,
                             ts=time.time())
                 state.set_value("early_stats", snap)
                 note = (f"events={snap['events']} tracked={snap['tracked_now']} entries={snap['entries']} "
-                        f"reconnects={snap['reconnects']}" + (f" err={snap['error']}" if snap["error"] else ""))
+                        f"reconnects={snap['reconnects']}" + (f" err={snap['error']}" if snap["error"] else "")
+                        + (" TRADE-FEED-OFF(need PUMPPORTAL_API_KEY)" if stream.trades_blocked else ""))
                 state.record_runner_heartbeat("early-watch", "local-pc", note)
                 print(f"[early-watch] {note}", flush=True)
             except Exception:  # noqa: BLE001

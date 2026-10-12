@@ -68,6 +68,7 @@ class EarlyTracker:
                  hot_terms_fn: Optional[Callable[[], Set[str]]] = None):
         self.recs: Dict[str, Rec] = {}
         self.dev_list = set(dev_list or [])
+        self.feed_off = False               # True when the per-coin trade feed is unavailable (no API key)
         self.smart_fn = smart_fn or (lambda: set())
         self.trusted_fn = trusted_fn or (lambda w: False)
         self.blacklist_fn = blacklist_fn or (lambda w: False)
@@ -167,9 +168,12 @@ class EarlyTracker:
         if why_block:
             r.decided = True
             return None
-        if len(r.buyers) < int(_f("EARLY_MIN_BUYERS_ANY", 4)):
-            return None                      # a few independent buyers first: cheap rug filter
         conf = self.confirmations(r, now)
+        # thin = too few independent buyers seen. Then ONLY a dev-list launch may enter (needs no trade feed).
+        thin = len(r.buyers) < int(_f("EARLY_MIN_BUYERS_ANY", 4))
+        dev_min = int(_f("EARLY_DEV_MIN_BUYERS", 0)) if self.feed_off else int(_f("EARLY_MIN_BUYERS_ANY", 4))
+        if thin and not ("dev_list" in conf and len(r.buyers) >= dev_min):
+            return None                      # a few independent buyers first: cheap rug filter
         c2_age, c2_mc = _f("EARLY_CORE2_MAX_AGE_S", 240), _f("EARLY_CORE2_MAX_MCAP_SOL", 55)
         c1_age, c1_mc = _f("EARLY_CORE1_MAX_AGE_S", 1200), _f("EARLY_CORE1_MAX_MCAP_SOL", 130)
         lanes = []
@@ -184,6 +188,8 @@ class EarlyTracker:
         if not lanes and conf == ["smart_wallet"] and age >= _f("EARLY_LEADERBOARD_AFTER_S", 60) \
                 and r.mcap_sol <= c1_mc:
             lanes.append("leaderboard")      # copy-trade fallback, only after stronger lanes had their chance
+        if thin:
+            lanes = [x for x in lanes if x == "dev_list"]
         if not lanes:
             return None
         lane = lanes[0]
