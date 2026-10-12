@@ -14,6 +14,44 @@ target is a number we measure against every week — not something assumed.
 
 ---
 
+## ▶ OCT 12 2026 — WHAT'S LEFT TO MAKE S1c PROPER AND LIVE (supersedes the older "Score" line below)
+
+**Truth first:** the system alerts, paper-trades and now scores demand + liquidity. It has NOT proven an edge (9.9 backtest = INSUFFICIENT DATA, needs 40+ coins of buyer data). Real money stays OFF until the gates in section C pass. 819 tests pass. GitHub main is up to date (`b2120fc`).
+
+### A. ALI — only you can do these (in order)
+- [ ] **A1 Restart local mode** — close the CMD running `start_local_mode.bat`, run it again. Loads the liquidity/mcap scoring + buyer-quality layer. DONE-WHEN: dashboard on http://localhost:8787 loads and System tab shows fresh heartbeats.
+- [ ] **A2 Top up Fomo credits** at fomoapi.io (HTTP 402 = credits exhausted). Then `findstr /i "layer13 fomoapi" logs\local_poll-fast.log` shows no 402. Without this Stage 2 (Fomo copy-trade) and the Fomo tab are dead. (11.6/1.7)
+- [ ] **A3 Keep the PC awake and the runner open.** Local mode only works while the PC is on and `start_local_mode.bat` is running. Set Windows sleep to "Never" while plugged in. If it sleeps, nothing is scanned.
+- [ ] **A4 Let it collect data 3-7 days** with no changes. The buyer archive fills only while it runs. Then tell me "run the backtest" (or run `python backtest_buyer_signals.py`).
+- [ ] **A5 (optional, recommended) Free Helius key** (helius.dev, free tier). Put it in `.env` as `SOLANA_RPC_URL=...`. Fixes RPC 403/rate limits for the buyer-funding lookups and wallet checks.
+- [ ] **A6 Decide 10.2** — confirm `EXECUTION_ENABLED` is `false` in the PC `.env` (it is OFF now; keep it so).
+- [ ] **A7 Create a NEW dedicated Solana wallet** (never your main Phantom) and fund it with a small amount you can afford to lose entirely. (6.1) Only after the section C gates pass.
+- [ ] **A8 Put that wallet's key** in the PC `.env` as `EXECUTION_SOLANA_PRIVATE_KEY` (and GitHub Secret if the test-trade workflow is used). Never paste it in chat. (6.2)
+- [ ] **A9 Set campaign env vars** (11.2): `SPRINT_MODE`, `MOONSHOT_ENABLED`, `COMPOUND_SEED_USD`, `TOTAL_WALLET_USD` — only when you decide to go live.
+- [ ] **A10 Final switch** `EXECUTION_ENABLED=true` — only after C1-C4. (6.5)
+
+### B. CLAUDE — I do these (no action from you unless noted)
+- [ ] **B1 Run the 9.9 backtest** when A4 has 40+ coins. Verdict decides whether buyer signals are used for buying or stay information-only.
+- [ ] **B2 Make the dev+sniper cap live** — pass `dev_pct` into the entry context (the guard exists but is dormant). Small change + tests.
+- [ ] **B3 Decide on the verified dev wallets** — 6 VERIFIED, 17 exist/active, 2 unchecked (RPC errors). Add them to a deployer watch list only if the backtest shows it helps.
+- [ ] **B4 Test-trade supervision (6.4)** — walk you through the $2 buy+sell and check the fills on Solscan and the dashboard.
+- [ ] **B5 Daily trade review for the first 48 h live (6.6)** — compare every real trade to paper.
+- [ ] **B6 (optional) Stricter rug filters** — LP lock threshold 50% -> 95% and Solana RugCheck integration. Only after measuring whether they remove losers on our data.
+- [ ] **B7 Keep checklist, HANDOFF, Notion and GitHub in sync** after every change.
+
+### C. GATES before real money (must ALL be true)
+- [ ] **C1** Fomo credits topped up and Layer 13 returning data (A2).
+- [ ] **C2** 9.9 backtest says SIGNAL SHOWS EDGE on the unseen half, OR we accept running without buyer signals and say so explicitly.
+- [ ] **C3** The daily replay win rate (Phase 2 gate, `replay_results/`) meets the gate in Phase 2, not just "looks fine".
+- [ ] **C4** $2 test trade passes: real buy AND sell confirmed on Solscan (6.4).
+- [ ] **C5** First 48 h live at minimum size, every trade reviewed (6.6). Scale only after 30+ real closed trades (6.7).
+
+### Change log (Oct 12)
+- Dev-wallet verification run (25 wallets from the Oct 10 screenshot): 6 VERIFIED, 17 EXISTS_ONLY, 2 ERROR (RPC). PnL claims unverifiable; NOT added to scanner. Verifier fixed in `b2120fc`.
+- Liquidity-to-market-cap rug check live in Layer 0 (9.10).
+
+---
+
 ## ▶ WHERE WE STAND — read this first (updated Sept 30 2026, 20:15 PKT / 15:15 UTC)
 
 **Code:** everything is merged to `main` (PRs #1–#11). Ali's PC is on `main` (pulled at `bd86c0c`; pull again for `restart_fast_watch.bat`). 736 automated tests pass.

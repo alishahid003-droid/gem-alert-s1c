@@ -1,0 +1,219 @@
+[
+ {
+  "address": "bwamJzztZsepfkteWRChggmXuiiCQvpLqPietdNfSXa",
+  "exists": true,
+  "sol": 50.399,
+  "last_seen_hours": 1.0,
+  "tx_per_day": 3737,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "whamNNP9tHoxLg92yHvJPdYhghEoCg1qYTsh5a2oLbx",
+  "exists": true,
+  "sol": 259.19,
+  "last_seen_hours": 5.9,
+  "tx_per_day": 51,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "7naFFwuEJWeWwWYQUkgAWHsxYKg3KctEuUj42JdAMidP",
+  "exists": true,
+  "sol": 75.046,
+  "last_seen_hours": 8.5,
+  "tx_per_day": 240,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "GpTXmkdvrTajqkzX1fBmC4BUjSboF9dHgfnqPqj8WAc4",
+  "exists": true,
+  "sol": 374.477,
+  "last_seen_hours": 4.2,
+  "tx_per_day": 292,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "5FqUo9aBjsp7QeeyN6Vi2ZmF2fjS4H5EU7wnAQwPy17z",
+  "verdict": "ERROR",
+  "error": "all RPCs failed: {'code': -32015, 'message': 'Transaction version (1) is not supported by the requesting client. Please try the request again with the following configuration parameter: \"maxSupportedTransactionVersion\": 1'}"
+ },
+ {
+  "address": "8ZN71XTdVo8yRovnGLmNgW3Tgniw6A4J3JGLvPD686FP",
+  "exists": true,
+  "sol": 12.77,
+  "last_seen_hours": 0.3,
+  "tx_per_day": 3843,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "AV7PjXHL5JXZ1YoYRoN9Dsstg1x2UciBupMCXcJP8gUz",
+  "exists": true,
+  "sol": 384.574,
+  "last_seen_hours": 3.5,
+  "tx_per_day": 482,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "D9gQ6RhKEpnobPBUdWY5bPQt2p3zGk3iVz6ChpUi2ArA",
+  "verdict": "ERROR",
+  "error": "all RPCs failed: {'code': -32015, 'message': 'Transaction version (1) is not supported by the requesting client. Please try the request again with the following configuration parameter: \"maxSupportedTransactionVersion\": 1'}"
+ },
+ {
+  "address": "EBx24uAPtaS1SvHwRhKEktSgzaXdiVEyHuSVpAMVwrcD",
+  "exists": true,
+  "sol": 104.421,
+  "last_seen_hours": 0.0,
+  "tx_per_day": 214,
+  "pumpfun_seen": true,
+  "verdict": "VERIFIED"
+ },
+ {
+  "address": "Aqje5DsN4u2PHmQxGF9PKfpsDGwQRCBhWeLKHCFhSMXk",
+  "exists": true,
+  "sol": 17.032,
+  "last_seen_hours": 4.0,
+  "tx_per_day": 561,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "8i5U2uNBEuTc4zskYP14zbebDg2RSwrrG8REhEnJb97K",
+  "exists": true,
+  "sol": 228.961,
+  "last_seen_hours": 4.8,
+  "tx_per_day": 424,
+  "pumpfun_seen": true,
+  "verdict": "VERIFIED"
+ },
+ {
+  "address": "GdRSPexhxbQz5H2zFQrNN2BAZUqEjAULBigTPvQ6oDMP",
+  "exists": true,
+  "sol": 37.219,
+  "last_seen_hours": 2.7,
+  "tx_per_day": 665,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "8NJ7Ujpji8uMF2675mqaTSEm2DCbfJA7fiRKtiaqkaLN",
+  "exists": true,
+  "sol": 169.655,
+  "last_seen_hours": 0.1,
+  "tx_per_day": 145,
+  "pumpfun_seen": true,
+  "verdict": "VERIFIED"
+ },
+ {
+  "address": "GeUnv1jmtviRbR7Gu1JnXSGkUMUgFVBHuEVQVpTaUX1W",
+  "exists": true,
+  "sol": 0.003,
+  "last_seen_hours": 5.3,
+  "tx_per_day": 377,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "DC99qH3jXiq5pPWQd6PjjJcCxTV593s58CLPxWGpEywt",
+  "exists": true,
+  "sol": 44.252,
+  "last_seen_hours": 8.4,
+  "tx_per_day": 1546,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "GZVSEAajExLJEvACHHQcujBw7nJq98GWUEZtood9LM9b",
+  "exists": true,
+  "sol": 98.72,
+  "last_seen_hours": -0.0,
+  "tx_per_day": 485,
+  "pumpfun_seen": true,
+  "verdict": "VERIFIED"
+ },
+ {
+  "address": "7GhWwhaMgbKiRWxF93Bud6HnHMci6NCLTJyTxG8zFH51",
+  "exists": true,
+  "sol": 20.474,
+  "last_seen_hours": 2.0,
+  "tx_per_day": 116,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "G7NvZKjoVqBDWciSYtWWgUPB7DA1iJavdvH5jty2FAmM",
+  "exists": true,
+  "sol": 205.844,
+  "last_seen_hours": 4.9,
+  "tx_per_day": 225,
+  "pumpfun_seen": true,
+  "verdict": "VERIFIED"
+ },
+ {
+  "address": "MNhBbrscBPmeid54buiqSgyWa4D8PY6uKHoK2wJsTJN",
+  "exists": true,
+  "sol": 19.907,
+  "last_seen_hours": 4.1,
+  "tx_per_day": 14,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "B9Zbs2W9VK22AHnCWiK4PqBueDFzN17RNAFu5uFozLMJ",
+  "exists": true,
+  "sol": 237.85,
+  "last_seen_hours": 0.7,
+  "tx_per_day": 66,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "36DWP52MVRDooYNrcRVDyoCh2R1fPXCYqKJQYg9pFQoE",
+  "exists": true,
+  "sol": 9.15,
+  "last_seen_hours": 4.1,
+  "tx_per_day": 8,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "83QQFLxcEzuJZaejBnzAiW5tyfyaRHMLZnkhJbRPRWtf",
+  "exists": true,
+  "sol": 26.2,
+  "last_seen_hours": 4.2,
+  "tx_per_day": 8,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "5Hyf6srdbrrD1HLjqxcFbXJRFBHgnwoZc7aZRj8vDuk5",
+  "exists": true,
+  "sol": 9.228,
+  "last_seen_hours": 5.4,
+  "tx_per_day": 13,
+  "pumpfun_seen": true,
+  "verdict": "VERIFIED"
+ },
+ {
+  "address": "D3sovmjANgA8V27e5rnQft8kV3mocSH8gw9zwth3Ba9g",
+  "exists": true,
+  "sol": 5.381,
+  "last_seen_hours": 4.2,
+  "tx_per_day": 11,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ },
+ {
+  "address": "6d22FozaKK239PoBYVffkYKA1QPQZE8fC7AQkpmHQfjp",
+  "exists": true,
+  "sol": 47.56,
+  "last_seen_hours": 4.3,
+  "tx_per_day": 10,
+  "pumpfun_seen": false,
+  "verdict": "EXISTS_ONLY"
+ }
+]

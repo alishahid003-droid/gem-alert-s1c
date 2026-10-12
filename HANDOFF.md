@@ -17,6 +17,7 @@ then run the tests (`python -m pytest -q`, 778 pass)._
 - This is NOT a path to $90k by any near deadline. Honest, not hopeful.
 
 ## 0c. Status as of Oct 9 2026 (verified)
+- **Oct 12:** liquidity/mcap rug check live in Layer 0 (9.10). 25 pump.fun dev wallets verified on-chain: 6 VERIFIED, 17 exist/active, 2 RPC errors; not added to the scanner (see `dev_wallet_verification.json`). GitHub main at `b2120fc`. Full Ali-vs-Claude action split is at the top of GO_LIVE_CHECKLIST.md.
 - **Oct 9 (later):** Phase 9 buyer-quality layer built (`layers/layer15_buyer_quality.py`, entry-guard hooks, buyer archive, `backtest_buyer_signals.py`; 9.9 verdict INSUFFICIENT DATA until the archive fills). Fomo DNS fixed; Fomo now blocked by HTTP 402 (credits exhausted). 815 tests pass. Real money still OFF.
 - **Last real code/doc commit: Oct 6 2026 (`35e7ce6`).** Everything after it is the automatic daily `replay_results` commit (Oct 6, 7, 8). No new build work Oct 7-9.
 - **Real money still OFF. No proven edge.** Unchanged from section 0.
