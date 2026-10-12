@@ -6,7 +6,7 @@ Needs only Python (no pip). Free public Solana RPC; ~3 calls per wallet, paced.
 For each address it checks:
   1. EXISTS    the account exists on mainnet (a mistyped address won't)
   2. ACTIVE    it has recent transactions (last-seen age, tx per day from last 100 sigs)
-  3. PUMPFUN   at least one of its 5 newest transactions touches the pump.fun program
+  3. PUMPFUN   at least one of its 15 newest transactions touches the pump.fun program
 Verdict: VERIFIED (exists + pump.fun activity), EXISTS_ONLY, or NOT_FOUND (likely a typo
 in the screenshot transcription). It does NOT confirm the poster's PnL / deploy numbers.
 Writes dev_wallet_verification.json next to this script.
@@ -23,17 +23,17 @@ RPCS = [r for r in RPCS if r]
 def rpc(method, params):
     last = None
     for url in RPCS:
-        for _ in range(2):
+        for attempt in range(3):
             try:
                 req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
                                              headers={"content-type": "application/json", "User-Agent": "Mozilla/5.0"})
                 with urllib.request.urlopen(req, timeout=25) as r:
                     j = json.loads(r.read())
                 if "error" in j:
-                    last = j["error"]; time.sleep(1.5); continue
+                    last = j["error"]; time.sleep(2 * (attempt + 1)); continue
                 return j.get("result")
             except Exception as e:
-                last = e; time.sleep(1.5)
+                last = e; time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"all RPCs failed: {last}")
 
 
@@ -50,30 +50,42 @@ def check(addr):
             out["last_seen_hours"] = round((now - max(ts)) / 3600, 1)
             span = max(max(ts) - min(ts), 1)
             out["tx_per_day"] = round(len(ts) / span * 86400)
-        for s in sigs[:5]:
+        for s in sigs[:15]:
             tx = rpc("getTransaction", [s["signature"], {"encoding": "json", "maxSupportedTransactionVersion": 0}])
             keys = (((tx or {}).get("transaction") or {}).get("message") or {}).get("accountKeys") or []
             if PUMP in keys:
                 out["pumpfun_seen"] = True; break
-            time.sleep(0.3)
+            time.sleep(0.5)
     out["verdict"] = "VERIFIED" if out["pumpfun_seen"] else "EXISTS_ONLY"
     return out
 
 
 def main():
     data = json.load(open(os.path.join(HERE, "pumpfun_top_devs_oct2026.json")))
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else len(data["wallets"])
+    nums = [a for a in sys.argv[1:] if a.isdigit()]
+    n = int(nums[0]) if nums else len(data["wallets"])
+    out_path = os.path.join(HERE, "dev_wallet_verification.json")
+    prev = {}
+    if os.path.exists(out_path) and "--all" not in sys.argv:
+        try:
+            prev = {r["address"]: r for r in json.load(open(out_path)) if r.get("verdict") not in (None, "ERROR")}
+        except Exception:
+            prev = {}
     res = []
+    print("(resumes: wallets already checked are kept; only ERROR rows are retried. Use --all to redo everything.)")
     print(f"{'address':46}{'verdict':13}{'SOL':>10}{'last seen h':>12}{'tx/day':>8}")
     for w in data["wallets"][:n]:
-        try:
-            r = check(w["address"])
-        except Exception as e:
-            r = {"address": w["address"], "verdict": "ERROR", "error": str(e)}
+        if w["address"] in prev:
+            r = prev[w["address"]]
+        else:
+            try:
+                r = check(w["address"])
+            except Exception as e:
+                r = {"address": w["address"], "verdict": "ERROR", "error": str(e)}
+            time.sleep(2.5)
         res.append(r)
         print(f"{r['address']:46}{r['verdict']:13}{str(r.get('sol')):>10}{str(r.get('last_seen_hours')):>12}{str(r.get('tx_per_day')):>8}")
-        time.sleep(0.5)
-    json.dump(res, open(os.path.join(HERE, "dev_wallet_verification.json"), "w"), indent=1)
+    json.dump(res, open(out_path, "w"), indent=1)
     c = {}
     for r in res: c[r["verdict"]] = c.get(r["verdict"], 0) + 1
     print("\nSummary:", c, "\nsaved dev_wallet_verification.json")
