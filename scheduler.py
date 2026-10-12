@@ -582,7 +582,8 @@ def _entry_ctx(scored: dict) -> dict:
     raw = scored.get("raw") or {}
     sr = scored.get("score")
     return {"liquidity_usd": raw.get("liquidity_usd"), "change_m5": raw.get("change_m5"),
-            "change_h1": raw.get("change_h1"), "coverage": getattr(sr, "signal_coverage", None)}
+            "change_h1": raw.get("change_h1"), "coverage": getattr(sr, "signal_coverage", None),
+            "sniper_pct": raw.get("bundler_sniper_pct")}
 
 
 def _hard_fail(sr) -> bool:
@@ -669,12 +670,19 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
             effective_deployer_tier = (
                 "good" if (deployer_wallet and state.is_deployer_trusted(deployer_wallet)) else None
             )
+            early_dev_pct = None
+            if chain == "solana" and deployer_wallet:
+                try:
+                    early_dev_pct = fetch_solana_dev_holding_pct(mint, deployer_wallet)
+                except Exception:  # noqa: BLE001 -- optional guard input
+                    early_dev_pct = None
+            _ctx = _with_demand(dict(_entry_ctx(scored), dev_pct=early_dev_pct), chain, mint, deployer_wallet)
             stage1 = handle_stage1_candidate(
                 chain, mint, score_band=sr.band, deployer_tier=effective_deployer_tier,
                 convergence_count=0, entry_mcap=mc,
                 signal_coverage=getattr(sr, "signal_coverage", None),
                 liquidity_usd=(scored.get("raw") or {}).get("liquidity_usd"),
-                entry_ctx=_with_demand(_entry_ctx(scored), chain, mint, deployer_wallet),
+                entry_ctx=_ctx,
             )
         # Per-token auto-buy verdict for the dashboard's Alerts tab (Sept 30
         # 2026, Ali: "would these trades have been executed?") -- the real
@@ -2715,6 +2723,22 @@ def run_poll_madeonsol():
         _print_cycle_summary(_stats())
 
 
+def run_poll_radar():
+    """Layer 16 catalyst radar: exchange-listing ladder, news-jack, launchpad
+    surges, narrative leaders, conviction wallets, regime gauge. Light (free
+    public feeds + DexScreener), safe to run every few minutes. Alerts +
+    PAPER trades only -- never real orders."""
+    try:
+        from layers import layer16_catalyst_radar as radar
+        out = radar.run_cycle()
+    except Exception as e:  # never let the radar take the runner down
+        print(f"[layer16] cycle failed: {type(e).__name__}: {e}")
+        out = {"candidates": 0, "alerts": 0, "paper": 0, "errors": [str(e)]}
+    print(f"[layer16] cycle done: {out}")
+    _safe(state.record_runner_heartbeat, "poll-radar", _runner_where(),
+          f"candidates={out.get('candidates')} alerts={out.get('alerts')} paper={out.get('paper')} errors={len(out.get('errors') or [])}")
+
+
 def run_poll():
     """Convenience for local/manual runs -- fast then slow in one process.
     Production runs these on separate crons; see poll-fast.yml/poll-slow.yml."""
@@ -2732,6 +2756,7 @@ if __name__ == "__main__":
     parser.add_argument("--poll-fast-once", action="store_true", help="discovery only, single cycle, no loop -- for manual/local testing")
     parser.add_argument("--poll-slow", action="store_true", help="expensive layers only -- runs on the slow cron")
     parser.add_argument("--poll-madeonsol", action="store_true", help="Layer 1 + Layer 8 + Layer 2+9 only -- run on your OWN PC via Task Scheduler, never on GitHub Actions (MadeOnSol free-key rate limit)")
+    parser.add_argument("--poll-radar", action="store_true", help="Layer 16 catalyst radar only (free feeds, alerts + paper trades) -- local_runner runs this every few minutes")
     args = parser.parse_args()
     if args.self_test:
         sys.exit(run_self_test())
@@ -2746,6 +2771,9 @@ if __name__ == "__main__":
     elif args.poll_madeonsol:
         if not _skip_local_state_on_actions("poll-madeonsol") and _cycle_due("poll-madeonsol", "MADEONSOL_MIN_INTERVAL_SECONDS", 1500):
             run_poll_madeonsol()
+    elif args.poll_radar:
+        if not _skip_local_state_on_actions("poll-radar"):
+            run_poll_radar()
     elif args.poll:
         run_poll()
     elif args.seed_pumpfun_wallets:

@@ -71,8 +71,33 @@ def run_job(name: str, flag: str, timeout_s: float) -> int:
             return -1
 
 
+def radar_enabled() -> bool:
+    return os.environ.get("LOCAL_RUNNER_RADAR", "true").strip().lower() != "false"
+
+
+def radar_interval_s() -> float:
+    return max(60.0, _f("LOCAL_RADAR_MINUTES", 3) * 60)
+
+
+def _radar_loop() -> None:
+    """Own thread so a long poll-slow/madeonsol job never delays the radar."""
+    iv = radar_interval_s()
+    while True:
+        started = time.time()
+        try:
+            rc = run_job("poll-radar", "--poll-radar", timeout_s=min(iv * 3, 600))
+        except Exception as e:  # noqa: BLE001
+            rc = f"error {e}"
+        print(f"[local_runner] {time.strftime('%H:%M:%S')} poll-radar exit={rc} ({time.time() - started:.0f}s)", flush=True)
+        time.sleep(max(5.0, iv - (time.time() - started)))
+
+
 def main() -> None:
     last: Dict[str, float] = {}
+    if radar_enabled():
+        import threading
+        threading.Thread(target=_radar_loop, name="radar", daemon=True).start()
+        print(f"[local_runner] radar thread started (every {int(radar_interval_s() // 60)} min)", flush=True)
     print("[local_runner] started. Jobs:", [(n, int(iv // 60)) for n, _, iv in schedule()], flush=True)
     while True:
         due = due_jobs(last, time.time())

@@ -313,7 +313,7 @@ def _health() -> dict:
     runners = []
     # Oct 5 2026: cycles are throttled to save Upstash commands (poll-fast ~30 min,
     # poll-slow ~60 min, madeonsol ~30 min, fast-watch idle 3 min), so "stale" limits grew.
-    for name, expect_min in (("poll-fast", 70), ("poll-slow", 130), ("poll-madeonsol", 70), ("fast-watch", 8)):
+    for name, expect_min in (("poll-fast", 70), ("poll-slow", 130), ("poll-madeonsol", 70), ("poll-radar", 20), ("fast-watch", 8)):
         b = beats.get(name) or {}
         ts = b.get("ts")
         age_min = (now - ts) / 60 if ts else None

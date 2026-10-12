@@ -346,3 +346,10 @@ Basis: MOONSHOT_RESEARCH.md (PONS, STONK, AMC, MARS: each had a public, dated ca
 - [ ] **12.12 BOTH** -- TEST the conflict: does the Layer 15 bot-farm block remove winners? (82.8% of >100% coins reportedly show artificial growth vs MemeTrans loss reduction.) Decide on the 9.9 backtest.
 - [ ] **12.13 ALI** -- Send screenshots of the DexScreener/Fomo lists of coins that ran 50x+ in the last 30-60 days (name + chain) so the forensic script has a real winners list. My shell cannot reach those APIs.
 - [ ] **12.7 ALI** -- Core 1 ($100 -> ~$1.5M) and Core 2 ($100 -> $125k in 1-2 months) stay on paper until 12.6 passes. Maths: 1,250x and 15,000x; see MOONSHOT_RESEARCH.md.
+
+## OCT 12 2026 (late) -- LAYER 16 CATALYST RADAR BUILT + WIRED (Claude side)
+- DONE: 12.1 listing ladder, 12.2 news-jack, 12.3 launchpad surges, 12.4 narrative leader/clone, 12.8 regime gauge (off by default: REGIME_GATE_ENABLED), 12.9 buyback proximity (optional buyback_sets.json), 12.10 conviction wallets, 12.11 cross-chain lag. All alert + PAPER only, never real orders.
+- WIRED: scheduler.py --poll-radar, local_runner radar thread every 3 min (LOCAL_RUNNER_RADAR=false to disable), dashboard System tab "poll-radar", daily alert cap 40.
+- B2 FIXED: entry guards now receive real liquidity, sniper % and dev % on the MadeOnSol Solana path.
+- Tests: 846 passed. Restart start_local_mode.bat to activate.
+- STILL OPEN: 12.5 forensics (needs Helius key), 12.6 backtest (needs 3-7 days data), 12.12, 12.13 (Ali screenshots), 12.7 Cores stay paper.

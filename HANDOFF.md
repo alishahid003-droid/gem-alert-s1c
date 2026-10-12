@@ -114,3 +114,5 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Only after a test (§4) proves an edge: add `EXECUTION_ENABLED=true` (+ the
   relevant mode switch) as GitHub Secrets AND in the PC `.env`, then `update.bat`.
 - Paid data (Helius) — optional, only after §4 shows a real edge.
+
+- Oct 12 2026 late: Layer 16 radar (layers/layer16_catalyst_radar.py, tests/test_layer16_catalyst_radar.py, tests/test_radar_wiring.py) wired via scheduler --poll-radar + local_runner thread; B2 guard-context fix in layer0_scoring/_entry_ctx/_handle_scored. 846 tests green.

@@ -308,6 +308,11 @@ def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
     only with MOONSHOT_ENABLED=true, band B+ safety (entry guards, momentum
     rules), the normal position cap, and a buy path on the chain."""
     usd = moonshot_position_usd()
+    try:  # Layer 16 regime gauge: shrinks stake in a cold market (off unless REGIME_GATE_ENABLED=true)
+        from layers.layer16_catalyst_radar import regime_stake_multiplier
+        usd = round(usd * float(regime_stake_multiplier()), 2)
+    except Exception:
+        pass
     ctx = dict(entry_ctx or {})
     ctx.setdefault("liquidity_usd", liquidity_usd)
     guard_ok, guard_why = entry_guards.check(score_band, usd, ctx, momentum=True)

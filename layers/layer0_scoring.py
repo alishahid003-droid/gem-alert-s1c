@@ -2053,7 +2053,8 @@ def score_solana_mint(mint: str, chain: str, is_pregraduation: bool) -> dict:
         txn_activity_decay_ratio=txn_activity_decay_ratio,
         mcap_usd=dex_mcap_usd,
     )
-    return {"chain": chain, "address": mint, "score": score_token(sig)}
+    return {"chain": chain, "address": mint, "score": score_token(sig),
+            "raw": {"liquidity_usd": liquidity_usd, "bundler_sniper_pct": sig.bundler_sniper_pct}}
 
 
 def free_recheck_solana_signals(mint: str) -> dict:
