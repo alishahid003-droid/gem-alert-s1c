@@ -397,3 +397,19 @@ Built: free PumpPortal stream -> per-coin tracker -> entries in the first second
 - [ ] Tune EARLY_*/ROUTER_* from real paper results
 - [ ] Faster paper exits for minute-scale pumps (fast-watch manages ~1/min)
 - [ ] Book-driven stakes for copy books
+
+## STATUS as of Oct 12 2026, 10:15 PM PKT (pushed: 5783305)
+DONE
+- [x] Modules/books/router (Core 1 $125K/60d, Core 2 $1M/150d, Compound daily, copy books, Fomo New Wallets wired)
+- [x] Pre-early sniper engine built; pushed; running via start_local_mode.bat
+- [x] diag_early_stream.py run on your PC: launch feed WORKS (~25 launches/30 s), field names match
+- [x] FOUND: PumpPortal per-coin trade feed needs an API key funded >= 0.02 SOL (~$3). Without it only dev-list launches can enter (at creation). Code auto-detects and shows "TRADE FEED OFF" on the Modules tab.
+- [x] 876 tests green; code supports PUMPPORTAL_API_KEY in .env
+
+OPEN -- ALI
+- [ ] DECISION: (a) PumpPortal API key + 0.02 SOL (~$3) -> add `PUMPPORTAL_API_KEY=...` to .env, restart (fastest, enables all lanes); or (b) free Helius key -> `SOLANA_RPC_URL`, Claude builds a free trade feed from Solana logs (slower, unverified)
+- [ ] Top up Fomo credits (HTTP 402) -> Fomo New Wallets + followers resume
+- [ ] Windows sleep = Never; keep EXECUTION_ENABLED=false
+- [ ] After 3-7 days: send Modules tab numbers; run `python backtest_buyer_signals.py`
+OPEN -- CLAUDE
+- [ ] Build free trade feed (Helius) if chosen; tune EARLY_*/ROUTER_* from data; faster paper exits; book-driven copy stakes
