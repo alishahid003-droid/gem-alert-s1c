@@ -1,3 +1,5 @@
+> SUPERSEDED BY FINAL_CHECKLIST_2026-10-12.md -- that file is the single up-to-date list of everything left.
+
 # S1c — Go-Live & 80% Win-Rate Checklist (single source of truth)
 
 _Created Sept 30 2026. Last reviewed Oct 9 2026 (no new work since Oct 6; see HANDOFF.md 0c). Every item has an OWNER and a DONE-WHEN. When an item
