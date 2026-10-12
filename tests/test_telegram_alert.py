@@ -25,6 +25,7 @@ def test_alert_omits_absent_tags():
 
 
 def test_send_telegram_message_survives_network_failure(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
     # Real bug caught live Sept 28 2026: a DNS/network-level failure here
     # used to raise uncaught all the way up through run_poll_fast and crash
     # the whole poll cycle -- before it ever reached Stage1/Stage2's
@@ -44,6 +45,7 @@ def test_send_telegram_message_survives_network_failure(monkeypatch):
 
 
 def test_send_telegram_message_still_reports_missing_config(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
     import telegram_alert
     monkeypatch.setattr(telegram_alert.CONFIG, "telegram_bot_token", None)
     result = send_telegram_message("test alert")
