@@ -116,8 +116,8 @@ def test_act_opens_paper_in_each_lane_and_alerts():
     out = w.act(dec, send=lambda m: sent.append(m), now=T0)
     assert out["opened"] == ["core2", "compound"]
     book = paper_ledger._open()
-    assert book["early_core2:solana:MintA"]["module"] == "core2" and book["early_core2:solana:MintA"]["exit_profile"] == "moonshot"
-    assert book["early_compound:solana:MintA"]["exit_profile"] == "quick"
+    assert book["early_core2:solana:MintA"]["module"] == "core2" and book["early_core2:solana:MintA"]["exit_profile"] == "core2"
+    assert book["early_compound:solana:MintA"]["exit_profile"] == "compound" and book["early_compound:solana:MintA"]["strategy"] == "early"
     assert book["early_core2:solana:MintA"]["entry_mcap"] == pytest.approx(33.0 * 150)
     assert sent and "CORE 2" in sent[0] and "EARLY ENTRY" in sent[0]
     assert w.act(dec, send=lambda m: sent.append(m), now=T0) == {"skipped": "already acted"}

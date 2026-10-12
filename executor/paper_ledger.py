@@ -96,7 +96,7 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
                now: Optional[float] = None, strategy: str = "stage",
                guard: Optional[str] = None, exit_profile: Optional[str] = None,
-               module: Optional[str] = None) -> Optional[dict]:
+               module: Optional[str] = None, live: bool = False) -> Optional[dict]:
     """Opens one paper position; no-op if the same (chain, token, source) is
     already open, the chain has no buy path, or the price is unknown."""
     if chain not in PAPER_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
@@ -117,7 +117,10 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
            "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False,
-           "guard": guard or "n/a", "exit_profile": exit_profile}
+           "guard": guard or "n/a", "exit_profile": exit_profile, "live": bool(live)}
+    if strategy == "early":
+        # pre-early coins: fills are slower/worse than the quoted price (curve moves, priority fee, 1% venue fee)
+        pos["cost_pct"] = max(pos["cost_pct"], float(os.environ.get("EARLY_PAPER_COST_PCT", "0.10")))
     book[pid] = pos
     state.set_value(OPEN_KEY, book)
     return pos
@@ -129,6 +132,12 @@ def _sell(pos: dict, pct_of_original: float, mcap: float, why: str, now: float):
         return
     mult = mcap / pos["entry_mcap"]
     proceeds = pos["usd"] * pct * mult * (1.0 - pos["cost_pct"])
+    if pos.get("live"):
+        try:                                   # mirror the exit on the real position (sell is never blocked by the kill switch)
+            from executor import pumpportal_exec
+            pumpportal_exec.sell(pos["token"], min(100.0, pct / max(pos["remaining"], 1e-9) * 100.0))
+        except Exception:  # noqa: BLE001
+            pass
     pos["proceeds_usd"] += proceeds
     pos["remaining"] = max(0.0, pos["remaining"] - pct)
     pos["events"].append({"ts": now, "why": why, "pct": round(pct, 4), "mult": round(mult, 3),
@@ -164,6 +173,48 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
     return True
 
 
+EARLY_RULES = {
+    # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
+    "core2": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.55),
+    "core1": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
+    "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
+    "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.70),
+    "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.70),
+}
+
+
+def _manage_early(pos: dict, mcap: float, now: float) -> bool:
+    """Exit engine for sniper entries (strategy 'early'): partial take-profits,
+    hard stop, trailing stop on the runner after 2x, dead-coin time stop.
+    Returns True when the position closed."""
+    ladder, stop, trail = EARLY_RULES.get(pos.get("exit_profile") or "", EARLY_RULES["core1"])
+    stop = float(os.environ.get("EARLY_STOP_MULT", stop))
+    mult = mcap / pos["entry_mcap"]
+    peak = pos["peak_mcap"] / pos["entry_mcap"]
+    age_min = (now - pos["opened_ts"]) / 60.0
+    for tier, frac in sorted(ladder.items()):
+        if str(tier) not in pos["rungs_fired"] and mult >= tier and pos["remaining"] > 1e-6:
+            _sell(pos, frac, mcap, f"take profit {tier}x", now)
+            pos["rungs_fired"].append(str(tier))
+    if pos["remaining"] <= 1e-6:
+        _close(pos, "fully_sold", "every slice sold", now)
+        return True
+    why = None
+    if peak < 2.0 and mult <= stop:
+        why = ("stop_loss", f"hard stop at {mult:.2f}x")
+    elif peak >= 2.0 and mult <= peak * trail:
+        why = ("trailing_stop", f"{mult:.1f}x is {int((1 - trail) * 100)}% below the {peak:.1f}x peak")
+    elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "20")) and peak < 1.5 and mult < 1.2:
+        why = ("time_stop", f"no move after {age_min:.0f} min")
+    elif age_min >= float(os.environ.get("EARLY_MAX_HOLD_MIN", "1440")):
+        why = ("max_hold", "24h hold limit")
+    if why:
+        _sell(pos, pos["remaining"], mcap, why[0], now)
+        _close(pos, why[0], why[1], now)
+        return True
+    return False
+
+
 def _batch_snapshots(book: dict, batch_fn) -> dict:
     """{(chain, token): snapshot} via ONE DexScreener batch call per chain
     per 30 tokens (Sept 30 2026: the 20-second fast watcher would otherwise
@@ -186,7 +237,7 @@ def _batch_snapshots(book: dict, batch_fn) -> dict:
 
 
 def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, now: Optional[float] = None,
-           batch_fn: Optional[Callable] = None) -> dict:
+           batch_fn: Optional[Callable] = None, source_prefix: Optional[str] = None) -> dict:
     """Re-price every open paper position and apply exits. Pass batch_fn
     (layers.layer14_revival.fetch_dexscreener_batch) in production; the
     per-token snapshot_fn is kept for tests and as a fallback."""
@@ -194,9 +245,12 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
     book = _open()
     if not book:
         return {"open": 0, "closed_now": 0}
-    batched = _batch_snapshots(book, batch_fn) if batch_fn else None
+    batched = _batch_snapshots({k: v for k, v in book.items() if not source_prefix or
+                                str(v.get("source", "")).startswith(source_prefix)}, batch_fn) if batch_fn else None
     closed_now = []
     for pid, pos in list(book.items()):
+        if source_prefix and not str(pos.get("source", "")).startswith(source_prefix):
+            continue
         if batched is not None:
             snap = batched.get((pos["chain"], pos["token"]))
         else:
@@ -244,6 +298,11 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             if d.action == "exit_all":
                 _sell(pos, pos["remaining"], mcap, d.exit_type, now)
                 closed_now.append(_close(pos, d.exit_type, d.reason, now))
+                del book[pid]
+            continue
+        if pos.get("strategy") == "early":
+            if _manage_early(pos, mcap, now):
+                closed_now.append(pos)
                 del book[pid]
             continue
         if pos.get("strategy") in ("scalper", "quick"):

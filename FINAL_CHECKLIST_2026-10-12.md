@@ -63,3 +63,9 @@ Legend: [ ] open  [x] done | Owner: ALI / CLAUDE | Blocks = what it stops until 
 ## CRITICAL PATH
 #1 (decide feed) -> #5/#6 (verify live) -> #7 (recorder) running -> #10 + #9 (exits, safety) -> 7-14 days -> #8/#12 (measure, tune) -> #20 (go/no-go) -> #21-#24.
 Fastest ALI actions today: #1, #2, #4, #5.
+
+## UPDATE 10:45 PM -- 24-HOUR PLAN (Ali: no time for 7-14 days)
+BUILT TONIGHT (tests green): launch recorder + outcome sampler (#7), analysis script `python analyze_early.py` (#8), bundle/sniper detection (#9 partial), real-time exit engine with take-profits/stop/trailing/time-stop checked every 6 s (#10), slippage/fee model (#14), watchdog Telegram alerts (#16 partial), PumpPortal live-execution adapter with risk caps + `python kill_switch.py on|off` (#21, #22). Live trading is OFF until EXECUTION_ENABLED=true AND PUMPPORTAL_API_KEY AND EARLY_LIVE_LANES set.
+24h RUN: recorder samples ALL launches (tens of thousands) at +5/+15/+60 min, which gives far more evidence than the few paper entries. After 24h: `python analyze_early.py` -> go/no-go. 24h proves the plumbing and a rough hit rate, NOT a durable edge. Live stakes stay tiny (LIVE_MAX_STAKE_USD=5, LIVE_DAILY_LOSS_USD=10, LIVE_MAX_OPEN=3) so the live test is the real validator.
+BLOCKER FOUND: ISP DNS blocks api.telegram.org -> no Telegram alerts reach Ali. Fix: DNS 1.1.1.1/8.8.8.8 or VPN.
+GitHub "run failed" emails: disable the cron-job.org "gem-alert" jobs (local mode owns state).

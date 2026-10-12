@@ -92,8 +92,9 @@ def make_tracker() -> EarlyTracker:
                         hot_terms_fn=hot_terms)
 
 
-_PROFILE = {"core1": ("stage", "moonshot"), "core2": ("stage", "moonshot"), "compound": ("quick", "quick"),
-            "dev_list": ("stage", "moonshot"), "leaderboard": ("stage", "moonshot")}
+# every sniper entry uses the early exit engine (paper_ledger._manage_early); the profile is the lane name
+_PROFILE = {k: ("early", k) for k in ("core1", "core2", "compound", "dev_list", "leaderboard")}
+_RECORDER = None
 
 
 def act(decision: dict, send=None, now=None) -> dict:
@@ -112,15 +113,34 @@ def act(decision: dict, send=None, now=None) -> dict:
     usd_price = sol_usd()
     mcap_usd = decision["entry_mcap_sol"] * usd_price
     opened, refused = [], []
+    if _RECORDER:
+        _RECORDER.on_decision(decision, now)
+    live_done = []
     for lane in decision.get("lanes") or [decision["lane"]]:
         ok, why = books.can_open(lane)
         stake = books.stake_usd(lane) if ok else 0.0
         if not stake:
             refused.append(f"{lane}: {why}")
             continue
-        strategy, profile = _PROFILE.get(lane, ("stage", None))
+        strategy, profile = _PROFILE.get(lane, ("early", lane))
+        is_live = False
+        try:
+            from executor import pumpportal_exec
+            l_ok, l_why, l_stake = pumpportal_exec.allowed(lane, stake)
+            if l_ok and l_stake > 0:
+                res = pumpportal_exec.buy(mint, l_stake, usd_price)
+                if res.get("ok"):
+                    is_live, stake = True, l_stake
+                    live_done.append(lane)
+                else:
+                    refused.append(f"{lane}: live buy failed ({str(res.get('resp'))[:80]})")
+            elif pumpportal_exec.lane_live(lane):
+                refused.append(f"{lane}: live blocked ({l_why})")
+        except Exception as e:  # noqa: BLE001
+            refused.append(f"{lane}: live error {type(e).__name__}")
         pos = paper_ledger.open_paper(
             "solana", mint, f"early_{lane}", f"early_{lane}", stake, mcap_usd, strategy=strategy, exit_profile=profile,
+            live=is_live,
             tags={"origin": "early", "age_s": decision["age_s"], "confirmations": decision["confirmations"],
                   "mcap_sol": decision["entry_mcap_sol"]}, module=lane)
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
@@ -132,7 +152,8 @@ def act(decision: dict, send=None, now=None) -> dict:
             f"age {decision['age_s']:.0f}s · mcap {decision['entry_mcap_sol']:.1f} SOL (~${mcap_usd:,.0f}) · "
             f"{decision['buyers']} buyers · {decision['buys']} buys/{decision['sells']} sells\n"
             f"Confirmations: {', '.join(decision['confirmations']) or 'none'}\n"
-            f"Paper entries: {', '.join(opened) or 'none'}" + (f" (refused: {'; '.join(refused)})" if refused else ""))
+            f"Paper entries: {', '.join(opened) or 'none'}" + (f" | LIVE buys: {', '.join(live_done)}" if live_done else "")
+            + (f" (refused: {'; '.join(refused)})" if refused else ""))
     try:
         from links import render_links_line
         ln = render_links_line("solana", mint)
@@ -158,12 +179,17 @@ async def main_async():
     tracker = make_tracker()
     loop = asyncio.get_running_loop()
     counters = {"events": 0, "entries": 0}
+    global _RECORDER
+    from early_recorder import Recorder
+    _RECORDER = recorder = Recorder()
 
     def on_event(e):
         counters["events"] += 1
         kind = (e.get("txType") or "").lower()
         if kind == "create":
-            if not tracker.on_create(e):
+            tracked = tracker.on_create(e)
+            recorder.on_create(e, tracked, (e.get("traderPublicKey") in tracker.dev_list))
+            if not tracked:
                 return None
             tracker.feed_off = stream.trades_blocked
             dec = tracker.evaluate(e["mint"])        # dev-list launches enter at creation, no trade feed needed
@@ -184,6 +210,8 @@ async def main_async():
         while True:
             await asyncio.sleep(30)
             try:
+                for r in [r for r in tracker.recs.values() if time.time() - r.created > 1800]:
+                    recorder.on_final(r)
                 gone = tracker.sweep()
                 if gone:
                     await stream.unsubscribe_trades(gone)
@@ -200,11 +228,61 @@ async def main_async():
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
 
+    async def manager():
+        """Sniper position manager: re-prices open early positions every few seconds (stream price when the
+        coin is tracked and recently traded, DexScreener otherwise) and applies the early exit engine."""
+        from executor import paper_ledger
+        from layers.layer0_scoring import fetch_dexscreener_snapshot
+        while True:
+            await asyncio.sleep(float(os.environ.get("EARLY_MANAGE_SECONDS", "6")))
+            try:
+                if not any(str(p.get("source", "")).startswith("early_") for p in paper_ledger._open().values()):
+                    continue
+                px = sol_usd()
+
+                def snap(chain, token):
+                    r = tracker.recs.get(token)
+                    if r and r.mcap_sol and time.time() - r.last_ts < 20:
+                        return {"mcap_usd": r.mcap_sol * px, "liquidity_usd": None}
+                    return fetch_dexscreener_snapshot(chain, token)
+                await loop.run_in_executor(None, lambda: paper_ledger.manage(snap, source_prefix="early_"))
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
+    async def sampler():
+        from layers.layer14_revival import fetch_dexscreener_batch
+        while True:
+            await asyncio.sleep(30)
+            try:
+                n = await loop.run_in_executor(None, lambda: recorder.sample(fetch_dexscreener_batch))
+                counters["outcomes"] = counters.get("outcomes", 0) + n
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
+    health = {"alerted": 0.0}
+
+    async def watchdog():
+        """Telegram warning when the launch feed goes quiet or the trade feed is blocked."""
+        while True:
+            await asyncio.sleep(60)
+            try:
+                quiet = stream.last_event_ts and time.time() - stream.last_event_ts > 120
+                if (quiet or stream.trades_blocked) and time.time() - health["alerted"] > 1800:
+                    health["alerted"] = time.time()
+                    msg = ("⚠️ early-watch: launch feed quiet for >2 min" if quiet else
+                           "⚠️ early-watch: trade feed OFF (set PUMPPORTAL_API_KEY) -- only dev-list launches can enter")
+                    await loop.run_in_executor(None, __import__("telegram_alert").send_telegram_message, msg)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
+    tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()
     finally:
         hk.cancel()
+        for t in tasks:
+            t.cancel()
 
 
 def main():

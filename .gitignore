@@ -7,3 +7,5 @@ logs/
 
 .gem_alert_state.json*
 .gem_state_*.tmp
+early_log/
+KILL_SWITCH

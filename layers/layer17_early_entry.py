@@ -42,7 +42,8 @@ def _f(name: str, default: float) -> float:
 
 class Rec:
     __slots__ = ("mint", "symbol", "name", "creator", "created", "dev_tokens", "init_sol", "mcap_sol0", "mcap_sol",
-                 "buyers", "buys", "sells", "buy_sol", "sell_sol", "creator_sold", "smart", "decided", "trades")
+                 "buyers", "buys", "sells", "buy_sol", "sell_sol", "creator_sold", "smart", "decided", "trades",
+                 "fast", "last_ts", "peak_sol")
 
     def __init__(self, mint, symbol, name, creator, created, dev_tokens, init_sol, mcap_sol):
         self.mint, self.symbol, self.name, self.creator, self.created = mint, symbol, name, creator, created
@@ -53,6 +54,9 @@ class Rec:
         self.creator_sold = 0.0
         self.smart: Set[str] = set()
         self.decided = False
+        self.fast: Set[str] = set()          # wallets that bought within the first seconds (bundle/sniper signature)
+        self.last_ts = created
+        self.peak_sol = mcap_sol
 
 
 def _num(x) -> float:
@@ -107,12 +111,16 @@ class EarlyTracker:
         mc = _num(e.get("marketCapSol"))
         if mc:
             r.mcap_sol = mc
+            r.peak_sol = max(r.peak_sol, mc)
+        r.last_ts = now
         r.trades += 1
         if kind == "buy":
             r.buys += 1
             r.buy_sol += sol
             if who and who != r.creator:
                 r.buyers[who] = r.buyers.get(who, 0.0) + sol
+                if now - r.created <= _f("EARLY_FAST_WINDOW_S", 3.0):
+                    r.fast.add(who)
         elif kind == "sell":
             r.sells += 1
             r.sell_sol += sol
@@ -152,6 +160,8 @@ class EarlyTracker:
             top = max(r.buyers.values()) / r.buy_sol
             if r.buys >= 6 and top > _f("EARLY_MAX_TOP_BUYER", 0.40):
                 return f"one wallet is {top * 100:.0f}% of the buying"
+        if len(r.fast) >= int(_f("EARLY_MAX_FAST_BUYERS", 10)):
+            return f"bundled launch ({len(r.fast)} wallets bought in the first seconds)"
         if r.trades >= 10 and r.sells > r.buys * _f("EARLY_MAX_SELL_RATIO", 0.8):
             return "sell pressure"
         return None
