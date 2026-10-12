@@ -1,4 +1,4 @@
-> SUPERSEDED BY FINAL_CHECKLIST_2026-10-12.md -- that file is the single up-to-date list of everything left.
+> The single up-to-date checklist is the MASTER STATUS block right below (updated Oct 13 2026).
 
 # S1c — Go-Live & 80% Win-Rate Checklist (single source of truth)
 
