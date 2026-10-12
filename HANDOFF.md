@@ -128,3 +128,4 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Oct 13: Sprint 96h book, Core1=30d, Core2=180d, vault banking (executor/books.py), sprint lane in early tracker. 891 tests.
 - Oct 13 night: see STATUS_2026-10-13_NIGHT.md for exactly where we stand and the morning plan.
 - Oct 13 01:45: MASTER_CHECKLIST.md is now the single checklist.
+- Oct 13 01:50: GO_LIVE_CHECKLIST.md top block = MASTER STATUS & ORDER OF WORK (single source of truth). FINAL_CHECKLIST_*/MASTER_CHECKLIST.md are stubs.

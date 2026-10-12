@@ -2,6 +2,97 @@
 
 # S1c — Go-Live & 80% Win-Rate Checklist (single source of truth)
 
+# ▶ MASTER STATUS & ORDER OF WORK — updated 13 Oct 2026, 01:50 PKT  (THE single source of truth)
+
+**UPDATE RULE (Claude, every time):** after EVERY build, test, restart or result — update this block, then HANDOFF.md, then the Notion S1c "CURRENT STATE" banner, then commit. Ali pushes with `git push origin main`. Nothing is "done" until its DONE-WHEN is met. Older sections below this block are history; if they disagree with this block, THIS BLOCK wins.
+Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · 🔴 broken/blocked · (A)=Ali · (C)=Claude · (B)=both
+
+**One-line state:** everything is PAPER. Sniper + multi-chain sniper have been running since 01:31 PKT Oct 13 (first real evidence run). No live trades anywhere. Live-trading adapter exists only for pump.fun (needs key); other platforms need adapters + wallets. 897 tests pass (mocked data only).
+
+## 1. WHAT HAS BEEN BUILT
+| Area | What | Status |
+|---|---|---|
+| Pump.fun early sniper | PumpPortal launch stream → EarlyTracker (dev_list, repeat_grad, smart_wallet, velocity, pressure, narrative confirmations) → lanes → paper entries | 🟡 running since 01:31 (launch feed works; per-coin trade feed OFF until PumpPortal key) |
+| Exit engine (all sniper entries) | partial take-profit 2x/4x/10x, hard stop, trailing stop on moon bag after 2x, dead-coin time stop, 24h max hold, checked every 6 s; 10% round-trip paper cost | ✅ built, tested on mocks and replayed in backtest_sniper.py |
+| Books / targets | Core 1 = Sprint 96h ($100→$10K, cash-out above $200 reseed); Core 2 = $125K/30d; Core 3 = $1M–$1.5M/180d; Compound (daily goal); copy books (Fomo Followers, Fomo New Wallets, Leaderboard, Dev Launch) | ✅ built · 🔴 Compound book shows $0.00 (lane can't open) |
+| Capital engine | stakes = % of book trading balance (auto-compounding), pace gauge (x1.25 behind / x0.8 ahead), profit vault (banks 20–30% of profit above 3x seed) | ✅ built/tested |
+| Multi-chain fast sniper | `multichain_sniper.py`: GeckoTerminal new pools for Solana(non-pump)/BSC/Base/Robinhood + StonkFun newest-tokens API; price-action confirmations; GoPlus honeypot gate on BSC/Base; same lanes/books/exits | 🟡 running; PAPER ONLY; entries seen on Solana, BSC, Base, Robinhood |
+| Dashboard | single place for alerts, trade links (GMGN etc.), positions, paper+live P&L, book cards (balance/vault/total/cash-out), Sniper desk | ✅ http://localhost:8787 |
+| Alerts | Telegram optional/off (blocked in Pakistan; DoH fallback built); dashboard is primary | ✅ |
+| Evidence tooling | recorder (all launches priced +5/+15/+60 min, graduation events), `analyze_early.py` (lift tables, Wilson CIs), creator reputation, `backtest_sniper.py` (exit replay on real graduated coins), `run_checks.bat` (backtests + feed health → logs\check_*.txt) | ✅ built · 🟡 first run partial |
+| Live execution (pump.fun) | PumpPortal Lightning adapter, risk caps (LIVE_MAX_STAKE_USD/LIVE_MAX_OPEN/LIVE_DAILY_LOSS_USD), kill switch (`python kill_switch.py on|off`) | ✅ built · ⬜ OFF (needs key + switches) |
+| Infra | local mode (no Upstash), DNS-over-HTTPS fallback, cron-job.org GitHub jobs paused (Ali), watchdogs | ✅ |
+| Docs sync | GO_LIVE_CHECKLIST (this), HANDOFF.md, MODULES.md, STATUS_2026-10-13_NIGHT.md, Notion banner | ✅ |
+
+## 2. WHAT IS BEING TESTED RIGHT NOW
+| Test | What it proves | Started | Status / result so far | Where to read |
+|---|---|---|---|---|
+| T1 24h evidence run (pump.fun recorder + multichain paper entries) | which launch features lift graduation odds on OUR data; paper P&L per book/lane/chain | 01:31 PKT Oct 13 (clock ends ~01:31 Oct 14) | 🟡 running. Logs 01:33 show early-watch started, multichain started, Robinhood slug = `robinhood`, paper entries on Solana/BSC/Robinhood/Base | logs\local_runner.log, logs\local_early-watch.log, dashboard, then `python analyze_early.py` |
+| T2 Exit-engine backtest on real graduated pump.fun coins (`run_checks.bat`) | do the exit rules make money on real post-graduation price paths (NOT an entry-edge test: pre-graduation prices aren't public) | 01:07 PKT | 🔴 run 1 crashed (Windows unicode) + fake 1,000,000x glitch spikes → both fixed (be02027). Partial 92-coin file is rough/unusable. Deliberately STOPPED so it doesn't share GeckoTerminal quota with T1 | logs\check_backtest_top.txt / _new.txt after re-run |
+| T3 Feed health (solana/bsc/base/robinhood/StonkFun) | each data feed actually responds on Ali's PC | — | 🟡 partly confirmed in sniper logs (all four chains + StonkFun producing candidates); full dump pending | logs\check_health.txt |
+| T4 Live trade test | real buy+sell works | — | ⬜ not started (needs Phase 2) | — |
+
+## 3. PLATFORM / CHAIN COVERAGE (what detects, enters, exits, and what's missing for LIVE)
+| Platform / chain | Detection | Paper entries | Exits | Live buy/sell | To make it live |
+|---|---|---|---|---|---|
+| Pump.fun (Solana) | ✅ fast stream (pre-early) | ✅ | ✅ | 🟡 adapter built (PumpPortal Lightning), OFF | (A) PumpPortal key + ≥0.02 SOL → `PUMPPORTAL_API_KEY`; `EXECUTION_ENABLED=true`; `EARLY_LIVE_LANES`=ONE lane; tiny stakes; watch first trades |
+| StonkFun (Solana) | 🟡 newest-tokens API (pre-graduation) + GeckoTerminal | ✅ | ✅ | ⬜ no adapter | (C) Jupiter/Raydium LaunchLab adapter (verify Jupiter routes curve-phase coins); (A) burner Solana wallet key in .env |
+| Four.meme (BSC) | 🟡 only after a DEX pool exists (GeckoTerminal); bonding-curve phase NOT seen | ✅ (pool phase) | ✅ | ⬜ no adapter | (C) bonding-curve buy/sell via TokenManager + PancakeSwap after migration, honeypot gate, slippage; (A) burner BNB wallet; $2–5 test |
+| Base | 🟡 GeckoTerminal new pools | ✅ | ✅ | ⬜ no adapter | (C) DEX-aggregator swap adapter; (A) burner wallet + 1inch API key |
+| Robinhood Chain | 🟡 GeckoTerminal slug `robinhood` (confirmed) | ✅ | ✅ | ⬜ no adapter | (C) 1inch-based adapter (memecoin support unverified); (A) burner wallet, 2nd RPC |
+| Fomo | ✅ wallet/roster alerts (credits exhausted, HTTP 402) | ✅ copy books | ✅ | ❌ no public trade API | stays alert + manual execution via dashboard links; (A) top up credits |
+
+## 4. ORDER OF WORK (do top to bottom; what's next is the first ⬜)
+### Step 1 — Run the evidence clock (NOW → ~01:31 PKT Oct 14)
+- ✅ (A) Restart from an ADMINISTRATOR CMD (old admin python processes silently blocked every normal restart; this is why the sniper never ran before 01:31) 
+- 🟡 (A) PC awake, Windows sleep = Never, minimized windows left open; restart ONLY via Admin CMD: `taskkill /F /IM python.exe` then `start_local_mode.bat`
+- ⬜ (C) Morning: read logs + dashboard; confirm Base/StonkFun/BSC/Robinhood entries; sanity-check stakes and open positions
+- ⬜ (C) FIX Compound book $0.00 (lane never opens)
+- ⬜ (C) TUNE multichain entries (too loose: 3-confirmation coins entering Core 1; max-3-open cap fills fast) → raise `MC_MIN_CONF`, `MC_MIN_LIQ_USD`, etc.
+- ⬜ (B) Re-run `run_checks.bat` (backtest top/new + feed health) once the sniper has run a few hours; (C) reads logs\check_*.txt
+- ⬜ (A) ~01:31 PKT Oct 14: `python analyze_early.py`, send output → (C) tune EARLY_*/MC_*/ROUTER_*, stakes, take-profit ladder, bank_pct
+### Step 2 — Decide go/no-go per lane (Claude + Ali, from Step 1 data)
+- ⬜ (C) Verdict per lane/chain: keep, cut or rework (no live on hope). Gate: positive paper P&L after the cost model, ≥50 entries in the lane
+- ⬜ (C) Verify dev-list wallets (only 6/25 verified); decide use
+- ⬜ (C) Book-driven stakes for copy books; realistic fills check
+### Step 3 — Live on pump.fun (smallest first)
+- ⬜ (A) PumpPortal API key + 0.02 SOL minimum (also enables per-coin trade feed → all lanes' buyer logic)
+- ⬜ (A) `.env`: `PUMPPORTAL_API_KEY`, `EXECUTION_ENABLED=true`, `EARLY_LIVE_LANES=<one lane>`, `LIVE_MAX_STAKE_USD` small, `LIVE_DAILY_LOSS_USD` small; restart from Admin CMD
+- ⬜ (B) First live buy+sell watched on dashboard; kill switch ready; review every trade for 48h vs paper; scale only after 30+ real closed trades
+### Step 4 — Live on other chains (one at a time)
+- ⬜ (A) Pick first chain (recommended: Four.meme/BSC → StonkFun → Base → Robinhood)
+- ⬜ (A) Separate BURNER wallet per chain, key only in `.env` (never in chat); 1inch API key; free Helius key → `SOLANA_RPC_URL`
+- ⬜ (C) Build adapter for that chain (paper until switched on) + tests; (B) $2–5 live test; then lane enable
+### Step 5 — Run to targets
+- ⬜ Core 1 Sprint → on $10K: dashboard "CASHED OUT" → (A) withdraw by hand, book reseeds $200; Core 2 ($125K/30d) and Core 3 ($1M–1.5M/180d) on their own seeds; weekly review of vault/stakes/pace
+### Always-open Ali items
+- ⬜ (A) Top up Fomo credits (HTTP 402) — Fomo books dead until then · ⬜ (A) Windows sleep = Never · ⬜ (A) free Helius key · ⬜ (A) send screenshots of 50x+ coins (name+chain) for calibration (12.13) · ⬜ (A) keep `EXECUTION_ENABLED=false` until Step 3
+
+## 5. KNOWN ISSUES
+- 🔴 Compound book $0.00 — lane refuses entries (fix in Step 1)
+- 🟡 Multichain thresholds loose/untuned; only coins with a DEX pool are visible; ~20 newest pools per call (busy chains miss some)
+- 🟡 Per-coin pump.fun trade feed OFF (needs key) → only dev-list entries at creation + launch-level signals until then
+- 🟡 Paper fills optimistic vs real; Robinhood memecoin swap support unverified
+- ✅ Fixed 13 Oct: restart script couldn't kill admin-level python (use Admin CMD); backtest unicode crash + glitch wicks
+
+## 6. TEST / EVENT LOG (newest first)
+- 01:50 Checklist rewritten as single master block (this).
+- 01:33 Logs confirm early-watch + multichain running; Robinhood slug `robinhood`; entries on Solana/BSC/Robinhood/Base. 24h clock started 01:31.
+- 01:31 Restart from Administrator CMD succeeded (3 old admin python processes killed).
+- 01:07–01:27 run_checks.bat run 1/2: crashed/partial (unicode; glitch wicks) → fixed be02027; stopped on purpose.
+- 00:46 Pushed multichain sniper (7c5a11f), run_checks.bat (153effd).
+- 00:30 Pushed Core 1/2/3 naming + cash-out (e0886ca), backtest_sniper.py (783052d).
+- Earlier history: see sections below (Phases 0–12) and HANDOFF.md.
+
+## 7. HONEST RISKS
+- Targets ($10K/96h = +216%/day, $125K/30d = +27%/day, $1M/180d = +5.2%/day) are what growth is REQUIRED, not shown performance. No proven edge yet; Sprint is lottery-like. Live stakes tiny, one lane first, only affordable money.
+- A 24h run proves plumbing and a rough hit rate, not a durable edge.
+
+---
+# (HISTORY — older sections below are kept for reference; this block above overrides them)
+
+
+
 _Created Sept 30 2026. Last reviewed Oct 9 2026 (no new work since Oct 6; see HANDOFF.md 0c). Every item has an OWNER and a DONE-WHEN. When an item
 is finished it is ticked `[x]` in the SAME commit that finished it, with the
 commit id. Nothing counts as done on "the code exists" alone — only on its
