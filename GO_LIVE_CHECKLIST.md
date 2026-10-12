@@ -339,4 +339,10 @@ Basis: MOONSHOT_RESEARCH.md (PONS, STONK, AMC, MARS: each had a public, dated ca
 - [ ] **12.4 CLAUDE** -- Narrative-leader map (rank first/biggest token of a hot sector, ignore clones).
 - [ ] **12.5 ALI+CLAUDE** -- Forensics of the 4 winners (first-24h buyers) to check what Layer 15 would have flagged. NEEDS a free Helius key from Ali (A5).
 - [ ] **12.6 CLAUDE** -- Point-in-time backtest of every radar incl. the catalysts that did NOT run. No radar goes live without positive results on unseen data.
+- [ ] **12.8 CLAUDE** -- Regime gauge: daily market-temperature from our own archive (launch count, graduation rate, profit share); size up only in hot regimes, paper/tiny in cold ones.
+- [ ] **12.9 CLAUDE** -- Buyback-set radar (StonkFun-style top-15 buyback inclusion; verify the claim first) and reward-token watch.
+- [ ] **12.10 CLAUDE** -- Conviction-money test: concentrated LARGE buys by tracked wallets in sub-$5M coins vs many small buys (uses Fomo roster + buyer archive).
+- [ ] **12.11 CLAUDE** -- Cross-chain narrative-lag watch (story starts on one chain, copies appear on another within hours).
+- [ ] **12.12 BOTH** -- TEST the conflict: does the Layer 15 bot-farm block remove winners? (82.8% of >100% coins reportedly show artificial growth vs MemeTrans loss reduction.) Decide on the 9.9 backtest.
+- [ ] **12.13 ALI** -- Send screenshots of the DexScreener/Fomo lists of coins that ran 50x+ in the last 30-60 days (name + chain) so the forensic script has a real winners list. My shell cannot reach those APIs.
 - [ ] **12.7 ALI** -- Core 1 ($100 -> ~$1.5M) and Core 2 ($100 -> $125k in 1-2 months) stay on paper until 12.6 passes. Maths: 1,250x and 15,000x; see MOONSHOT_RESEARCH.md.
