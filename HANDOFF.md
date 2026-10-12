@@ -126,3 +126,4 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Oct 12 23:50: Sniper desk on dashboard Overview (entries+trade links GMGN/pump.fun/Dex, open positions live multiple, paper/live P&L, status); TELEGRAM_ENABLED=false switch. Telegram no longer primary.
 - Oct 13: early_creators.py (repeat_grad), subscribeMigration + grad recording, analyze_early graduation-lift report, MOONSHOT_RESEARCH addendum, FINAL_CHECKLIST_2026-10-13.md
 - Oct 13: Sprint 96h book, Core1=30d, Core2=180d, vault banking (executor/books.py), sprint lane in early tracker. 891 tests.
+- Oct 13 night: see STATUS_2026-10-13_NIGHT.md for exactly where we stand and the morning plan.
