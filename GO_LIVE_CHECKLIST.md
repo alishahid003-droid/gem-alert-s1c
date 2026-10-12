@@ -330,3 +330,13 @@ Cause: the free DB hit 500K commands/month (908K reads); Upstash then rejects ev
 - [x] **11.4 ALI** — Local mode switched on (Oct 6, ~9:20 AM PKT): Upstash lines blanked in `.env`, old Task Scheduler jobs disabled, `start_local_mode.bat` run from a fresh clone/pull of the repo. Dashboard confirmed on the local file: fast-watch heartbeat live (`local-pc`), DB commands 0/16,000, Marathon tracking $100 day 0/150. Waiting on first poll-fast / poll-slow / poll-madeonsol heartbeats (~10-15 min after start) -- not yet confirmed.
 - [ ] **11.5 ALI+CLAUDE** — Confirm the three poll runners show recent times on the dashboard System tab (if still "never" after ~20 min: `type logs\local_poll-fast.log`). Then decide 10.2 (`EXECUTION_ENABLED`) and 11.2 (campaign env vars: `SPRINT_MODE`, `MOONSHOT_ENABLED`, `COMPOUND_SEED_USD=100`, `TOTAL_WALLET_USD=100`).
 - [ ] **11.6 ALI** — Fomo tab empty (Layer 13). DNS PART DONE Oct 9: Wi-Fi DNS set to 1.1.1.1/8.8.8.8 (`netsh`; the PowerShell in the first fix_dns.bat was broken and is corrected), log shows no more NameResolutionError. REMAINING: Fomo API returns `HTTP 402` (credits exhausted) on /v2/alerts and /v2/leaderboard/7d. Top up fomoapi.io credits, restart `start_local_mode.bat`, re-check with `findstr /i "layer13 fomoapi" logs\local_poll-fast.log`. Not a code bug.
+
+## Phase 12 -- Catalyst Radar: finding the moonshot BEFORE the crowd (Oct 12 2026)
+Basis: MOONSHOT_RESEARCH.md (PONS, STONK, AMC, MARS: each had a public, dated catalyst; hypotheses, untested).
+- [ ] **12.1 CLAUDE** -- Listing-ladder radar: watch Binance Alpha/futures/spot announcements, alert + paper-trade the next step. DONE-WHEN: tested with mocks, runs in local mode.
+- [ ] **12.2 CLAUDE** -- News-jack radar: viral brand/person news -> coins launched in the next hours with matching names -> scored with Layer 15. DONE-WHEN: tested + paper-running.
+- [ ] **12.3 CLAUDE** -- Launchpad/chain radar: new launchpads/chains, fee growth, buyback ratio vs mcap. DONE-WHEN: tested + paper-running.
+- [ ] **12.4 CLAUDE** -- Narrative-leader map (rank first/biggest token of a hot sector, ignore clones).
+- [ ] **12.5 ALI+CLAUDE** -- Forensics of the 4 winners (first-24h buyers) to check what Layer 15 would have flagged. NEEDS a free Helius key from Ali (A5).
+- [ ] **12.6 CLAUDE** -- Point-in-time backtest of every radar incl. the catalysts that did NOT run. No radar goes live without positive results on unseen data.
+- [ ] **12.7 ALI** -- Core 1 ($100 -> ~$1.5M) and Core 2 ($100 -> $125k in 1-2 months) stay on paper until 12.6 passes. Maths: 1,250x and 15,000x; see MOONSHOT_RESEARCH.md.
