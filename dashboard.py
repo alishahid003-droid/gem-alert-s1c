@@ -403,7 +403,22 @@ def _module_cards(feed: list, fomo_signals: list, fomo_candidates: list, board: 
         day = sum(1 for i in items if now - i["ts"] < 86400)
         paper = pm.get(mid) or {}
         st = paper.get("stats") or {}
-        card = {"id": mid, "emoji": m["emoji"], "name": m["name"], "blurb": m["blurb"],
+        book = None
+        if m.get("kind") == "book":
+            try:
+                from executor import books as _books
+                book = _books.status(mid)
+            except Exception as e:  # noqa: BLE001
+                print(f"[dashboard] book status {mid} failed: {type(e).__name__}: {e}")
+        wait = None
+        if mid in ("fomo_followers", "fomo_new"):
+            try:
+                if _health().get("fomo_backoff"):
+                    wait = "Waiting for Fomo credits (HTTP 402) -- starts by itself when credits are live"
+            except Exception:  # noqa: BLE001
+                pass
+        card = {"id": mid, "kind": m.get("kind"), "book": book, "wait": wait,
+                "emoji": m["emoji"], "name": m["name"], "blurb": m["blurb"],
                 "alerts_24h": day, "total_shown": len(items), "last_ago": items[0]["ago"] if items else None,
                 "latest": [{k: v for k, v in i.items() if k != "ts"} for i in items[:5]],
                 "paper_open": paper.get("open", 0), "paper_n": st.get("n", 0), "paper_wins": st.get("wins", 0),
@@ -449,7 +464,9 @@ def build_data() -> dict:
         item["category"] = LAYER_CATEGORY.get(item.get("layer"), item.get("layer") or "other")
         try:
             from layers import modules as _mods
-            item["module"] = _mods.for_layer(item.get("layer"))
+            item["module"] = (item.get("tags") or {}).get("Module") or _mods.for_layer(item.get("layer"))
+            if _mods.get(item["module"]) is None:
+                item["module"] = _mods.for_layer(item.get("layer"))
             item["module_label"] = _mods.label(item["module"])
         except Exception:  # noqa: BLE001
             item["module"], item["module_label"] = "own", ""
@@ -657,6 +674,7 @@ PAGE_TEMPLATE = """<!doctype html>
   .mblurb { color:#8a8f98; font-size:12px; margin-bottom:8px; }
   .mstats { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; margin-bottom:6px; }
   .mstatus { font-size:12px; color:#c9a227; margin-bottom:6px; }
+  .mbook { font-size:12px; background:#1b2230; border-radius:6px; padding:6px 8px; margin-bottom:6px; }
   .tabpanel { display:none; }
   .tabpanel.active { display:block; }
   .highlight-list { display:flex; flex-direction:column; gap:6px; }
@@ -1007,6 +1025,11 @@ function render(data) {
         ${c.real !== null && c.real !== undefined ? `<span>Real money: <b>${c.real ? 'ON' : 'off'}</b></span>` : ''}
       </div>
       ${c.status ? `<div class="mstatus">${esc(c.status)}</div>` : ''}
+      ${c.wait ? `<div class="mstatus">${esc(c.wait)}</div>` : ''}
+      ${c.book ? `<div class="mbook">Balance <b>$${Number(c.book.equity).toLocaleString(undefined,{maximumFractionDigits:2})}</b> (seed $${c.book.seed})
+        ${c.book.has_target ? ` &middot; target <b>$${Number(c.book.target).toLocaleString()}</b> &middot; day <b>${c.book.elapsed_days}/${c.book.days}</b> &middot; ${c.book.on_pace ? '<span class="pos-pnl">ahead of path</span>' : '<span class="neg-pnl">behind path</span>'} ($${Number(c.book.path_now).toLocaleString()}) &middot; needs <b>+${c.book.needed_daily_growth_pct}%/day</b>` : ''}
+        ${c.book.daily_goal_usd !== undefined ? ` &middot; today <b>${c.book.today_pnl >= 0 ? '+' : ''}$${c.book.today_pnl}</b> vs goal $${c.book.daily_goal_usd} ${c.book.goal_hit ? '<span class="pos-pnl">hit</span>' : ''}` : ''}
+        &middot; next stake <b>$${c.book.stake_next}</b></div>` : ''}
       ${c.latest.length ? `<table><tbody>${c.latest.map(i => `<tr>
         <td title="${esc(i.chain)}">${esc(i.ago)}</td><td><b>${esc(i.symbol)}</b></td><td class="${i.band ? 'band-' + esc(i.band) : ''}">${esc(i.band || '')}</td>
         <td>${esc(i.headline)}</td>

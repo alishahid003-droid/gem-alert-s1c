@@ -111,7 +111,8 @@ def test_scheduler_screen_alerts_once(monkeypatch):
     out = scheduler._run_moonshot_screen("solana", items)
     assert out == {"screened": 1, "qualified": 1}
     assert len(sent) == 1 and "MOONSHOT" in sent[0] and "PAWNS" in sent[0]
-    assert "moonshot:solana:MOON" in pl._open()
+    assert "core1:solana:MOON" in pl._open()              # $800K mcap -> routed to the Core 1 book
+    assert "Core 1" in sent[0] or "CORE 1" in sent[0]
     scheduler._run_moonshot_screen("solana", items)          # cooldown: no repeat alert
     assert len(sent) == 1
 

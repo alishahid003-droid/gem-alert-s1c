@@ -883,6 +883,14 @@ def _handle_scored(scored: dict, chain: str, source: str, mc: float = None, boar
     if deployer_rep_tag:
         alert.set_tag("Deployer track record", deployer_rep_tag)
     layer_name = "layer0b" if source in ("mobula", "geckoterminal") else "layer0"
+    try:  # route the coin to its book NOW so the alert names the module, not "own analysis"
+        from layers import router as _router, modules as _mods
+        _lane = _router.route({"band": sr.band, "mcap": mc, "liquidity": (scored.get("raw") or {}).get("liquidity_usd")})
+        _mid = _lane["lane"] if _lane["lane"] != "watch" else "own"
+        alert.set_tag("Module", _mid)
+        alert.module_label = _mods.label(_mid) + (" · watch" if _mid == "own" else f" · {_lane['potential']}")
+    except Exception:  # noqa: BLE001
+        pass
     send_res = _alert(alert, layer_name)
     print(f"[layer0/8:{chain}] {mint} band {sr.band} -> {send_res}")
     # Post-alert monitoring pass (Ali, Sept 28 2026 -- see state.py's
@@ -1421,6 +1429,11 @@ def poll_layer13_fomo_copytrade() -> dict:
                   f"(gap={fetched.get('gap')}): {detected['buys_recorded']} roster buy(s), "
                   f"{detected['theses_recorded']} thesis/theses, {len(detected['unmatched'])} unmatched trader(s)")
             out["buyers_by_handle"] = detected["buyers_by_handle"]
+            nw = _safe(detect_new_wallet_buys, alerts, fetch_dexscreener_snapshot)
+            if isinstance(nw, dict):
+                out["new_wallet"] = nw
+                if nw.get("signals"):
+                    print(f"[layer13] new-wallet module: {nw}")
             for ev in detected["convergence"]:
                 if ev["chain"] not in ("solana", "bsc", "robinhood_chain"):
                     continue
@@ -1746,8 +1759,14 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
                 band = sc["score"].band
         ctx = {"liquidity_usd": m.get("liquidity_usd"), "change_m5": m.get("change_m5"),
                "change_h1": m.get("change_h1"), "signals": 1}
+        from layers import router as _router, modules as _mods
+        _lane = _router.route({"moonshot_ok": True, "mcap": m.get("mcap_usd"), "liquidity": m.get("liquidity_usd"),
+                               "band": band, "moonshot_score": score})
+        if _lane["lane"] == "watch":
+            print(f"[layer15:{chain}] {addr[:10]} qualified but routed to watch: {_lane['why']}")
+            continue
         res = _safe(handle_moonshot_candidate, chain, addr, band, m.get("mcap_usd"), m.get("liquidity_usd"),
-                    score, ctx) or {}
+                    score, ctx, book=_lane["lane"], origin="layer15") or {}
         from executor import compound_scalper as _cs
         if _cs.sprint_mode():
             # Sprint: a moonshot qualifier is also a sprint entry (escape velocity).
@@ -1755,7 +1774,7 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
             _safe(handle_compound_scalper_candidate, chain, addr, band, m.get("mcap_usd"),
                   liquidity_usd=m.get("liquidity_usd"), momentum=True, entry_ctx={**ctx, "moonshot": True})
         symbol = (pair.get("baseToken") or {}).get("symbol") or addr[:8]
-        text = (f"[🌙 MOONSHOT · Core 1] 🌙 *MOONSHOT candidate* [{chain}] {symbol} (score {score}/100, band {band or '?'})\n"
+        text = (f"[{_mods.label(_lane['lane'])}] 🌙 *MOONSHOT candidate* [{chain}] {symbol} (score {score}/100, band {band or '?'}, potential {_lane['potential']})\n"
                 f"`{addr}`\n"
                 f"mcap ${m.get('mcap_usd') or 0:,.0f} · liq ${m.get('liquidity_usd') or 0:,.0f} · "
                 f"1h {m.get('change_h1') or 0:+.0f}% · 6h {m.get('change_h6') or 0:+.0f}% · "
@@ -1765,9 +1784,9 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
         if links:
             text += "\n" + links
         _safe(send_telegram_message, text)
-        _safe(state.log_full_alert, "layer15_moonshot", chain, symbol, addr,
+        _safe(state.log_full_alert, "layer15_" + _lane["lane"], chain, symbol, addr,
               f"Moonshot candidate (score {score}/100)",
-              {"Chain": chain, "Score": f"{score}/100" + (f" (band {band})" if band else ""),
+              {"Chain": chain, "Module": _lane["lane"], "Why": _lane["why"][:80], "Score": f"{score}/100" + (f" (band {band})" if band else ""),
                "MCap": f"${m.get('mcap_usd') or 0:,.0f}", "Action": str(res.get('reason') or ('BUY sent' if res.get('fired') else 'paper only'))[:80]})
         print(f"[layer15:{chain}] MOONSHOT {symbol} {addr[:10]} score {score} band {band} -> "
               f"fired={res.get('fired')} ({res.get('reason')})")

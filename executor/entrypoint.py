@@ -302,7 +302,8 @@ def open_moonshots_at_risk() -> int:
 
 def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
                               entry_mcap: Optional[float], liquidity_usd: Optional[float],
-                              moonshot_score: int, entry_ctx: Optional[dict] = None) -> dict:
+                              moonshot_score: int, entry_ctx: Optional[dict] = None,
+                              book: Optional[str] = None, origin: Optional[str] = None) -> dict:
     """Layer 15 entry path (Sept 30 2026). Always paper-trades the moonshot
     (profile "moonshot": stake back at 2x, half rides as a runner). Real money
     only with MOONSHOT_ENABLED=true, band B+ safety (entry guards, momentum
@@ -316,10 +317,19 @@ def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
     ctx = dict(entry_ctx or {})
     ctx.setdefault("liquidity_usd", liquidity_usd)
     guard_ok, guard_why = entry_guards.check(score_band, usd, ctx, momentum=True)
-    paper_ledger.open_paper(chain, token, "moonshot", "moonshot", usd, entry_mcap,
-                            band=score_band, liquidity_usd=liquidity_usd,
-                            tags={"moonshot_score": moonshot_score},
-                            guard="pass" if guard_ok else "blocked", exit_profile="moonshot")
+    paper_usd, paper_src, paper_note = usd, "moonshot", None
+    if book:  # router path (Oct 12 2026): the book has its own balance, pace and stake
+        from executor import books
+        can, paper_note = books.can_open(book)
+        paper_usd, paper_src = (books.stake_usd(book) if can else 0.0), book
+    if paper_usd:
+        paper_ledger.open_paper(chain, token, paper_src, "moonshot", paper_usd, entry_mcap,
+                                band=score_band, liquidity_usd=liquidity_usd,
+                                tags={"moonshot_score": moonshot_score, **({"origin": origin} if origin else {})},
+                                guard="pass" if guard_ok else "blocked", exit_profile="moonshot",
+                                module=book)
+    elif book and paper_note:
+        return {"fired": False, "stage": "moonshot", "reason": f"{book} book: {paper_note}"}
     if not moonshot_enabled():
         return {"fired": False, "stage": "moonshot", "reason": "MOONSHOT_ENABLED is off (paper + alert only)"}
     if _sprint_only():

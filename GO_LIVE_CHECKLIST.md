@@ -375,3 +375,8 @@ CLAUDE:
 - DONE: 10 modules (Moonshot Core 1, Compound Core 2, Radar, Leaderboard copy, Fomo followers, Fomo new wallets, Dev launch, Dev intel, Own analysis, Context). Telegram label on every alert, module on every paper trade, dashboard Modules tab, Module column on Alerts tab. See MODULES.md.
 - OPEN (Claude): Fomo new-wallet module lists wallets, not yet the coin each one traded (needs Fomo credits + profile call); dev-intel for coins we BUY (not only alert on) once positions exist; Core 2 target ($125K/1-2 months) vs code default ($90K/7 days) needs Ali's call on SPRINT_TARGET_USD.
 - ALI: restart start_local_mode.bat, open Modules tab, tell me which module is wrong/missing.
+
+## OCT 12 2026 LATE NIGHT -- BOOKS + ROUTER (Claude side, DONE)
+- DONE: books (Core 1 $100->$125K/60d, Core 2 $100->$1M/150d, Compound daily goal, 4 copy books) with own balance, pace and pace-aware stake; router sends each coin to exactly one book (alert labelled by destination); radar + Layer 15 + band A/B coins wired to it; Fomo New Wallets pipeline built (inert until Fomo credits, then automatic, zero extra credits); daily summary shows every book; dashboard cards show balance/target/pace. 863 tests green.
+- OPEN (Claude): copy books (leaderboard/fomo/dev) still use the old fixed stake on entry (book balance counts, stake not yet book-driven); Layer 15 pre-screen starts at $100K mcap so Core 2 early plays <$100K are not screened yet (needs a screen-threshold decision); tune router thresholds after first live data.
+- ALI: push, restart start_local_mode.bat, check Modules tab, confirm Core targets ($125K Core 1, $1M-$1.5M Core 2).

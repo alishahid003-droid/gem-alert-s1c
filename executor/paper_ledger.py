@@ -95,7 +95,8 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
                entry_mcap: Optional[float], band: Optional[str] = None,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
                now: Optional[float] = None, strategy: str = "stage",
-               guard: Optional[str] = None, exit_profile: Optional[str] = None) -> Optional[dict]:
+               guard: Optional[str] = None, exit_profile: Optional[str] = None,
+               module: Optional[str] = None) -> Optional[dict]:
     """Opens one paper position; no-op if the same (chain, token, source) is
     already open, the chain has no buy path, or the price is unknown."""
     if chain not in PAPER_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
@@ -107,9 +108,9 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
         return None
     try:
         from layers import modules as _mods
-        module = _mods.for_paper(source, signal)
+        module = module or _mods.for_paper(source, signal)
     except Exception:  # noqa: BLE001
-        module = "own"
+        module = module or "own"
     pos = {"id": pid, "module": module, "chain": chain, "token": token, "source": source, "signal": signal,
            "band": band, "tags": tags or {}, "usd": float(usd), "entry_mcap": float(entry_mcap),
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
@@ -336,6 +337,19 @@ def scoreboard(since_ts: Optional[float] = None) -> dict:
                                              "exit_type", "closed_ts", "opened_ts")}
                      for r in rows[-25:]][::-1]
     return out
+
+
+def _module_of(r: dict) -> str:
+    from layers import modules as mods
+    return r.get("module") or mods.for_paper(r.get("source"), r.get("signal"))
+
+
+def module_rows(module_id: str, include_runners: bool = False) -> list:
+    return [r for r in _closed() if _module_of(r) == module_id and (include_runners or r.get("strategy") != "runner")]
+
+
+def module_open_count(module_id: str) -> int:
+    return sum(1 for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
 
 
 def module_scoreboard() -> dict:

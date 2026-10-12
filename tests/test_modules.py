@@ -9,7 +9,7 @@ from executor import paper_ledger
 def test_registry_ids_unique_and_complete():
     ids = [m["id"] for m in mods.MODULES]
     assert len(ids) == len(set(ids))
-    for need in ("moonshot", "compound", "leaderboard", "fomo_followers", "fomo_new", "dev_list", "dev_intel", "own", "radar"):
+    for need in ("core1", "core2", "compound", "leaderboard", "fomo_followers", "fomo_new", "dev_list", "dev_intel", "own", "radar"):
         assert need in ids
 
 
@@ -19,9 +19,11 @@ def test_layer_and_paper_mapping():
     assert mods.for_layer("layer0b") == "own"
     assert mods.for_layer("radar_news") == "radar"
     assert mods.for_layer("something_new") == "own"       # unknown never crashes
-    assert mods.for_paper("moonshot", "moonshot") == "moonshot"
+    assert mods.for_paper("moonshot", "moonshot") == "core2"
     assert mods.for_paper("scalper") == "compound"
-    assert mods.for_paper("stage2") == "leaderboard"
+    assert mods.for_paper("stage2") == "fomo_followers"
+    assert mods.for_paper("stage1", "deployer_trusted") == "dev_list"
+    assert mods.for_paper("stage1", "score_band_A") == "compound"
     assert mods.has_dev_intel({"Dev holding": "low (3%)"}) and not mods.has_dev_intel({"Chain": "solana"})
 
 
@@ -35,9 +37,9 @@ def test_telegram_prefix():
 def test_paper_positions_carry_module(monkeypatch, tmp_path):
     monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "s.json"), raising=False)
     pos = paper_ledger.open_paper("solana", "TokX", "moonshot", "moonshot", 30, 50000)
-    assert pos and pos["module"] == "moonshot"
+    assert pos and pos["module"] == "core2"
     sb = paper_ledger.module_scoreboard()
-    assert sb["moonshot"]["open"] == 1 and sb["radar"]["open"] == 0
+    assert sb["core2"]["open"] == 1 and sb["radar"]["open"] == 0
 
 
 def test_module_cards_shape_and_routing():

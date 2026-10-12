@@ -663,3 +663,73 @@ def find_new_trader_candidates(leaderboard_traders: List[dict], min_balance_usd:
     if newly_promoted:
         state.set_fomo_promoted(promoted)
     return {"checked": checked, "candidates_found": candidates_found, "promoted": newly_promoted}
+
+
+def qualified_new_wallets() -> dict:
+    """{normalized handle: candidate} for new wallets worth copying: >= $5k
+    balance, NOT insider-flagged, positive 7d AND 30d PnL, not already on the
+    roster. Read from the candidates the leaderboard scan already stored."""
+    out = {}
+    promoted = state.get_fomo_promoted()
+    learned = state.get_fomo_handle_map()
+    for c in state.get_fomo_candidates(limit=200):
+        h = c.get("handle")
+        if not h or c.get("insider") is True:
+            continue
+        if (c.get("balance_usd") or 0) < 5000 or (c.get("pnl_7d") or 0) <= 0 or (c.get("pnl_30d") or 0) <= 0:
+            continue
+        if _match_roster(h, c.get("display_name"), learned=learned, promoted=promoted):
+            continue  # already followed: handled as a roster signal
+        out[_normalize(h)] = c
+    return out
+
+
+def detect_new_wallet_buys(alerts: List[dict], snap_fn=None, wallets: Optional[dict] = None) -> dict:
+    """Module "Fomo New Wallets" (Ali, Oct 12 2026). From the SAME /v2/alerts
+    rows the roster scan already fetched (zero extra credits), finds buys by
+    qualified new wallets, records a dashboard signal, and opens a PAPER copy
+    in the fomo_new book. Inert until Fomo returns data: when credits are out
+    the alerts fetch fails upstream and this is never reached, then it starts
+    by itself the first cycle credits are back."""
+    wallets = qualified_new_wallets() if wallets is None else wallets
+    if not wallets:
+        return {"wallets": 0, "signals": 0, "paper": 0}
+    from executor import paper_ledger, books
+    seen = state.fomo_signal_ids()
+    signals = paper = 0
+    for a in alerts:
+        if (a.get("alertType") or a.get("type") or "").lower() != "buy":
+            continue
+        handle = a.get("trader") or a.get("handle")
+        w = wallets.get(_normalize(handle))
+        mint = a.get("tokenAddress") or a.get("address") or a.get("mint")
+        if not w or not mint:
+            continue
+        chain = normalize_chain(a.get("chain") or a.get("network"))
+        sid = "newwallet:" + _signal_id(a, "buy", handle, mint)
+        if sid in seen:
+            continue
+        seen.add(sid)
+        symbol = a.get("token") or a.get("symbol") or mint[:8]
+        snap = None
+        if snap_fn:
+            try:
+                snap = snap_fn(chain, mint)
+            except Exception:  # noqa: BLE001
+                snap = None
+        mcap = (snap or {}).get("mcap_usd")
+        liq = (snap or {}).get("liquidity_usd")
+        state.record_fomo_signal(
+            kind="new_wallet_buy", trader=w.get("display_name") or handle, tier="new",
+            token_symbol=symbol, token_address=mint, chain=chain,
+            detail=f"new wallet (${w.get('balance_usd') or 0:,.0f}, 7d {w.get('pnl_7d')}, 30d {w.get('pnl_30d')}) bought {symbol}",
+            pnl_7d=w.get("pnl_7d"), pnl_30d=w.get("pnl_30d"), signal_id=sid, ts=alert_ts_seconds(a))
+        signals += 1
+        ok, _why = books.can_open("fomo_new")
+        usd = books.stake_usd("fomo_new") if ok else 0.0
+        if usd and mcap and (liq is None or liq >= 8000):
+            if paper_ledger.open_paper(chain, mint, "fomo_new", "fomo_new_wallet", usd, mcap,
+                                       liquidity_usd=liq, tags={"wallet": handle, "origin": "fomo_new"},
+                                       module="fomo_new"):
+                paper += 1
+    return {"wallets": len(wallets), "signals": signals, "paper": paper}

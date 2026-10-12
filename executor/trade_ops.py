@@ -151,6 +151,12 @@ def daily_summary_text(now: Optional[float] = None) -> str:
         lines.append(marathon_line())
     except Exception:  # noqa: BLE001
         pass
+    try:  # per-module books (executor/books.py): balance, target pace, daily goal
+        from executor import books
+        for bid in books.BOOKS:
+            lines.append("📘 " + books.line(bid))
+    except Exception:  # noqa: BLE001
+        pass
     by_sig = sb.get("by_signal") or {}
     if by_sig:
         best = sorted(by_sig.items(), key=lambda kv: -(kv[1].get("n") or 0))[:4]

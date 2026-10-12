@@ -613,7 +613,12 @@ def format_alert(c: dict, regime: Optional[dict] = None) -> str:
     from links import render_links_line
     head = {"ladder": "LISTING LADDER", "news": "NEWS-JACK", "launchpad": "LAUNCHPAD SURGE",
             "conviction": "CONVICTION MONEY", "buyback": "BUYBACK SET"}.get(c["kind"], c["kind"].upper())
-    lines = [f"[📡 RADAR] 📡 CATALYST RADAR - {head}", f"{_clean(c.get('symbol'))}  {('`' + c['token'] + '`') if c.get('token') else ''}".strip(),
+    try:
+        from layers import modules as _m
+        _lab = _m.label(c.get("lane") if c.get("lane") not in (None, "watch") else "radar")
+    except Exception:  # noqa: BLE001
+        _lab = "📡 RADAR"
+    lines = [f"[{_lab}] 📡 CATALYST RADAR - {head}" + (f" (potential {c['potential']})" if c.get("potential", "-") != "-" else ""), f"{_clean(c.get('symbol'))}  {('`' + c['token'] + '`') if c.get('token') else ''}".strip(),
              _clean(c.get("reason"))]
     tags = [f"[Chain: {c['chain']}]"] if c.get("chain") else []
     if c.get("mcap"):
@@ -638,13 +643,32 @@ def open_paper_for(c: dict) -> Optional[dict]:
     """Opens the paper position for a candidate (never a real order)."""
     if not (c.get("paper") and c.get("chain") and c.get("token") and c.get("mcap")):
         return None
-    from executor import paper_ledger
+    from executor import paper_ledger, books
     usd = _f("RADAR_PAPER_USD", 30.0)
     signal = f"radar_{c['kind']}"
     quick = c.get("profile") == "quick"
+    lane = c.get("lane") or "compound"
+    profile = c.get("profile")
+    if lane in ("core1", "core2"):          # moonshot books size and gate their own entries
+        ok, _why = books.can_open(lane)
+        usd = books.stake_usd(lane) if ok else 0.0
+        profile, quick = "moonshot", False
+    if lane == "watch" or not usd:
+        return None
     return paper_ledger.open_paper(c["chain"], c["token"], signal, signal, usd, c["mcap"],
-                                   liquidity_usd=c.get("liquidity"), tags={"radar": c["kind"], "score": c.get("score")},
-                                   strategy="quick" if quick else "stage", exit_profile=c.get("profile"))
+                                   liquidity_usd=c.get("liquidity"),
+                                   tags={"radar": c["kind"], "score": c.get("score"), "origin": "radar"},
+                                   strategy="quick" if quick else "stage", exit_profile=profile, module=lane)
+
+
+def route_candidate(c: dict) -> dict:
+    """Routes a radar candidate to its book (layers/router.py) and records it on the candidate."""
+    from layers import router
+    r = router.route({"kind": c.get("kind"), "mcap": c.get("mcap"), "liquidity": c.get("liquidity")})
+    c["lane"], c["lane_why"], c["potential"] = r["lane"], r["why"], r["potential"]
+    if r["lane"] == "watch":
+        c["paper"] = False
+    return c
 
 
 # ------------------------------------------------------------ orchestration
@@ -808,6 +832,7 @@ def run_cycle(send: Optional[Callable[[str], dict]] = None, *, fetch_json: Calla
     for c in fresh:
         if sent >= cap:
             break
+        guard("route", lambda c=c: route_candidate(c))
         pos = guard("paper", lambda c=c: open_paper_for(c))
         if pos:
             paper_n += 1
@@ -817,7 +842,8 @@ def run_cycle(send: Optional[Callable[[str], dict]] = None, *, fetch_json: Calla
         guard("feed", lambda c=c: state.log_full_alert(
             "radar_" + str(c.get("kind") or "x"), c.get("chain") or "n/a", _clean(c.get("symbol")) or "?",
             c.get("token") or "n/a", _clean(c.get("reason"))[:200],
-            {"Chain": c.get("chain") or "", "Radar": str(c.get("kind")),
+            {"Chain": c.get("chain") or "", "Radar": str(c.get("kind")), "Module": c.get("lane") or "radar",
+             "Why": str(c.get("lane_why") or "")[:80],
              "MCap": f"${c['mcap']:,.0f}" if c.get("mcap") else "",
              "Paper": "opened" if c.get("paper") else "alert only"}))
         sent += 1
