@@ -313,7 +313,7 @@ def _health() -> dict:
     runners = []
     # Oct 5 2026: cycles are throttled to save Upstash commands (poll-fast ~30 min,
     # poll-slow ~60 min, madeonsol ~30 min, fast-watch idle 3 min), so "stale" limits grew.
-    for name, expect_min in (("poll-fast", 70), ("poll-slow", 130), ("poll-madeonsol", 70), ("poll-radar", 20), ("fast-watch", 8)):
+    for name, expect_min in (("poll-fast", 70), ("poll-slow", 130), ("poll-madeonsol", 70), ("poll-radar", 20), ("early-watch", 3), ("fast-watch", 8)):
         b = beats.get(name) or {}
         ts = b.get("ts")
         age_min = (now - ts) / 60 if ts else None
@@ -372,6 +372,16 @@ def _module_cards(feed: list, fomo_signals: list, fomo_candidates: list, board: 
         elif "sprint" in n or "compound" in n:
             board_by["compound"] = r
     cards = []
+    try:
+        es = state.get_value("early_stats")
+        if isinstance(es, dict) and now - float(es.get("ts") or 0) < 180:
+            early_txt = (f"Launch sniper LIVE: {es.get('created', 0):,} launches seen, {es.get('tracked_now', 0)} tracked, "
+                         f"{es.get('entries', 0)} entries, last event {es.get('last_event_ago')}s ago"
+                         + (f" -- {es.get('error')}" if es.get("error") else ""))
+        else:
+            early_txt = "Launch sniper NOT running (start_local_mode.bat starts it; diag_early_stream.py checks the feed)"
+    except Exception:  # noqa: BLE001
+        early_txt = None
     for m in mods.MODULES:
         mid = m["id"]
         items = []
@@ -424,6 +434,8 @@ def _module_cards(feed: list, fomo_signals: list, fomo_candidates: list, board: 
                 "paper_open": paper.get("open", 0), "paper_n": st.get("n", 0), "paper_wins": st.get("wins", 0),
                 "paper_win_rate": st.get("win_rate"), "paper_pnl_usd": st.get("total_pnl_usd"),
                 "real": (board_by.get(mid) or {}).get("real"), "status": (board_by.get(mid) or {}).get("status")}
+        if mid in ("core1", "core2", "compound", "dev_list", "leaderboard"):
+            card["status"] = card["status"] or early_txt
         cards.append(card)
     return cards
 

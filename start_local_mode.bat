@@ -6,7 +6,7 @@ cd /d "%~dp0"
 echo === Pulling latest code ===
 git pull
 echo === Stopping old copies ===
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'worker_fast_watch|run_fast_watch|local_runner|dashboard\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'worker_fast_watch|run_fast_watch|worker_early_watch|local_runner|dashboard\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 timeout /t 3 /nobreak > nul
 echo === Starting fast watcher ===
 start "GemAlert FastWatch" /min cmd /c "%~dp0run_fast_watch.bat"

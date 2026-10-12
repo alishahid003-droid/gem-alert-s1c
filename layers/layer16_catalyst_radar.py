@@ -430,7 +430,8 @@ def news_candidates(matches: List[dict]) -> List[dict]:
         out.append({"id": f"news:{c.get('chain')}:{c.get('address')}", "kind": "news", "symbol": sym,
                     "chain": c.get("chain"), "token": c.get("address"), "reason": reason,
                     "score": m["score"] + (10 if m["leader"] else -20), "mcap": c.get("market_cap_usd") or c.get("fdv_usd"),
-                    "liquidity": c.get("liquidity_usd"), "paper": bool(m["leader"]), "profile": "moonshot"})
+                    "liquidity": c.get("liquidity_usd"), "paper": bool(m["leader"]), "profile": "moonshot",
+                    "age_min": m["age_min"], "change_h1": c.get("change_h1")})
     return out
 
 
@@ -664,7 +665,8 @@ def open_paper_for(c: dict) -> Optional[dict]:
 def route_candidate(c: dict) -> dict:
     """Routes a radar candidate to its book (layers/router.py) and records it on the candidate."""
     from layers import router
-    r = router.route({"kind": c.get("kind"), "mcap": c.get("mcap"), "liquidity": c.get("liquidity")})
+    r = router.route({"kind": c.get("kind"), "mcap": c.get("mcap"), "liquidity": c.get("liquidity"),
+                      "age_min": c.get("age_min")})
     c["lane"], c["lane_why"], c["potential"] = r["lane"], r["why"], r["potential"]
     if r["lane"] == "watch":
         c["paper"] = False
@@ -756,6 +758,7 @@ def run_cycle(send: Optional[Callable[[str], dict]] = None, *, fetch_json: Calla
             notes.append("news: no feed returned titles")
             return
         hot = hot_terms(feeds)
+        state.set_value("radar_hot_terms", {"ts": now, "terms": sorted(hot)[:300]})   # read by the early watcher
         matches = match_new_coins(hot, coins, now)
         copies = cross_chain_copies(coins, now=now)
         for cd in news_candidates(matches):

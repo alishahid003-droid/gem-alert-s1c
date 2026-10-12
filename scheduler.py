@@ -1760,8 +1760,11 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
         ctx = {"liquidity_usd": m.get("liquidity_usd"), "change_m5": m.get("change_m5"),
                "change_h1": m.get("change_h1"), "signals": 1}
         from layers import router as _router, modules as _mods
-        _lane = _router.route({"moonshot_ok": True, "mcap": m.get("mcap_usd"), "liquidity": m.get("liquidity_usd"),
-                               "band": band, "moonshot_score": score})
+        _created = m.get("pair_created_at")
+        _age = (time.time() - _created / 1000.0) / 60.0 if isinstance(_created, (int, float)) and _created > 0 else None
+        # Layer 15 passes only coins that ALREADY ran (+80% in 6h): never a Core entry, a swing at most.
+        _lane = _router.route({"momentum": True, "mcap": m.get("mcap_usd"), "liquidity": m.get("liquidity_usd"),
+                               "band": band, "moonshot_score": score, "age_min": _age, "change_h1": m.get("change_h1")})
         if _lane["lane"] == "watch":
             print(f"[layer15:{chain}] {addr[:10]} qualified but routed to watch: {_lane['why']}")
             continue

@@ -92,8 +92,36 @@ def _radar_loop() -> None:
         time.sleep(max(5.0, iv - (time.time() - started)))
 
 
+def early_enabled() -> bool:
+    return os.environ.get("LOCAL_RUNNER_EARLY", "true").strip().lower() != "false"
+
+
+def _early_loop() -> None:
+    """Supervises worker_early_watch.py (the real-time launch sniper): restarts it if it dies."""
+    backoff = 5.0
+    log = os.path.join(HERE, "logs", "local_early-watch.log")
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    while True:
+        started = time.time()
+        try:
+            with open(log, "a", encoding="utf-8", errors="replace") as fh:
+                fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} early-watch start ===\n")
+                fh.flush()
+                rc = subprocess.run([sys.executable, "-u", os.path.join(HERE, "worker_early_watch.py")],
+                                    cwd=HERE, stdout=fh, stderr=subprocess.STDOUT).returncode
+        except Exception as e:  # noqa: BLE001
+            rc = f"error {e}"
+        print(f"[local_runner] {time.strftime('%H:%M:%S')} early-watch exited rc={rc}; restarting", flush=True)
+        backoff = 5.0 if time.time() - started > 120 else min(backoff * 2, 120.0)
+        time.sleep(backoff)
+
+
 def main() -> None:
     last: Dict[str, float] = {}
+    if early_enabled():
+        import threading
+        threading.Thread(target=_early_loop, name="early", daemon=True).start()
+        print("[local_runner] early-watch (launch sniper) supervisor started", flush=True)
     if radar_enabled():
         import threading
         threading.Thread(target=_radar_loop, name="radar", daemon=True).start()

@@ -110,14 +110,21 @@ def pace(book_id: str, now: Optional[float] = None, eq: Optional[float] = None) 
 
 
 def max_open(book_id: str, eq: Optional[float] = None) -> int:
+    """Moonshot books take MORE small shots (lottery odds need shots on goal);
+    other books stay tighter."""
     eq = equity(book_id) if eq is None else eq
-    if eq < 300:
-        return 1
-    if eq < 3_000:
-        return 2
-    if eq < 30_000:
-        return 3
-    return 4
+    steps = (3, 4, 5, 6) if cfg(book_id)["kind"] == "moonshot" else (1, 2, 3, 4)
+    return steps[0] if eq < 300 else steps[1] if eq < 3_000 else steps[2] if eq < 30_000 else steps[3]
+
+
+def committed_usd(book_id: str) -> float:
+    """Cost of this book's open (not yet closed) paper positions still at risk."""
+    from executor import paper_ledger
+    return round(paper_ledger.module_open_cost(book_id), 2)
+
+
+def free_equity(book_id: str) -> float:
+    return max(0.0, round(equity(book_id) - committed_usd(book_id), 2))
 
 
 def open_count(book_id: str) -> int:
@@ -147,7 +154,8 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
             base *= 1.25
         elif r is not None and r > 1.5:
             base *= 0.8
-    return round(max(0.0, min(base, eq * c["max_share"])), 2)
+    out = min(base, eq * c["max_share"], free_equity(book_id))
+    return round(max(0.0, out), 2) if out >= 5.0 else 0.0
 
 
 def can_open(book_id: str) -> tuple:
@@ -156,6 +164,8 @@ def can_open(book_id: str) -> tuple:
         return False, f"{book_id} book is empty (${eq:.2f})"
     if open_count(book_id) >= max_open(book_id, eq):
         return False, f"{book_id}: {max_open(book_id, eq)} open position(s) is the limit at ${eq:,.0f}"
+    if free_equity(book_id) < 5.0:
+        return False, f"{book_id}: balance is fully committed (${committed_usd(book_id):,.0f} open)"
     return True, "ok"
 
 

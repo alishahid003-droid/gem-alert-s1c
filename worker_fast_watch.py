@@ -55,6 +55,8 @@ def busy() -> bool:
         import executor.compound_scalper as compound_scalper
         if compound_scalper.sprint_mode():
             return True      # sprint: 20-s ticks for the momentum lane
+        if paper_ledger._open():
+            return True      # early-entry paper positions move in minutes: manage them at 20 s
         if any(p.get("amount_tokens") for p in position_state.list_open_positions()):
             return True
         return bool(compound_scalper.status().get("open_position"))

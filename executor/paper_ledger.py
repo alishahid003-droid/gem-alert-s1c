@@ -348,6 +348,12 @@ def module_rows(module_id: str, include_runners: bool = False) -> list:
     return [r for r in _closed() if _module_of(r) == module_id and (include_runners or r.get("strategy") != "runner")]
 
 
+def module_open_cost(module_id: str) -> float:
+    """USD still at risk in this module's open positions (cost x remaining)."""
+    return sum(float(p.get("usd") or 0) * float(p.get("remaining", 1.0))
+               for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
+
+
 def module_open_count(module_id: str) -> int:
     return sum(1 for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
 

@@ -323,11 +323,13 @@ def handle_moonshot_candidate(chain: str, token: str, score_band: Optional[str],
         can, paper_note = books.can_open(book)
         paper_usd, paper_src = (books.stake_usd(book) if can else 0.0), book
     if paper_usd:
+        swing = book == "compound"       # swing book takes 2x-10x profits, no runner lottery
         paper_ledger.open_paper(chain, token, paper_src, "moonshot", paper_usd, entry_mcap,
                                 band=score_band, liquidity_usd=liquidity_usd,
                                 tags={"moonshot_score": moonshot_score, **({"origin": origin} if origin else {})},
-                                guard="pass" if guard_ok else "blocked", exit_profile="moonshot",
-                                module=book)
+                                guard="pass" if guard_ok else "blocked",
+                                strategy="quick" if swing else "stage",
+                                exit_profile="quick" if swing else "moonshot", module=book)
     elif book and paper_note:
         return {"fired": False, "stage": "moonshot", "reason": f"{book} book: {paper_note}"}
     if not moonshot_enabled():

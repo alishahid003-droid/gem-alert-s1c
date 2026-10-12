@@ -29,36 +29,48 @@ def _f(name: str, default: float) -> float:
 
 
 def route(c: dict) -> Dict:
-    """-> {"lane": ..., "why": str, "potential": "100x+"|"10x-50x"|"2x-13x"|"-"}"""
+    """-> {"lane": ..., "why": str, "potential": "100x+"|"10x-50x"|"2x-13x"|"-"}
+
+    AGE first, never "already moved" (Ali, Oct 12 2026: entering at $100K-$300K
+    is useless). Real-time launch entries are decided by layers/layer17_early_entry.py;
+    this router is for coins found by the polling layers, where age is the
+    earliness proxy and market cap is only a sanity ceiling."""
     mcap = c.get("mcap")
     liq = c.get("liquidity")
     kind = c.get("kind")
     band = c.get("band")
+    age = c.get("age_min")
+    h1 = c.get("change_h1")
     if c.get("blocked"):
         return {"lane": "watch", "why": "blocked by entry guard / rug filter", "potential": "-"}
     min_liq = _f("ROUTER_MIN_LIQ_USD", 8_000.0)
     if liq is not None and liq < min_liq:
         return {"lane": "watch", "why": f"liquidity ${liq:,.0f} below ${min_liq:,.0f}", "potential": "-"}
+    if h1 is not None and h1 > _f("ROUTER_MAX_RAN_H1_PCT", 300.0):
+        return {"lane": "watch", "why": f"already ran +{h1:.0f}% in 1h", "potential": "-"}
 
-    # Exchange-listing ladder pops are +20-70% plays on big caps: daily-profit book.
+    # Exchange-listing ladder pops: short swings on big caps -> daily-profit book.
     if kind == "ladder":
         return {"lane": "compound", "why": "listing-ladder pop (short swing)", "potential": "2x-13x"}
 
     moonshot_class = bool(c.get("moonshot_ok")) or kind in ("news", "launchpad", "conviction", "buyback")
+    c2_age, c1_age = _f("ROUTER_CORE2_MAX_AGE_MIN", 15.0), _f("ROUTER_CORE1_MAX_AGE_MIN", 120.0)
+    c2_cap, c1_cap = _f("ROUTER_CORE2_MCAP_CEIL", 200_000.0), _f("ROUTER_CORE1_MCAP_CEIL", 1_000_000.0)
     if moonshot_class:
-        core2_max = _f("ROUTER_CORE2_MAX_MCAP", 300_000.0)
-        core1_max = _f("ROUTER_CORE1_MAX_MCAP", 8_000_000.0)
-        age = c.get("age_min")
-        if mcap is None:
-            return {"lane": "watch", "why": "moonshot-class but mcap unknown", "potential": "-"}
-        if mcap <= core2_max and (age is None or age <= _f("ROUTER_CORE2_MAX_AGE_MIN", 24 * 60)):
-            return {"lane": "core2", "why": f"early moonshot: mcap ${mcap:,.0f} <= ${core2_max:,.0f}", "potential": "100x+"}
-        if mcap <= core1_max:
-            return {"lane": "core1", "why": f"moonshot with traction: mcap ${mcap:,.0f}", "potential": "10x-50x"}
-        return {"lane": "watch", "why": f"mcap ${mcap:,.0f} too large for a 10x+ play", "potential": "-"}
+        if age is not None and age <= c2_age and (mcap is None or mcap <= c2_cap):
+            return {"lane": "core2", "why": f"pre-early: {age:.0f} min old", "potential": "100x+"}
+        if age is not None and age <= c1_age and (mcap is None or mcap <= c1_cap):
+            return {"lane": "core1", "why": f"early: {age:.0f} min old", "potential": "10x-50x"}
+        # older than the early windows: no moonshot claim, at most a swing
+        if band in ("A", "B") or c.get("moonshot_ok"):
+            if age is None or age <= _f("ROUTER_COMPOUND_MAX_AGE_MIN", 180.0):
+                return {"lane": "compound", "why": "confirmed but past the early window: swing only", "potential": "2x-13x"}
+        return {"lane": "watch", "why": "past the early window", "potential": "-"}
 
     if band in ("A", "B") or c.get("momentum"):
-        if mcap is not None and mcap > _f("ROUTER_COMPOUND_MAX_MCAP", 30_000_000.0):
-            return {"lane": "watch", "why": "mcap too large for a swing", "potential": "-"}
+        if age is not None and age > _f("ROUTER_COMPOUND_MAX_AGE_MIN", 180.0):
+            return {"lane": "watch", "why": f"{age:.0f} min old: move already happened", "potential": "-"}
+        if mcap is not None and mcap > _f("ROUTER_COMPOUND_MAX_MCAP", 5_000_000.0):
+            return {"lane": "watch", "why": "mcap too large for a 2x-13x swing", "potential": "-"}
         return {"lane": "compound", "why": f"band {band}" if band in ("A", "B") else "momentum swing", "potential": "2x-13x"}
     return {"lane": "watch", "why": "no moonshot or swing signal", "potential": "-"}

@@ -13,16 +13,19 @@ def _iso(monkeypatch, tmp_path):
 
 
 def test_router_lanes():
-    assert router.route({"moonshot_ok": True, "mcap": 120_000, "liquidity": 30_000})["lane"] == "core2"
-    assert router.route({"moonshot_ok": True, "mcap": 2_000_000, "liquidity": 90_000})["lane"] == "core1"
-    assert router.route({"moonshot_ok": True, "mcap": 60_000_000})["lane"] == "watch"
-    assert router.route({"band": "A", "mcap": 500_000, "liquidity": 40_000})["lane"] == "compound"
+    assert router.route({"moonshot_ok": True, "age_min": 6, "mcap": 40_000, "liquidity": 12_000})["lane"] == "core2"
+    assert router.route({"moonshot_ok": True, "age_min": 60, "mcap": 400_000, "liquidity": 40_000})["lane"] == "core1"
+    # old/large coins are NOT moonshots any more: swing at most, or watch
+    assert router.route({"moonshot_ok": True, "age_min": 600, "mcap": 2_000_000, "liquidity": 90_000})["lane"] == "watch"
+    assert router.route({"moonshot_ok": True, "mcap": 2_000_000, "liquidity": 90_000})["lane"] == "compound"
+    assert router.route({"band": "A", "age_min": 30, "mcap": 500_000, "liquidity": 40_000})["lane"] == "compound"
+    assert router.route({"band": "A", "age_min": 900, "mcap": 500_000, "liquidity": 40_000})["lane"] == "watch"
+    assert router.route({"band": "A", "age_min": 30, "change_h1": 900, "liquidity": 40_000})["lane"] == "watch"
     assert router.route({"kind": "ladder", "mcap": 800_000_000})["lane"] == "compound"
-    assert router.route({"kind": "news", "mcap": 90_000, "liquidity": 20_000})["lane"] == "core2"
+    assert router.route({"kind": "news", "age_min": 4, "mcap": 30_000, "liquidity": 20_000})["lane"] == "core2"
     assert router.route({"band": "C"})["lane"] == "watch"
     assert router.route({"band": "A", "blocked": True})["lane"] == "watch"
     assert router.route({"band": "A", "liquidity": 500})["lane"] == "watch"
-    assert router.route({"moonshot_ok": True})["lane"] == "watch"            # mcap unknown
 
 
 def test_core_targets_and_defaults():
@@ -63,7 +66,8 @@ def test_book_equity_from_paper_trades(monkeypatch):
 
 def test_can_open_limits(monkeypatch):
     assert books.can_open("core2")[0] is True
-    paper_ledger.open_paper("solana", "T1", "core2", "moonshot", 30, 50_000)
+    for i in range(3):                                   # moonshot books take up to 3 shots below $300
+        paper_ledger.open_paper("solana", f"T{i}", "core2", "moonshot", 10, 50_000, module="core2")
     ok, why = books.can_open("core2")
     assert not ok and "limit" in why
 
@@ -95,19 +99,21 @@ def test_router_integration_core_moonshot_into_book(monkeypatch):
     assert res["fired"] is False
     pos = paper_ledger._open()["core2:solana:TokC2"]
     assert pos["module"] == "core2" and pos["usd"] == books.stake_usd("core2") or pos["usd"] == 25.0
-    # book limit reached: second entry is refused with the book's reason
+    for i in range(2):
+        paper_ledger.open_paper("solana", f"X{i}", "core2", "moonshot", 10, 50_000, module="core2")
+    # book limit reached: next entry is refused with the book's reason
     res2 = handle_moonshot_candidate("solana", "TokC2b", "B", 150_000, 40_000, 70, {}, book="core2")
     assert "core2 book" in res2["reason"] and "core2:solana:TokC2b" not in paper_ledger._open()
 
 
 def test_radar_candidate_routing(monkeypatch):
     from layers import layer16_catalyst_radar as r
-    c = {"kind": "news", "chain": "solana", "token": "RadTok", "mcap": 90_000, "liquidity": 20_000, "paper": True, "symbol": "RAD", "reason": "x"}
+    c = {"kind": "news", "chain": "solana", "token": "RadTok", "mcap": 90_000, "age_min": 7, "liquidity": 20_000, "paper": True, "symbol": "RAD", "reason": "x"}
     r.route_candidate(c)
     assert c["lane"] == "core2" and "CORE 2" in r.format_alert(c)
     pos = r.open_paper_for(c)
     assert pos and pos["module"] == "core2" and pos["exit_profile"] == "moonshot"
-    big = {"kind": "news", "chain": "solana", "token": "Big", "mcap": 90_000_000, "liquidity": 2_000_000, "paper": True, "symbol": "B", "reason": "x"}
+    big = {"kind": "news", "chain": "solana", "token": "Big", "mcap": 90_000_000, "age_min": 4000, "liquidity": 2_000_000, "paper": True, "symbol": "B", "reason": "x"}
     r.route_candidate(big)
     assert big["lane"] == "watch" and r.open_paper_for(big) is None
     lad = {"kind": "ladder", "chain": "solana", "token": "Lad", "mcap": 500_000_000, "liquidity": 9_000_000, "paper": True, "symbol": "L", "reason": "x", "profile": "quick"}

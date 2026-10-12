@@ -380,3 +380,20 @@ CLAUDE:
 - DONE: books (Core 1 $100->$125K/60d, Core 2 $100->$1M/150d, Compound daily goal, 4 copy books) with own balance, pace and pace-aware stake; router sends each coin to exactly one book (alert labelled by destination); radar + Layer 15 + band A/B coins wired to it; Fomo New Wallets pipeline built (inert until Fomo credits, then automatic, zero extra credits); daily summary shows every book; dashboard cards show balance/target/pace. 863 tests green.
 - OPEN (Claude): copy books (leaderboard/fomo/dev) still use the old fixed stake on entry (book balance counts, stake not yet book-driven); Layer 15 pre-screen starts at $100K mcap so Core 2 early plays <$100K are not screened yet (needs a screen-threshold decision); tune router thresholds after first live data.
 - ALI: push, restart start_local_mode.bat, check Modules tab, confirm Core targets ($125K Core 1, $1M-$1.5M Core 2).
+
+## OCT 12 2026 NIGHT 2 -- PRE-EARLY SNIPER ENGINE (Claude side DONE; paper only)
+Built: free PumpPortal stream -> per-coin tracker -> entries in the first seconds/minutes (Core 2 <=4 min, Core 1 <=20 min, Compound on >=3 confirmations, dev_list, leaderboard fallback). Router is age-first. See MODULES.md.
+
+### ALI's actions
+- [ ] `git push origin main` (if rejected: `git pull --rebase --autostash origin main`, then push)
+- [ ] Restart `start_local_mode.bat` (now also starts early-watch)
+- [ ] Run `python diag_early_stream.py` (30 s) and send me the output -- verifies the live PumpPortal field names
+- [ ] Dashboard: Modules tab shows "Launch sniper LIVE"; System tab shows early-watch green
+- [ ] Top up Fomo credits (HTTP 402) -- Fomo New Wallets starts by itself
+- [ ] Windows sleep = Never; keep EXECUTION_ENABLED=false; free Helius key -> SOLANA_RPC_URL
+- [ ] Let it collect 3-7 days, then send me the Modules tab numbers so thresholds can be tuned
+
+### Claude's actions (open)
+- [ ] Tune EARLY_*/ROUTER_* from real paper results
+- [ ] Faster paper exits for minute-scale pumps (fast-watch manages ~1/min)
+- [ ] Book-driven stakes for copy books

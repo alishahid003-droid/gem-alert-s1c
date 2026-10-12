@@ -266,10 +266,10 @@ def test_run_cycle_end_to_end_and_dedupe(monkeypatch):
     assert out["errors"] == [], out
     kinds = " ".join(sent)
     assert "LISTING LADDER" in kinds and "NEWS-JACK" in kinds and "LAUNCHPAD SURGE" in kinds
-    assert out["alerts"] == 3 and out["paper"] >= 2
+    assert out["alerts"] == 3 and out["paper"] >= 1          # router: only coins with a known early age get a paper entry
     from executor import paper_ledger
     ids = set(paper_ledger._open())
-    assert "radar_ladder:solana:FOOTOKEN" in ids and "radar_news:solana:TENEVADDR" in ids
+    assert "radar_ladder:solana:FOOTOKEN" in ids and "radar_news:solana:TENEVADDR" in ids   # 30-min-old news coin -> Core 1
     # second pass: nothing new -> no repeat alerts
     sent2 = []
     out2 = r.run_cycle(lambda m: sent2.append(m), fetch_json=fj, fetch_text=ft, coins_fn=cf, dex_batch=lambda a: {}, now=time.time())

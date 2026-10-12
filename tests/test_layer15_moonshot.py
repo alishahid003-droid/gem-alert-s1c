@@ -98,7 +98,7 @@ def test_scheduler_screen_alerts_once(monkeypatch):
     sent = []
     live = time.time()
     p = pair()
-    p["pairCreatedAt"] = (live - 10 * 3600) * 1000
+    p["pairCreatedAt"] = (live - 2 * 3600) * 1000
     p["baseToken"] = {"symbol": "PAWNS"}
     monkeypatch.setattr(scheduler.layer14, "fetch_dexscreener_batch", lambda chain, addrs: {"MOON": p})
 
@@ -111,8 +111,8 @@ def test_scheduler_screen_alerts_once(monkeypatch):
     out = scheduler._run_moonshot_screen("solana", items)
     assert out == {"screened": 1, "qualified": 1}
     assert len(sent) == 1 and "MOONSHOT" in sent[0] and "PAWNS" in sent[0]
-    assert "core1:solana:MOON" in pl._open()              # $800K mcap -> routed to the Core 1 book
-    assert "Core 1" in sent[0] or "CORE 1" in sent[0]
+    assert "compound:solana:MOON" in pl._open()           # already-ran coin: swing book, never a Core entry
+    assert "COMPOUND" in sent[0]
     scheduler._run_moonshot_screen("solana", items)          # cooldown: no repeat alert
     assert len(sent) == 1
 

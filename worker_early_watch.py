@@ -1,0 +1,215 @@
+"""Early watcher -- the sniper (Ali, Oct 12 2026). Runs on your PC as its own
+process (local_runner supervises it). Listens to EVERY new pump.fun launch in
+real time (free PumpPortal stream) and decides within seconds, per coin, whether
+a book should take a paper entry (layers/layer17_early_entry.py).
+
+Memory-only while it listens (no state writes per event); state is written only
+on an entry, a heartbeat (every 30 s) and the stats snapshot the dashboard reads.
+PAPER only. Real money stays off.
+
+Usage: python worker_early_watch.py
+"""
+import asyncio
+import json
+import os
+import time
+import traceback
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+import state  # noqa: E402
+from early_stream import EarlyStream  # noqa: E402
+from layers import modules  # noqa: E402
+from layers.layer17_early_entry import EarlyTracker  # noqa: E402
+
+WSOL = "So11111111111111111111111111111111111111112"
+_cache = {}
+
+
+def _cached(key: str, ttl: float, fn):
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    try:
+        val = fn()
+    except Exception:  # noqa: BLE001
+        val = hit[1] if hit else None
+    _cache[key] = (time.time(), val)
+    return val
+
+
+def sol_usd() -> float:
+    """SOL price in USD, cached 5 min; falls back to SOL_USD env (default 150)."""
+    def fetch():
+        from utils.http import get_json
+        j = get_json(f"https://api.dexscreener.com/latest/dex/tokens/{WSOL}")
+        pairs = (j or {}).get("pairs") or []
+        best = max(pairs, key=lambda p: float(((p.get("liquidity") or {}).get("usd")) or 0), default=None)
+        return float(best["priceUsd"]) if best and best.get("priceUsd") else None
+    v = _cached("sol", 300, fetch)
+    try:
+        return float(v) if v else float(os.environ.get("SOL_USD", "150"))
+    except ValueError:
+        return 150.0
+
+
+def load_dev_list() -> set:
+    out = set()
+    path = os.environ.get("EARLY_DEV_LIST_FILE", "pumpfun_top_devs_oct2026.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for w in (json.load(f).get("wallets") or []):
+                if w.get("address"):
+                    out.add(w["address"])
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def smart_wallets() -> set:
+    def fetch():
+        from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
+        return get_smart_money_roster()
+    return _cached("smart", 30, fetch) or set()
+
+
+def hot_terms() -> set:
+    def fetch():
+        rec = state.get_value("radar_hot_terms")
+        if isinstance(rec, dict) and time.time() - float(rec.get("ts") or 0) < 6 * 3600:
+            return {str(t).lower() for t in (rec.get("terms") or [])}
+        return set()
+    return _cached("hot", 60, fetch) or set()
+
+
+def make_tracker() -> EarlyTracker:
+    return EarlyTracker(dev_list=load_dev_list(), smart_fn=smart_wallets,
+                        trusted_fn=state.is_deployer_trusted, blacklist_fn=state.is_deployer_blacklisted,
+                        hot_terms_fn=hot_terms)
+
+
+_PROFILE = {"core1": ("stage", "moonshot"), "core2": ("stage", "moonshot"), "compound": ("quick", "quick"),
+            "dev_list": ("stage", "moonshot"), "leaderboard": ("stage", "moonshot")}
+
+
+def act(decision: dict, send=None, now=None) -> dict:
+    """Paper entries (one per book in decision['lanes']) + one Telegram alert + feed row."""
+    from executor import books, paper_ledger
+    now = now if now is not None else time.time()
+    mint = decision["mint"]
+    if state.cache_get(f"early_seen:{mint}", 24 * 3600):
+        return {"skipped": "already acted"}
+    day = time.strftime("%Y-%m-%d", time.gmtime(now))
+    d = state.get_value("early_day")
+    d = d if isinstance(d, dict) and d.get("day") == day else {"day": day, "n": 0}
+    if d["n"] >= int(float(os.environ.get("EARLY_MAX_ENTRIES_PER_DAY", "60"))):
+        return {"skipped": "daily cap"}
+    state.cache_set(f"early_seen:{mint}", True)
+    usd_price = sol_usd()
+    mcap_usd = decision["entry_mcap_sol"] * usd_price
+    opened, refused = [], []
+    for lane in decision.get("lanes") or [decision["lane"]]:
+        ok, why = books.can_open(lane)
+        stake = books.stake_usd(lane) if ok else 0.0
+        if not stake:
+            refused.append(f"{lane}: {why}")
+            continue
+        strategy, profile = _PROFILE.get(lane, ("stage", None))
+        pos = paper_ledger.open_paper(
+            "solana", mint, f"early_{lane}", f"early_{lane}", stake, mcap_usd, strategy=strategy, exit_profile=profile,
+            tags={"origin": "early", "age_s": decision["age_s"], "confirmations": decision["confirmations"],
+                  "mcap_sol": decision["entry_mcap_sol"]}, module=lane)
+        (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
+    d["n"] += 1
+    state.set_value("early_day", d)
+    primary = decision["lane"]
+    label = modules.label(primary)
+    text = (f"[{label} · {decision['potential']}] ⚡ *EARLY ENTRY* {decision['symbol'] or mint[:8]}\n`{mint}`\n"
+            f"age {decision['age_s']:.0f}s · mcap {decision['entry_mcap_sol']:.1f} SOL (~${mcap_usd:,.0f}) · "
+            f"{decision['buyers']} buyers · {decision['buys']} buys/{decision['sells']} sells\n"
+            f"Confirmations: {', '.join(decision['confirmations']) or 'none'}\n"
+            f"Paper entries: {', '.join(opened) or 'none'}" + (f" (refused: {'; '.join(refused)})" if refused else ""))
+    try:
+        from links import render_links_line
+        ln = render_links_line("solana", mint)
+        if ln:
+            text += "\n" + ln
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        (send or __import__("telegram_alert").send_telegram_message)(text)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        state.log_full_alert("early_" + primary, "solana", decision["symbol"] or mint[:8], mint,
+                             f"Early entry ({decision['age_s']:.0f}s old, {decision['entry_mcap_sol']:.0f} SOL)",
+                             {"Chain": "solana", "Module": primary, "Confirmations": ", ".join(decision["confirmations"]),
+                              "Paper": ", ".join(opened) or "none", "Dev holding": ""})
+    except Exception:  # noqa: BLE001
+        pass
+    return {"opened": opened, "refused": refused}
+
+
+async def main_async():
+    tracker = make_tracker()
+    loop = asyncio.get_running_loop()
+    counters = {"events": 0, "entries": 0}
+
+    def on_event(e):
+        counters["events"] += 1
+        kind = (e.get("txType") or "").lower()
+        if kind == "create":
+            return [e["mint"]] if tracker.on_create(e) else None
+        if kind in ("buy", "sell"):
+            dec = tracker.on_trade(e)
+            if dec:
+                counters["entries"] += 1
+                loop.run_in_executor(None, act, dec)
+        return None
+
+    stream = EarlyStream(on_event)
+
+    async def housekeeping():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                gone = tracker.sweep()
+                if gone:
+                    await stream.unsubscribe_trades(gone)
+                snap = dict(tracker.stats, tracked_now=len(tracker.recs), events=counters["events"],
+                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error,
+                            last_event_ago=round(time.time() - stream.last_event_ts, 1) if stream.last_event_ts else None,
+                            ts=time.time())
+                state.set_value("early_stats", snap)
+                note = (f"events={snap['events']} tracked={snap['tracked_now']} entries={snap['entries']} "
+                        f"reconnects={snap['reconnects']}" + (f" err={snap['error']}" if snap["error"] else ""))
+                state.record_runner_heartbeat("early-watch", "local-pc", note)
+                print(f"[early-watch] {note}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
+    hk = asyncio.create_task(housekeeping())
+    try:
+        await stream.run_forever()
+    finally:
+        hk.cancel()
+
+
+def main():
+    print("[early-watch] started (PumpPortal stream, paper entries only)", flush=True)
+    while True:
+        try:
+            asyncio.run(main_async())
+        except KeyboardInterrupt:
+            return
+        except Exception:  # the watcher must never die
+            traceback.print_exc()
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()
