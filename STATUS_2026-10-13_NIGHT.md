@@ -24,3 +24,10 @@
 ## Honest risks
 - Targets ($10K/96h, $125K/30d, $1M/180d) are what growth is REQUIRED, not evidence of edge; Sprint is lottery-like. Keep live stakes tiny, one lane first.
 - Multi-chain thresholds are untuned guesses; non-Solana chains only see coins that already have a DEX pool (four.meme bonding-curve phase invisible); Robinhood GeckoTerminal slug is auto-probed and unverified.
+
+## CORRECTION / FINAL STATE at 01:37 PKT (supersedes the above where different)
+- The new sniper code had NOT been running before tonight: old elevated python processes (admin) survived every start_local_mode.bat restart, so the new runner could not start. Fixed at 01:31 PKT by running taskkill + start_local_mode.bat from an ADMINISTRATOR cmd window. LESSON: if restarts ever look ignored, run them from an Administrator cmd.
+- 24h evidence clock started 01:31 PKT Oct 13. Confirmed in logs at 01:33: early-watch started (pump.fun stream works; TRADE-FEED-OFF until PUMPPORTAL_API_KEY), multichain loop started, Robinhood GeckoTerminal slug = "robinhood", multichain paper entries already firing on solana / bsc / robinhood_chain (e.g. GREMLIN, RA, FAIR, CASHPIG).
+- Backtest (run_checks.bat) is NOT running (stopped on purpose so it doesn't share the free GeckoTerminal quota with the sniper). Partial 92-coin output exists in logs\check_backtest_top.txt (rough; contains glitch spikes). Re-run in the morning: run_checks.bat.
+- Observed issues to fix in the morning: compound book shows $0.00 (empty) so compound lane never opens; multichain entries look loose (3-confirmation coins entering core1) and positions cap at 3 open per book -- tune MC_* thresholds; check stakes.
+- Morning order: (1) read logs\local_runner.log + local_early-watch.log, dashboard; (2) look at compound book ($0) and fix/reseed; (3) rerun run_checks.bat; (4) python analyze_early.py once 24h is up (~01:31 PKT Oct 14); (5) decide live-automation chain.
