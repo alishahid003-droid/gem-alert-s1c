@@ -23,3 +23,19 @@ def test_other_hosts_still_fail(monkeypatch):
         assert False
     except socket.gaierror:
         pass
+
+
+def test_dashboard_sniper_desk_and_telegram_off(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TELEGRAM_ENABLED", "false")
+    import telegram_alert
+    assert "disabled" in telegram_alert.send_telegram_message("x")["reason"]
+    import dashboard
+    from executor import paper_ledger
+    paper_ledger.open_paper("solana", "MintZ", "early_core2", "early_core2", 10, 5000, strategy="early",
+                            exit_profile="core2", now=1000.0)
+    paper_ledger.manage(lambda c, t: {"mcap_usd": 7500, "liquidity_usd": 9999}, now=1010.0, source_prefix="early_")
+    d = dashboard._sniper_desk([{"ts": 1000, "layer": "early_core2", "token_symbol": "Z", "token_address": "MintZ",
+                                 "headline": "h", "tags": {"Module": "core2", "Confirmations": "velocity"}}])
+    assert d["open"][0]["mult"] == 1.5 and d["recent"][0]["links"]["GMGN"].endswith("MintZ")
+    assert d["live_on"] is False

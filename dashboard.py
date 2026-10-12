@@ -305,6 +305,45 @@ def _modules_board(scalper_status: dict) -> list:
     return rows
 
 
+def _sniper_desk(feed: list) -> dict:
+    """One place for the launch sniper: today's P&L (paper + live), open positions with live multiple,
+    latest entries with one-click trade links, and the live/kill-switch state."""
+    now = time.time()
+    day = time.strftime("%Y-%m-%d", time.gmtime(now))
+    is_early = lambda p: str(p.get("source", "")).startswith("early_")
+    opens = []
+    for p in paper_ledger._open().values():
+        if not is_early(p):
+            continue
+        m = (p.get("last_mcap") or 0) / p["entry_mcap"] if p.get("entry_mcap") and p.get("last_mcap") else None
+        opens.append({"token": p["token"], "lane": p.get("module"), "usd": p["usd"], "live": bool(p.get("live")),
+                      "mult": m, "held": _ago(p.get("opened_ts") or now), "remaining": p.get("remaining"),
+                      "links": links.build_links("solana", p["token"])})
+    closed = [r for r in paper_ledger._closed() if is_early(r)
+              and time.strftime("%Y-%m-%d", time.gmtime(r.get("closed_ts") or 0)) == day]
+    pnl = lambda rows: round(sum(float(r.get("pnl_usd") or 0) for r in rows), 2)
+    recent = []
+    for f in reversed(feed or []):
+        if str(f.get("layer", "")).startswith("early_"):
+            recent.append({"ts": _fmt_ts(f["ts"]), "symbol": f.get("token_symbol"), "token": f.get("token_address"),
+                           "lane": (f.get("tags") or {}).get("Module"), "why": (f.get("tags") or {}).get("Confirmations"),
+                           "headline": f.get("headline"), "links": links.build_links("solana", f.get("token_address"))})
+        if len(recent) >= 15:
+            break
+    es = state.get_value("early_stats") or {}
+    try:
+        from executor import pumpportal_exec as px
+        kill, lanes = px.kill_switch_on(), sorted({x.strip() for x in os.environ.get("EARLY_LIVE_LANES", "").split(",") if x.strip()})
+        live_on = os.environ.get("EXECUTION_ENABLED", "").strip().lower() == "true" and bool(os.environ.get("PUMPPORTAL_API_KEY"))
+    except Exception:  # noqa: BLE001
+        kill, lanes, live_on = False, [], False
+    return {"open": opens, "closed_today": len(closed), "wins_today": sum(1 for r in closed if r.get("win")),
+            "pnl_paper_today": pnl(closed), "pnl_live_today": pnl([r for r in closed if r.get("live")]),
+            "recent": recent, "kill": kill, "live_lanes": lanes if live_on else [], "live_on": live_on,
+            "feed_ok": bool(es) and time.time() - float(es.get("ts") or 0) < 180, "trades_blocked": bool(es.get("trades_blocked")),
+            "launches_seen": es.get("created"), "entries": es.get("entries")}
+
+
 def _health() -> dict:
     """System-tab health (Sept 30 2026): is each runner actually running,
     and what's the real fomoapi.io credit situation."""
@@ -586,6 +625,7 @@ def build_data() -> dict:
         "paper": paper_ledger.scoreboard(),
         "modules_board": _modules_board(scalper_status),
         "module_cards": _safe_cards(feed, fomo_signals, fomo_candidates, scalper_status),
+        "sniper_desk": (lambda: _sniper_desk(feed))() if True else None,
         "win_rate_target": 0.8,
     }
     _lap(f"TOTAL")
@@ -712,6 +752,10 @@ PAGE_TEMPLATE = """<!doctype html>
 </nav>
 
 <div class="tabpanel active" data-panel="overview">
+  <section>
+    <h2>Sniper desk <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(entries, P&amp;L and trade links, all in one place; this replaces Telegram)</span></h2>
+    <div id="sniper_desk"></div>
+  </section>
   <section>
     <h2>What needs your eyes <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(most recent, non-noise alerts)</span></h2>
     <div id="recent_highlights"></div>
@@ -881,7 +925,32 @@ function renderAttentionAndHighlights(data) {
   else { badgeAlerts.style.display = "none"; }
 }
 
+function renderSniper(d) {
+  const el = document.getElementById("sniper_desk");
+  if (!el) return;
+  if (!d) { el.innerHTML = '<span class="na">sniper data unavailable</span>'; return; }
+  const btn = (l) => Object.entries(l || {}).map(([k,u]) => `<a class="linkbtn" href="${esc(u)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" ");
+  const status = d.live_on ? (d.kill ? '<span class="neg-pnl">LIVE ARMED but KILL SWITCH ON</span>' : `<span class="pos-pnl">LIVE lanes: ${esc((d.live_lanes||[]).join(", ") || "none")}</span>`) : '<span class="na">paper only (live off)</span>';
+  const feedTxt = !d.feed_ok ? '<span class="neg-pnl">early-watch not running</span>' : (d.trades_blocked ? '<span class="neg-pnl">launch feed OK, trade feed OFF</span>' : '<span class="pos-pnl">sniper live</span>');
+  const open = (d.open || []).map(p => `<tr><td>${esc(p.lane)}${p.live ? ' <b>LIVE</b>' : ''}</td><td><code>${esc(String(p.token).slice(0,8))}</code></td><td>${p.mult == null ? '<span class="na">-</span>' : p.mult.toFixed(2) + 'x'}</td><td>$${(p.usd||0).toFixed(2)}</td><td>${esc(p.held)}</td><td>${btn(p.links)}</td></tr>`).join("");
+  const rec = (d.recent || []).map(r => `<tr><td>${esc(r.ts)}</td><td>${esc(r.symbol)}</td><td>${esc(r.lane)}</td><td>${esc(r.why)}</td><td>${btn(r.links)}</td></tr>`).join("");
+  el.innerHTML = `
+    <div class="statbar">
+      <div class="stat"><div class="label">Status</div><div class="value" style="font-size:14px">${feedTxt}<br>${status}</div></div>
+      <div class="stat"><div class="label">Launches seen</div><div class="value">${(d.launches_seen||0).toLocaleString()}</div></div>
+      <div class="stat"><div class="label">Entries (session)</div><div class="value">${d.entries||0}</div></div>
+      <div class="stat"><div class="label">Today paper P&amp;L</div><div class="value">${fmtUsd(d.pnl_paper_today)}</div></div>
+      <div class="stat"><div class="label">Today LIVE P&amp;L</div><div class="value">${fmtUsd(d.pnl_live_today)}</div></div>
+      <div class="stat"><div class="label">Closed today</div><div class="value">${d.wins_today}W / ${d.closed_today - d.wins_today}L</div></div>
+    </div>
+    <h3 style="margin:10px 0 4px">Open sniper positions</h3>
+    ${open ? `<table><thead><tr><th>Book</th><th>Coin</th><th>Now</th><th>Stake</th><th>Held</th><th>Trade</th></tr></thead><tbody>${open}</tbody></table>` : '<span class="na">none open</span>'}
+    <h3 style="margin:10px 0 4px">Latest entries (click to open the coin and trade it yourself)</h3>
+    ${rec ? `<table><thead><tr><th>Time</th><th>Coin</th><th>Book</th><th>Why</th><th>Trade</th></tr></thead><tbody>${rec}</tbody></table>` : '<span class="na">no entries yet</span>'}`;
+}
+
 function render(data) {
+  try { renderSniper(data.sniper_desk); } catch (e) { console.error(e); }
   document.getElementById("meta").textContent =
     `Generated ${data.generated_at} · state backend: ${data.state_backend}`;
 

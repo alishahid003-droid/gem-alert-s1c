@@ -49,6 +49,7 @@ def build_links(chain: str, token_address: str, is_pregrad: bool = False) -> dic
     if chain == "solana":
         links["pump.fun"] = f"https://pump.fun/coin/{token_address}"
         links["StonkFun"] = f"https://www.stonkfun.xyz/token/{token_address}"
+        links["GMGN"] = f"https://gmgn.ai/sol/token/{token_address}"
 
     return links
 

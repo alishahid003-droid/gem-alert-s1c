@@ -64,6 +64,9 @@ def send_telegram_message(text: str) -> dict:
     could abort the run before it ever reached Stage1/Stage2's buy-trigger
     checks further down in run_poll_fast. One missed alert should never
     cost a missed trade."""
+    import os
+    if os.environ.get("TELEGRAM_ENABLED", "true").strip().lower() in ("false", "0", "no"):
+        return {"sent": False, "reason": "telegram disabled (TELEGRAM_ENABLED=false); alerts live on the dashboard"}
     if not CONFIG.telegram_ready():
         return {"sent": False, "reason": "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured"}
     url = f"https://api.telegram.org/bot{CONFIG.telegram_bot_token}/sendMessage"

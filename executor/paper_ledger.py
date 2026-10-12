@@ -269,6 +269,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 del book[pid]
             continue
         pos["unpriced_cycles"] = 0
+        pos["last_mcap"] = mcap          # dashboard shows the live multiple
         pos.pop("unpriced_since", None)
         # Same entry sanity check as real positions (position_state.
         # sanity_rebase_entry): an entry >5x away from the first live read
