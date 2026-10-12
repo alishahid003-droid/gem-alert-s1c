@@ -68,6 +68,7 @@ class EarlyStream:
                     self.connected_at = time.time()
                     backoff = 1.0
                     await self._send({"method": "subscribeNewToken"})
+                    await self._send({"method": "subscribeMigration"})      # graduations: ground truth for the recorder
                     if self.watched:                       # resubscribe after a drop
                         await self._send({"method": "subscribeTokenTrade", "keys": sorted(self.watched)})
                     async for raw in ws:

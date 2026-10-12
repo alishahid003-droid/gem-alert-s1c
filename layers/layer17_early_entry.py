@@ -72,6 +72,7 @@ class EarlyTracker:
                  hot_terms_fn: Optional[Callable[[], Set[str]]] = None):
         self.recs: Dict[str, Rec] = {}
         self.dev_list = set(dev_list or [])
+        self.creator_fn = lambda c: False    # repeat-graduate creator (early_creators.Creators.repeat_grad)
         self.feed_off = False               # True when the per-coin trade feed is unavailable (no API key)
         self.smart_fn = smart_fn or (lambda: set())
         self.trusted_fn = trusted_fn or (lambda w: False)
@@ -133,6 +134,8 @@ class EarlyTracker:
         out = []
         if r.creator in self.dev_list or self.trusted_fn(r.creator):
             out.append("dev_list")
+        if self.creator_fn(r.creator):
+            out.append("repeat_grad")       # creator already graduated a token (measured ~7x lift in a 2026 study)
         smart = self.smart_fn()
         hits = [w for w in r.buyers if w in smart]
         if hits:
@@ -182,12 +185,13 @@ class EarlyTracker:
         # thin = too few independent buyers seen. Then ONLY a dev-list launch may enter (needs no trade feed).
         thin = len(r.buyers) < int(_f("EARLY_MIN_BUYERS_ANY", 4))
         dev_min = int(_f("EARLY_DEV_MIN_BUYERS", 0)) if self.feed_off else int(_f("EARLY_MIN_BUYERS_ANY", 4))
-        if thin and not ("dev_list" in conf and len(r.buyers) >= dev_min):
+        devish = "dev_list" in conf or "repeat_grad" in conf
+        if thin and not (devish and len(r.buyers) >= dev_min):
             return None                      # a few independent buyers first: cheap rug filter
         c2_age, c2_mc = _f("EARLY_CORE2_MAX_AGE_S", 240), _f("EARLY_CORE2_MAX_MCAP_SOL", 55)
         c1_age, c1_mc = _f("EARLY_CORE1_MAX_AGE_S", 1200), _f("EARLY_CORE1_MAX_MCAP_SOL", 130)
         lanes = []
-        if "dev_list" in conf and age <= c2_age:
+        if devish and age <= c2_age:
             lanes.append("dev_list")
         if age <= c2_age and r.mcap_sol <= c2_mc and len(conf) >= 2:
             lanes.append("core2")

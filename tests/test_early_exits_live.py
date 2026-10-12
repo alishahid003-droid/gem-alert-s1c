@@ -108,3 +108,38 @@ def test_recorder_samples_outcomes(tmp_path):
     r.sample(lambda c, ms: {}, now=100.0 + 3601)
     assert "A" not in r.pending
     assert any(f.endswith(".jsonl") for f in os.listdir(tmp_path / "log"))
+
+
+def test_creator_reputation_and_lane(tmp_path):
+    from early_creators import Creators
+    c = Creators(str(tmp_path / "c.json"))
+    c.on_create("DEVX", "M1", now=1000.0)
+    assert not c.repeat_grad("DEVX", now=1001.0)
+    assert c.on_graduate("M1", now=1200.0) == "DEVX"
+    c.on_create("DEVX", "M2", now=1000.0 + 2 * 86400)             # second launch two days later
+    assert c.repeat_grad("DEVX", now=1000.0 + 2 * 86400)
+    c.save(now=1000.0 + 2 * 86400)
+    assert Creators(str(tmp_path / "c.json")).t["DEVX"]["grads"] == 1
+    t = EarlyTracker()
+    t.creator_fn = c.repeat_grad
+    t.feed_off = True
+    t.on_create({"txType": "create", "mint": "M2", "traderPublicKey": "DEVX", "initialBuy": 1e6, "solAmount": .03,
+                 "marketCapSol": 28}, now=1000.0 + 2 * 86400)
+    d = t.evaluate("M2", now=1001.0 + 2 * 86400)
+    assert d and d["lane"] == "dev_list" and "repeat_grad" in d["confirmations"]
+
+
+def test_analyze_script_runs(tmp_path, monkeypatch, capsys):
+    import json, runpy, sys
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("early_log")
+    rows = []
+    for i in range(300):
+        rows.append({"t": "create", "ts": 1.0, "mint": f"m{i}", "init_sol": 0.1, "mcap_sol": 28, "dev_list": i < 10, "repeat_grad": False})
+    rows += [{"t": "grad", "ts": 2.0, "mint": f"m{i}"} for i in range(0, 8)]
+    open("early_log/2026-10-13.jsonl", "w").write("\n".join(json.dumps(r) for r in rows))
+    monkeypatch.setattr(sys, "argv", ["analyze_early.py"])
+    src = os.path.join(os.path.dirname(__file__), "..", "analyze_early.py")
+    runpy.run_path(src)
+    out = capsys.readouterr().out
+    assert "GRADUATION LIFT" in out and "dev-list creator" in out

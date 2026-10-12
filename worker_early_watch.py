@@ -182,13 +182,20 @@ async def main_async():
     global _RECORDER
     from early_recorder import Recorder
     _RECORDER = recorder = Recorder()
+    from early_creators import Creators
+    creators = Creators()
+    tracker.creator_fn = creators.repeat_grad
 
     def on_event(e):
         counters["events"] += 1
         kind = (e.get("txType") or "").lower()
         if kind == "create":
+            who = e.get("traderPublicKey")
+            if who and e.get("mint"):
+                creators.on_create(who, e["mint"])
             tracked = tracker.on_create(e)
-            recorder.on_create(e, tracked, (e.get("traderPublicKey") in tracker.dev_list))
+            recorder.on_create(e, tracked, (who in tracker.dev_list),
+                               extra={**creators.snapshot(who or ""), "repeat_grad": creators.repeat_grad(who or "")})
             if not tracked:
                 return None
             tracker.feed_off = stream.trades_blocked
@@ -197,6 +204,12 @@ async def main_async():
                 counters["entries"] += 1
                 loop.run_in_executor(None, act, dec)
             return [e["mint"]]
+        if kind == "migrate" or (e.get("pool") and kind not in ("buy", "sell", "create")):
+            counters["grads"] = counters.get("grads", 0) + 1
+            if e.get("mint"):
+                creators.on_graduate(e["mint"])
+                recorder.on_grad(e["mint"])
+            return None
         if kind in ("buy", "sell"):
             dec = tracker.on_trade(e)
             if dec:
@@ -212,11 +225,12 @@ async def main_async():
             try:
                 for r in [r for r in tracker.recs.values() if time.time() - r.created > 1800]:
                     recorder.on_final(r)
+                creators.save()
                 gone = tracker.sweep()
                 if gone:
                     await stream.unsubscribe_trades(gone)
                 snap = dict(tracker.stats, tracked_now=len(tracker.recs), events=counters["events"],
-                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error, trades_blocked=stream.trades_blocked,
+                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error, trades_blocked=stream.trades_blocked, grads=counters.get("grads", 0), creators_known=len(creators.t),
                             last_event_ago=round(time.time() - stream.last_event_ts, 1) if stream.last_event_ts else None,
                             ts=time.time())
                 state.set_value("early_stats", snap)

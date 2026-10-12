@@ -31,7 +31,10 @@ class Recorder:
         except OSError:
             pass
 
-    def on_create(self, e: dict, tracked: bool, dev_list: bool, now: Optional[float] = None):
+    def on_grad(self, mint: str, now: Optional[float] = None):
+        self._write({"t": "grad", "ts": round(now or time.time(), 1), "mint": mint}, now)
+
+    def on_create(self, e: dict, tracked: bool, dev_list: bool, now: Optional[float] = None, extra: Optional[dict] = None):
         now = now if now is not None else time.time()
         mint = e.get("mint")
         if not mint:
@@ -39,7 +42,7 @@ class Recorder:
         self._write({"t": "create", "ts": round(now, 1), "mint": mint, "creator": e.get("traderPublicKey"),
                      "init_sol": e.get("solAmount"), "init_tokens": e.get("initialBuy"),
                      "mcap_sol": e.get("marketCapSol"), "sym": str(e.get("symbol") or "")[:16],
-                     "name": str(e.get("name") or "")[:30], "tracked": tracked, "dev_list": dev_list}, now)
+                     "name": str(e.get("name") or "")[:30], "tracked": tracked, "dev_list": dev_list, **(extra or {})}, now)
         if len(self.pending) < self.max_pending:
             self.pending[mint] = [now, 0]
 

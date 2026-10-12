@@ -79,3 +79,12 @@ The repeatable edge is knowing a catalyst BEFORE the crowd. Two kinds:
 - arXiv 2607.02823, pump.fun labels / model fails out of sample: https://arxiv.org/abs/2607.02823
 - Webopedia, memecoin millionaires: https://www.webopedia.com/crypto/learn/memecoin-millionaires/
 - MadeOnSol, first 3 minutes: https://madeonsol.com/blog/pump-fun-first-3-minutes-graduation-math
+
+## ADDENDUM Oct 13 2026 -- what the newest evidence says about picking launches (read before trusting any rule)
+- Graduation base rate: ~0.63% (arXiv 2602.14860, 655,770 launches Sep 2025; graduates take a median ~4.4 min); 1.71% in a Jun-Jul 2026 cohort of 693,331 launches.
+- The only creation-time feature that survived validation in the 2026 cohort study (scorplabs): creator ALREADY graduated a token AND was quiet >= 7 days -> 98/816 = 12.0% graduated (CI 10.0-14.4%) vs 1.71% base = ~7x. Volume score, holders, socials, wallet clusters were noise (their own score AUC 0.48). Chosen from dozens of tested features on one cohort, so likely optimistic.
+- The same author's LIVE trading on that kind of signal: 77 positions, 5 graduations (6.5%), net loss; break-even needed ~8-9% after entry premium and missed fills. I.e. even a 7x-lift filter was about break-even live.
+- arXiv 2602.14860: reaching a given SOL-in-curve in FEW trades is the strongest predictor of graduation; trades made directly on the contract (bots) vs the website matter; creators/sophisticated traders often run short pump-and-dumps before graduation.
+- arXiv 2607.02823 (already above): models that scored AUROC 0.86 on development data fell to chance on later data.
+- Graduation (~$69K) is NOT a moonshot. The coins that made 100x+ (PONS, STONK, AMC, MARS, and earlier GOAT/PNUT/FARTCOIN-type runs) had datable catalysts; a launch-time filter alone is a lottery ticket with a better-than-random but small edge.
+WHAT WE BUILT FROM THIS: (1) creator reputation table built from our own stream (early_creators.py): repeat-graduate creator = new "repeat_grad" confirmation that opens the dev_list lane; (2) graduation events recorded (subscribeMigration) so `python analyze_early.py` prints each feature's graduation LIFT with confidence intervals after 24h; (3) catalyst radar still routes news/launchpad/listing coins to Core 1/2 (that is where the 100x+ evidence is).
