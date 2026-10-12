@@ -353,3 +353,20 @@ Basis: MOONSHOT_RESEARCH.md (PONS, STONK, AMC, MARS: each had a public, dated ca
 - B2 FIXED: entry guards now receive real liquidity, sniper % and dev % on the MadeOnSol Solana path.
 - Tests: 846 passed. Restart start_local_mode.bat to activate.
 - STILL OPEN: 12.5 forensics (needs Helius key), 12.6 backtest (needs 3-7 days data), 12.12, 12.13 (Ali screenshots), 12.7 Cores stay paper.
+
+## ACTIONABLE ITEMS LEFT (as of Oct 12 2026 evening; radar pushed at 83dfe07)
+ALI:
+- [ ] A1 Restart start_local_mode.bat; confirm "poll-radar" fresh on dashboard System tab (~5 min)
+- [ ] A2 Top up Fomo credits at fomoapi.io (HTTP 402) -- Layer 13 empty until then
+- [ ] A3 Windows sleep = Never
+- [ ] A5 Free Helius key -> SOLANA_RPC_URL in .env (unlocks 12.5 forensics)
+- [ ] A6 Keep EXECUTION_ENABLED=false
+- [ ] A4 After 3-7 days of data: python backtest_buyer_signals.py, send the output (9.9 / 12.6)
+- [ ] 12.13 Screenshots of 50x+ coins (name + chain) from DexScreener/Fomo
+- [ ] A7-A10 wallet / keys / final live switch -- only after a backtested pattern exists
+CLAUDE:
+- [ ] 12.5 on-chain forensics of winners (after Helius key + screenshots)
+- [ ] 12.6 point-in-time backtest incl. radar signals (after data)
+- [ ] 12.12 bot-farm block vs engineered-winners conflict test
+- [ ] Review first live radar alerts, tune thresholds; create buyback_sets.json
+- [ ] Notion banner updated Oct 12 (done)
