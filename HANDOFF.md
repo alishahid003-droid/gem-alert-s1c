@@ -122,3 +122,4 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Oct 12 2026 10:15 PM: diag showed PumpPortal trade feed needs API key (>=0.02 SOL). Patched: PUMPPORTAL_API_KEY support, trades_blocked detection, dev-list entry at creation (tracker.feed_off). 876 tests. Pushed 5783305. Next: Ali decides key vs Helius feed.
 - Oct 12 2026 10:30 PM: single FINAL_CHECKLIST_2026-10-12.md created (24 items, 5 phases). It is THE list.
 - Oct 12 22:45: built recorder (early_recorder.py, analyze_early.py), early exit engine (paper_ledger._manage_early), pumpportal_exec.py live adapter + kill_switch.py, bundle detection, watchdog. 884 tests. 24h plan in FINAL_CHECKLIST.
+- Oct 12 23:35: dns_fallback.py (DoH) for ISP DNS block of api.telegram.org; telegram_alert installs it.

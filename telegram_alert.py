@@ -14,7 +14,10 @@ relevant to it, in this order:
 This module does NOT place any trade, ever -- it only sends a message.
 """
 import requests
+import dns_fallback
 from config import CONFIG
+
+dns_fallback.install()      # ISP DNS blocks api.telegram.org for Ali; falls back to DNS-over-HTTPS
 from links import render_links_line
 
 
