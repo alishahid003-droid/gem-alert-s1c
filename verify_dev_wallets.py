@@ -15,8 +15,8 @@ import json, os, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
-RPCS = [os.environ.get("SOLANA_RPC_URL", "").strip(), "https://api.mainnet-beta.solana.com",
-        "https://solana-rpc.publicnode.com", "https://rpc.ankr.com/solana"]
+RPCS = [os.environ.get("SOLANA_RPC_URL", "").strip(), "https://solana-rpc.publicnode.com",
+        "https://solana.leorpc.com/?api_key=FREE", "https://api.mainnet-beta.solana.com"]
 RPCS = [r for r in RPCS if r]
 
 
@@ -82,7 +82,7 @@ def main():
                 r = check(w["address"])
             except Exception as e:
                 r = {"address": w["address"], "verdict": "ERROR", "error": str(e)}
-            time.sleep(2.5)
+            time.sleep(4)
         res.append(r)
         print(f"{r['address']:46}{r['verdict']:13}{str(r.get('sol')):>10}{str(r.get('last_seen_hours')):>12}{str(r.get('tx_per_day')):>8}")
     json.dump(res, open(out_path, "w"), indent=1)
