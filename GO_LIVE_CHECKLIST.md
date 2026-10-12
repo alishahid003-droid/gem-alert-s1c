@@ -48,6 +48,7 @@ Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · �
 - 🟡 (A) PC awake, Windows sleep = Never, minimized windows left open; restart ONLY via Admin CMD: `taskkill /F /IM python.exe` then `start_local_mode.bat`
 - ⬜ (C) Morning: read logs + dashboard; confirm Base/StonkFun/BSC/Robinhood entries; sanity-check stakes and open positions
 - ⬜ (C) FIX Compound book $0.00 (lane never opens)
+- ⬜ (C) **API BUDGET AUDIT (Ali's rule: every free API must last the whole MONTH, not run out in a day).** Measure real calls/day of EVERY API now that non-Solana chains + StonkFun + multichain sniper were added: MadeOnSol (hard cap ~200/day; used 94 on Oct 12, 175 on Oct 9), Fomo credits (0 left, HTTP 402), GeckoTerminal (free 30 calls/min; multichain loop uses ~12/min + pollers + backtest share it; 1x HTTP 429 already seen), DexScreener, Birdeye (EVM usage 40 on Oct 12; free monthly compute cap), GoPlus (one call per EVM entry), PumpPortal, Jupiter, StonkFun (300/min), RPCs. Output: table calls/day vs limit vs "days it lasts". Then build a central API budget ledger: per-API daily quota = monthly limit / 30, pacing + back-off on 429, a dashboard line, and a Telegram/dashboard warning at 80%. Multichain loop must back off on 429 and never touch MadeOnSol. DONE-WHEN: table shows every API lasts >= 30 days at current rates (or the rate is cut to fit).
 - ⬜ (C) TUNE multichain entries (too loose: 3-confirmation coins entering Core 1; max-3-open cap fills fast) → raise `MC_MIN_CONF`, `MC_MIN_LIQ_USD`, etc.
 - ⬜ (B) Re-run `run_checks.bat` (backtest top/new + feed health) once the sniper has run a few hours; (C) reads logs\check_*.txt
 - ⬜ (A) ~01:31 PKT Oct 14: `python analyze_early.py`, send output → (C) tune EARLY_*/MC_*/ROUTER_*, stakes, take-profit ladder, bank_pct
@@ -73,9 +74,11 @@ Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · �
 - 🟡 Multichain thresholds loose/untuned; only coins with a DEX pool are visible; ~20 newest pools per call (busy chains miss some)
 - 🟡 Per-coin pump.fun trade feed OFF (needs key) → only dev-list entries at creation + launch-level signals until then
 - 🟡 Paper fills optimistic vs real; Robinhood memecoin swap support unverified
+- 🟡 API budgets not yet audited after adding multichain/StonkFun/non-Solana (see Step 1 API BUDGET AUDIT); 1 GeckoTerminal 429 seen at 01:33
 - ✅ Fixed 13 Oct: restart script couldn't kill admin-level python (use Admin CMD); backtest unicode crash + glitch wicks
 
 ## 6. TEST / EVENT LOG (newest first)
+- 01:55 Added API BUDGET AUDIT item (Ali): all free APIs must be paced to last a month.
 - 01:50 Checklist rewritten as single master block (this).
 - 01:33 Logs confirm early-watch + multichain running; Robinhood slug `robinhood`; entries on Solana/BSC/Robinhood/Base. 24h clock started 01:31.
 - 01:31 Restart from Administrator CMD succeeded (3 old admin python processes killed).
