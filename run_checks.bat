@@ -2,6 +2,7 @@
 REM One click: pulls latest code, runs both backtests, dumps system health into logs\check_*.txt.
 REM Claude reads those files from this folder -- you only double-click / run this and say "done".
 cd /d "%~dp0"
+set PYTHONIOENCODING=utf-8
 if not exist logs mkdir logs
 echo === pull ===
 git pull

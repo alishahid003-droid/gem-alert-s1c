@@ -62,7 +62,15 @@ def candles(pool):
     time.sleep(2.2)
     rows = ((d or {}).get("data", {}).get("attributes", {}) or {}).get("ohlcv_list") or []
     rows = sorted(rows, key=lambda r: r[0])
-    return [{"t": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4]} for r in rows if r[1] and r[3]]
+    out = []
+    wick = float(os.environ.get("BT_WICK_CAP", "1.25"))
+    for r in rows:
+        if not (r[1] and r[4] and r[3]):
+            continue
+        hi_body, lo_body = max(r[1], r[4]), min(r[1], r[4])
+        # thin-pool glitch guard: cap wicks so one bad tick can't fake a 1,000,000x (honest/pessimistic)
+        out.append({"t": r[0], "o": r[1], "h": min(r[2], hi_body * wick), "l": max(r[3], lo_body / wick), "c": r[4]})
+    return out
 
 
 def simulate(cs, entry_idx, profile, rules=None):
@@ -109,6 +117,10 @@ def simulate(cs, entry_idx, profile, rules=None):
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="new", choices=["new", "top"])
     ap.add_argument("--pages", type=int, default=5)
@@ -134,7 +146,7 @@ def main():
             res[prof] = (pnl, how)
             tot[prof].append(pnl)
         rows += 1
-        print(f"{p['name'][:22]:22s} {len(cs):4d}m peak {peak:6.1f}x now {now:6.2f}x | " +
+        print(f"{p['name'][:22].encode('ascii','replace').decode():22s} {len(cs):4d}m peak {peak:6.1f}x now {now:6.2f}x | " +
               " ".join(f"{k[:5]} {v[0]:+6.0f}%" for k, v in res.items()))
     print("\n" + "=" * 70)
     for prof, v in tot.items():
