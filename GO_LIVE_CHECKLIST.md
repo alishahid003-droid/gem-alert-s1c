@@ -370,3 +370,8 @@ CLAUDE:
 - [ ] 12.12 bot-farm block vs engineered-winners conflict test
 - [ ] Review first live radar alerts, tune thresholds; create buyback_sets.json
 - [ ] Notion banner updated Oct 12 (done)
+
+## OCT 12 2026 NIGHT -- MODULE SYSTEM (Claude side, DONE)
+- DONE: 10 modules (Moonshot Core 1, Compound Core 2, Radar, Leaderboard copy, Fomo followers, Fomo new wallets, Dev launch, Dev intel, Own analysis, Context). Telegram label on every alert, module on every paper trade, dashboard Modules tab, Module column on Alerts tab. See MODULES.md.
+- OPEN (Claude): Fomo new-wallet module lists wallets, not yet the coin each one traded (needs Fomo credits + profile call); dev-intel for coins we BUY (not only alert on) once positions exist; Core 2 target ($125K/1-2 months) vs code default ($90K/7 days) needs Ali's call on SPRINT_TARGET_USD.
+- ALI: restart start_local_mode.bat, open Modules tab, tell me which module is wrong/missing.

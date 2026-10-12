@@ -529,6 +529,12 @@ def _alert(alert: Alert, layer: str) -> dict:
     per distinct layer-set so it doesn't re-fire every cycle for the same
     convergence."""
     token = alert.token_address
+    try:  # module label first in Telegram (layers/modules.py)
+        from layers import modules as _mods
+        if not alert.module_label:
+            alert.module_label = _mods.label_for_layer(layer)
+    except Exception:  # noqa: BLE001
+        pass
     # Repeat suppression (Sept 30 2026, Ali's dashboard): the same coin was
     # re-alerted every 10-min cycle with the same band -- Telegram spam, and
     # it filled the 300-item feed in ~2 h. Same token + layer + band within
@@ -562,6 +568,7 @@ def _alert(alert: Alert, layer: str) -> dict:
                 continue  # already sent this exact layer-set for this token
             mega_alert = Alert(alert.token_symbol, token, alert.chain,
                                 f"MEGA-ALERT: {len(mega.layers)} independent layers converged")
+            mega_alert.module_label = "🎯 MEGA"
             mega_alert.set_tag("Chain", alert.chain)
             mega_alert.set_tag("MEGA-ALERT", f"{len(mega.layers)} layers ({', '.join(mega.layers)}) "
                                               f"within {mega.window_minutes:.0f}min")
@@ -1748,7 +1755,7 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
             _safe(handle_compound_scalper_candidate, chain, addr, band, m.get("mcap_usd"),
                   liquidity_usd=m.get("liquidity_usd"), momentum=True, entry_ctx={**ctx, "moonshot": True})
         symbol = (pair.get("baseToken") or {}).get("symbol") or addr[:8]
-        text = (f"🌙 *MOONSHOT candidate* [{chain}] {symbol} (score {score}/100, band {band or '?'})\n"
+        text = (f"[🌙 MOONSHOT · Core 1] 🌙 *MOONSHOT candidate* [{chain}] {symbol} (score {score}/100, band {band or '?'})\n"
                 f"`{addr}`\n"
                 f"mcap ${m.get('mcap_usd') or 0:,.0f} · liq ${m.get('liquidity_usd') or 0:,.0f} · "
                 f"1h {m.get('change_h1') or 0:+.0f}% · 6h {m.get('change_h6') or 0:+.0f}% · "
@@ -1758,6 +1765,10 @@ def _run_moonshot_screen(chain: str, fetched_items: list) -> dict:
         if links:
             text += "\n" + links
         _safe(send_telegram_message, text)
+        _safe(state.log_full_alert, "layer15_moonshot", chain, symbol, addr,
+              f"Moonshot candidate (score {score}/100)",
+              {"Chain": chain, "Score": f"{score}/100" + (f" (band {band})" if band else ""),
+               "MCap": f"${m.get('mcap_usd') or 0:,.0f}", "Action": str(res.get('reason') or ('BUY sent' if res.get('fired') else 'paper only'))[:80]})
         print(f"[layer15:{chain}] MOONSHOT {symbol} {addr[:10]} score {score} band {band} -> "
               f"fired={res.get('fired')} ({res.get('reason')})")
     return {"screened": len(pairs), "qualified": qualified}

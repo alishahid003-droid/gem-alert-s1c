@@ -116,3 +116,4 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Paid data (Helius) — optional, only after §4 shows a real edge.
 
 - Oct 12 2026 late: Layer 16 radar (layers/layer16_catalyst_radar.py, tests/test_layer16_catalyst_radar.py, tests/test_radar_wiring.py) wired via scheduler --poll-radar + local_runner thread; B2 guard-context fix in layer0_scoring/_entry_ctx/_handle_scored. 846 tests green.
+- Oct 12 2026 night: module system (layers/modules.py, MODULES.md): Telegram labels, paper positions carry a module, dashboard Modules tab + Module column. 853 tests green.

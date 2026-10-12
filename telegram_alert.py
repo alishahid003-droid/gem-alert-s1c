@@ -25,6 +25,7 @@ class Alert:
         self.chain = chain
         self.headline = headline
         self.tags: dict = {}
+        self.module_label: str = ""   # e.g. "🏆 LEADERBOARD COPY" (layers/modules.py); shown first in Telegram
 
     def set_tag(self, key: str, value: str):
         if value:
@@ -38,7 +39,7 @@ class Alert:
         ]
         tag_str = " ".join(f"[{k}: {self.tags[k]}]" for k in order if k in self.tags)
         lines = [
-            f"🚨 {self.headline}",
+            (f"[{self.module_label}] " if self.module_label else "") + f"🚨 {self.headline}",
             f"{self.token_symbol}  `{self.token_address}`",
             tag_str,
         ]

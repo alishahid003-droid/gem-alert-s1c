@@ -613,7 +613,7 @@ def format_alert(c: dict, regime: Optional[dict] = None) -> str:
     from links import render_links_line
     head = {"ladder": "LISTING LADDER", "news": "NEWS-JACK", "launchpad": "LAUNCHPAD SURGE",
             "conviction": "CONVICTION MONEY", "buyback": "BUYBACK SET"}.get(c["kind"], c["kind"].upper())
-    lines = [f"📡 CATALYST RADAR - {head}", f"{_clean(c.get('symbol'))}  {('`' + c['token'] + '`') if c.get('token') else ''}".strip(),
+    lines = [f"[📡 RADAR] 📡 CATALYST RADAR - {head}", f"{_clean(c.get('symbol'))}  {('`' + c['token'] + '`') if c.get('token') else ''}".strip(),
              _clean(c.get("reason"))]
     tags = [f"[Chain: {c['chain']}]"] if c.get("chain") else []
     if c.get("mcap"):
@@ -814,6 +814,12 @@ def run_cycle(send: Optional[Callable[[str], dict]] = None, *, fetch_json: Calla
         else:
             c["paper"] = False
         guard("alert", lambda c=c: send(format_alert(c, regime)))
+        guard("feed", lambda c=c: state.log_full_alert(
+            "radar_" + str(c.get("kind") or "x"), c.get("chain") or "n/a", _clean(c.get("symbol")) or "?",
+            c.get("token") or "n/a", _clean(c.get("reason"))[:200],
+            {"Chain": c.get("chain") or "", "Radar": str(c.get("kind")),
+             "MCap": f"${c['mcap']:,.0f}" if c.get("mcap") else "",
+             "Paper": "opened" if c.get("paper") else "alert only"}))
         sent += 1
         done_ids.append(c["id"])
     mark_seen(done_ids, now)

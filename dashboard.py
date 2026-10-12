@@ -354,6 +354,73 @@ def _campaigns() -> dict:
     return out
 
 
+def _module_cards(feed: list, fomo_signals: list, fomo_candidates: list, board: list) -> list:
+    """One card per module (Ali, Oct 12 2026): status, last activity, paper
+    record and the latest picks, so it is obvious which module a coin came
+    from. Pure read; every section is guarded so a bad one never blanks the page."""
+    from layers import modules as mods
+    now = time.time()
+    try:
+        pm = paper_ledger.module_scoreboard()
+    except Exception:  # noqa: BLE001
+        pm = {}
+    board_by = {}
+    for r in board or []:
+        n = (r.get("module") or "").lower()
+        if "moonshot" in n:
+            board_by["moonshot"] = r
+        elif "sprint" in n or "compound" in n:
+            board_by["compound"] = r
+    cards = []
+    for m in mods.MODULES:
+        mid = m["id"]
+        items = []
+        if mid == "fomo_followers":
+            for f in fomo_signals[:8]:
+                items.append({"symbol": f.get("token_symbol") or "?", "chain": f.get("chain"),
+                              "ago": f.get("ago"), "headline": f"{f.get('trader') or '?'} ({f.get('tier') or '-'}): {f.get('detail') or f.get('kind') or ''}"[:140],
+                              "band": f.get("band"), "links": f.get("links") or {}, "ts": f.get("ts") or 0})
+        elif mid == "fomo_new":
+            for c in fomo_candidates[:8]:
+                bal = c.get("balance_usd")
+                items.append({"symbol": c.get("display_name") or c.get("handle") or "?", "chain": "fomo",
+                              "ago": c.get("ago"), "headline": f"balance {('$%s' % format(bal, ',.0f')) if bal else '?'}, 7d {c.get('pnl_7d')}, 30d {c.get('pnl_30d')}",
+                              "band": None, "links": {}, "ts": c.get("ts") or 0})
+        elif mid == "dev_intel":
+            for a in feed:
+                if mods.has_dev_intel(a.get("tags")):
+                    t = a.get("tags") or {}
+                    items.append({"symbol": a.get("token_symbol"), "chain": a.get("chain"), "ago": a.get("ago"),
+                                  "headline": " | ".join(f"{k}: {t[k]}" for k in mods.DEV_TAGS if k in t)[:160],
+                                  "band": a.get("band"), "links": a.get("links") or {}, "ts": a.get("ts") or 0})
+        else:
+            for a in feed:
+                if a.get("module") == mid:
+                    items.append({"symbol": a.get("token_symbol"), "chain": a.get("chain"), "ago": a.get("ago"),
+                                  "headline": (a.get("headline") or "")[:140], "band": a.get("band"),
+                                  "links": a.get("links") or {}, "ts": a.get("ts") or 0})
+        items.sort(key=lambda i: i["ts"], reverse=True)
+        day = sum(1 for i in items if now - i["ts"] < 86400)
+        paper = pm.get(mid) or {}
+        st = paper.get("stats") or {}
+        card = {"id": mid, "emoji": m["emoji"], "name": m["name"], "blurb": m["blurb"],
+                "alerts_24h": day, "total_shown": len(items), "last_ago": items[0]["ago"] if items else None,
+                "latest": [{k: v for k, v in i.items() if k != "ts"} for i in items[:5]],
+                "paper_open": paper.get("open", 0), "paper_n": st.get("n", 0), "paper_wins": st.get("wins", 0),
+                "paper_win_rate": st.get("win_rate"), "paper_pnl_usd": st.get("total_pnl_usd"),
+                "real": (board_by.get(mid) or {}).get("real"), "status": (board_by.get(mid) or {}).get("status")}
+        cards.append(card)
+    return cards
+
+
+def _safe_cards(feed, fomo_signals, fomo_candidates, scalper_status):
+    try:
+        return _module_cards(feed, fomo_signals, fomo_candidates, _modules_board(scalper_status))
+    except Exception as e:  # noqa: BLE001
+        print(f"[dashboard] module cards failed: {type(e).__name__}: {e}")
+        return []
+
+
 def build_data() -> dict:
     """Sept 30 2026 (Ali, "same pathetic interface and bullshit stuff" --
     /api/data was hanging indefinitely): every section below is timed and
@@ -380,6 +447,12 @@ def build_data() -> dict:
         item["ago"] = _ago(item["ts"])
         item["ts_fmt"] = _fmt_ts(item["ts"])
         item["category"] = LAYER_CATEGORY.get(item.get("layer"), item.get("layer") or "other")
+        try:
+            from layers import modules as _mods
+            item["module"] = _mods.for_layer(item.get("layer"))
+            item["module_label"] = _mods.label(item["module"])
+        except Exception:  # noqa: BLE001
+            item["module"], item["module_label"] = "own", ""
         item["band"] = _extract_band(item.get("tags"))
         item["noise"] = item["category"] in BAND_FILTERABLE_CATEGORIES and item["band"] in ("C", "D")
         item["links"] = links.build_links(item.get("chain"), item.get("token_address"))
@@ -482,6 +555,7 @@ def build_data() -> dict:
         "health": _health(),
         "paper": paper_ledger.scoreboard(),
         "modules_board": _modules_board(scalper_status),
+        "module_cards": _safe_cards(feed, fomo_signals, fomo_candidates, scalper_status),
         "win_rate_target": 0.8,
     }
     _lap(f"TOTAL")
@@ -574,6 +648,15 @@ PAGE_TEMPLATE = """<!doctype html>
   .tabbtn:hover { color:#e6e6e6; }
   .tabbtn.active { color:#e6e6e6; border-bottom:2px solid #3498db; }
   .tabbtn .badge { display:inline-block; background:#e74c3c; color:#fff; border-radius:9px; font-size:10px; font-weight:700; padding:1px 6px; margin-left:5px; }
+  .mgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(430px,1fr)); gap:14px; }
+  .mcard { background:#161a20; border:1px solid #2a2f37; border-radius:8px; padding:12px 14px; }
+  .mhead { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .memoji { font-size:18px; } .mname { font-weight:700; flex:1; }
+  .mpill { font-size:11px; font-weight:700; border-radius:9px; padding:2px 8px; }
+  .mpill.on { background:#1e5b36; color:#7dffb0; } .mpill.off { background:#2a2f37; color:#8a8f98; }
+  .mblurb { color:#8a8f98; font-size:12px; margin-bottom:8px; }
+  .mstats { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; margin-bottom:6px; }
+  .mstatus { font-size:12px; color:#c9a227; margin-bottom:6px; }
   .tabpanel { display:none; }
   .tabpanel.active { display:block; }
   .highlight-list { display:flex; flex-direction:column; gap:6px; }
@@ -590,6 +673,7 @@ PAGE_TEMPLATE = """<!doctype html>
 
 <nav class="tabs" id="tabs">
   <button class="tabbtn active" data-tab="overview">Overview</button>
+  <button class="tabbtn" data-tab="modules">Modules</button>
   <button class="tabbtn" data-tab="positions">Positions <span class="badge" id="badge-positions" style="display:none"></span></button>
   <button class="tabbtn" data-tab="alerts">Alerts <span class="badge" id="badge-alerts" style="display:none"></span></button>
   <button class="tabbtn" data-tab="fomo">Fomo</button>
@@ -608,6 +692,13 @@ PAGE_TEMPLATE = """<!doctype html>
   <section>
     <h2>Compound Scalper <span class="tag" id="scalper-tag"></span></h2>
     <div id="scalper_detail"></div>
+  </section>
+</div>
+
+<div class="tabpanel" data-panel="modules">
+  <section>
+    <h2>Modules <span style="color:#8a8f98; font-weight:normal; font-size:12px;">(every alert and paper trade belongs to exactly one module -- the Telegram label matches these names)</span></h2>
+    <div class="mgrid" id="module_cards"></div>
   </section>
 </div>
 
@@ -891,10 +982,10 @@ function render(data) {
     : `Show all (incl. ${hiddenCount} band C/D noise)`;
   document.getElementById("noise-toggle").className = "toggle" + (showNoise ? " active" : "");
   document.getElementById("feed").innerHTML = shown.length ? `
-    <table><thead><tr><th>When</th><th>Category</th><th>Band</th><th>Token</th><th>Headline</th><th>Auto-buy</th><th>Tags</th><th>Links</th></tr></thead>
+    <table><thead><tr><th>When</th><th>Module</th><th>Band</th><th>Token</th><th>Headline</th><th>Auto-buy</th><th>Tags</th><th>Links</th></tr></thead>
     <tbody>${shown.map(a => `<tr>
       <td title="${esc(a.ts_fmt)}">${esc(a.ago)}</td>
-      <td class="cat-${esc(a.category)}">${esc(a.category)}</td>
+      <td class="cat-${esc(a.category)}" title="${esc(a.category)}">${esc(a.module_label || a.category)}</td>
       <td class="${a.band ? 'band-' + esc(a.band) : ''}">${esc(a.band || '-')}</td>
       <td>${esc(a.token_symbol)}</td>
       <td>${esc(a.headline)}</td>
@@ -903,6 +994,25 @@ function render(data) {
       <td>${Object.entries(a.links || {}).map(([label,url]) => `<a class="linkbtn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" ")}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No alerts to show (try the toggle above if you want to see filtered noise too).</div>';
   document.getElementById("noise-toggle").onclick = () => { showNoise = !showNoise; render(window.__lastData); };
+
+  const cards = data.module_cards || [];
+  document.getElementById("module_cards").innerHTML = cards.map(c => `
+    <div class="mcard">
+      <div class="mhead"><span class="memoji">${esc(c.emoji)}</span><span class="mname">${esc(c.name)}</span>
+        <span class="mpill ${c.alerts_24h ? 'on' : 'off'}">${c.alerts_24h ? c.alerts_24h + ' in 24h' : 'quiet'}</span></div>
+      <div class="mblurb">${esc(c.blurb)}</div>
+      <div class="mstats">
+        <span>Last: <b>${esc(c.last_ago || 'never')}</b></span>
+        <span>Paper: <b>${c.paper_open}</b> open &middot; <b>${c.paper_n}</b> closed${c.paper_n ? ' &middot; ' + (c.paper_win_rate * 100).toFixed(0) + '% wins &middot; ' + fmtUsd(c.paper_pnl_usd) : ''}</span>
+        ${c.real !== null && c.real !== undefined ? `<span>Real money: <b>${c.real ? 'ON' : 'off'}</b></span>` : ''}
+      </div>
+      ${c.status ? `<div class="mstatus">${esc(c.status)}</div>` : ''}
+      ${c.latest.length ? `<table><tbody>${c.latest.map(i => `<tr>
+        <td title="${esc(i.chain)}">${esc(i.ago)}</td><td><b>${esc(i.symbol)}</b></td><td class="${i.band ? 'band-' + esc(i.band) : ''}">${esc(i.band || '')}</td>
+        <td>${esc(i.headline)}</td>
+        <td>${Object.entries(i.links || {}).slice(0,3).map(([l,u]) => `<a class="linkbtn" href="${esc(u)}" target="_blank" rel="noopener">${esc(l)}</a>`).join(" ")}</td></tr>`).join("")}</tbody></table>`
+        : '<div class="empty">Nothing from this module yet.</div>'}
+    </div>`).join("");
 
   const mb = data.modules_board || [];
   const mbPct = (st) => st && st.n ? `${(st.win_rate * 100).toFixed(0)}% (${st.wins}/${st.n})` : '-';

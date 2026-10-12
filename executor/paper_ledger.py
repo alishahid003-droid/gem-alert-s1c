@@ -105,7 +105,12 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
     pid = f"{source}:{chain}:{token}"
     if pid in book or len(book) >= MAX_OPEN:
         return None
-    pos = {"id": pid, "chain": chain, "token": token, "source": source, "signal": signal,
+    try:
+        from layers import modules as _mods
+        module = _mods.for_paper(source, signal)
+    except Exception:  # noqa: BLE001
+        module = "own"
+    pos = {"id": pid, "module": module, "chain": chain, "token": token, "source": source, "signal": signal,
            "band": band, "tags": tags or {}, "usd": float(usd), "entry_mcap": float(entry_mcap),
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
@@ -330,6 +335,29 @@ def scoreboard(since_ts: Optional[float] = None) -> dict:
     out["recent"] = [{k: r.get(k) for k in ("chain", "token", "signal", "band", "pnl_pct", "pnl_usd",
                                              "exit_type", "closed_ts", "opened_ts")}
                      for r in rows[-25:]][::-1]
+    return out
+
+
+def module_scoreboard() -> dict:
+    """Per-module paper record: {module_id: {open, n, wins, win_rate, total_pnl_usd, recent[]}}.
+    Positions opened before modules existed are classified on read."""
+    from layers import modules as mods
+
+    def mid(r):
+        return r.get("module") or mods.for_paper(r.get("source"), r.get("signal"))
+
+    out = {}
+    rows = [r for r in _closed() if r.get("strategy") != "runner"]
+    for m in mods.MODULES:
+        mine = [r for r in rows if mid(r) == m["id"]]
+        st = _stats(mine)
+        out[m["id"]] = {"open": 0, "stats": st,
+                        "recent": [{k: r.get(k) for k in ("chain", "token", "signal", "pnl_pct", "pnl_usd", "closed_ts")}
+                                   for r in mine[-5:]][::-1]}
+    for p in _open().values():
+        if p.get("strategy") == "runner":
+            continue
+        out.setdefault(mid(p), {"open": 0, "stats": _stats([]), "recent": []})["open"] += 1
     return out
 
 
