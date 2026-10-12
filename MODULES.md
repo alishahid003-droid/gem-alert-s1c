@@ -45,3 +45,10 @@ Caveat: pace is a gauge of what the target needs (Core 1 ~ +12%/day, Core 2 ~ +6
 ## Naming + cash-out (Oct 13, per Ali)
 - Core 1 = Sprint 96h ($100 -> $10,000, id `sprint`); Core 2 = $125,000 in 30 days (id `core1`); Core 3 = $1M-$1.5M in 180 days (id `core2`). IDs are unchanged internally; only the names changed.
 - CASH-OUT: when Core 1 (Sprint) reaches $10,000 the system logs a cash-out of everything above `SPRINT_RESEED_USD` (default $200), restarts the Sprint cycle with that reseed, and the dashboard shows "CASHED OUT $X -- withdraw it". Ali withdraws the money himself. Core 2 and Core 3 run as their own separate books on their own $100-$200 seeds.
+
+## Multi-chain fast sniper (Oct 13) -- `multichain_sniper.py`
+- Runs inside `local_runner.py` (thread; off with `LOCAL_RUNNER_MULTICHAIN=false`), every ~20 s.
+- Feeds: GeckoTerminal new pools for **Solana (non-pump launchpads: LaunchLab/Raydium/Meteora...), BSC, Base, Robinhood Chain** + **StonkFun's own newest-tokens API** (pre-graduation launches).
+- Same lanes/books/exit engine as the pump.fun sniper (Core 1/2/3, Sprint, Compound). Entry = confirmations: buy pressure, unique buyers, velocity (5m), volume vs liquidity, freshness, growth since first seen; blocks coins already up >400% in 5m and coins being dumped; GoPlus honeypot/tax gate on BSC/Base.
+- Env knobs: `MC_MIN_LIQ_USD`, `MC_MAX_MCAP_USD`, `MC_MAX_AGE_MIN`, `MC_MIN_CONF`, `MC_MIN_CONF_STONK`, `MC_POLL_S`, `MC_RHC_SLUG`.
+- LIMITS: paper only on these chains (no live adapter); only coins with a DEX pool are visible (four.meme bonding-curve phase is not); ~20 newest pools per call; Robinhood slug on GeckoTerminal is auto-probed (log line `[multichain] Robinhood chain slug`), may need `MC_RHC_SLUG`; thresholds untuned.

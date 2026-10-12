@@ -9,3 +9,8 @@ HONEST STATE: the 24h run measures which launch features actually lift graduatio
 - [x] Profit vault (banks part of profit above 3x), compounding stakes, 2x/4x/10x take-profits + moon-bag trailing stop
 - [ ] ALI: after go-live, keep EARLY_LIVE_LANES to ONE lane at first (e.g. sprint) with LIVE_MAX_STAKE_USD tiny; never fund live with money you cannot lose
 - [ ] CLAUDE: tune BANK_AFTER_MULT / bank_pct, stake %, take-profit ladder from the 24h analyze_early results
+
+## ADDED Oct 13 (multi-chain)
+- [x] multichain_sniper.py: BSC / Base / Robinhood / Solana-nonpump + StonkFun on the fast loop with the same lanes and exit engine (paper)
+- [ ] ALI: after restart open logs\local_runner.log and check lines "[multichain] sniper loop started" and "Robinhood chain slug"; send me any "not found" line
+- [ ] CLAUDE: tune MC_* thresholds from 24h data; add live execution for non-Solana chains only if paper results justify it

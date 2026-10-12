@@ -122,6 +122,11 @@ def main() -> None:
         import threading
         threading.Thread(target=_early_loop, name="early", daemon=True).start()
         print("[local_runner] early-watch (launch sniper) supervisor started", flush=True)
+    if os.environ.get("LOCAL_RUNNER_MULTICHAIN", "true").strip().lower() != "false":
+        import threading
+        import multichain_sniper
+        threading.Thread(target=multichain_sniper.run_loop, name="multichain", daemon=True).start()
+        print("[local_runner] multichain sniper (bsc/base/robinhood/solana+StonkFun) started", flush=True)
     if radar_enabled():
         import threading
         threading.Thread(target=_radar_loop, name="radar", daemon=True).start()
