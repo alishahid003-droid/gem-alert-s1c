@@ -103,7 +103,13 @@ class Scanner:
     def evaluate(self, p: dict, now: float) -> Optional[dict]:
         k = self.see(p, now)
         mcap, liq = p.get("mcap"), p.get("liq")
-        if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or mcap > _f("MC_MAX_MCAP_USD", 60_000):
+        cap = _f("MC_MAX_MCAP_USD", 60_000)
+        # Oct 13 2026: 60k stops the moonshot lanes chasing (all 13 first-run entries above $50k lost), but real
+        # runners also keep running after 60k. Solana coins up to MC_MOMENTUM_MAX_MCAP_USD may enter ONLY the
+        # core1 momentum bucket and only with >=4 confirmations -- its own bucket so the data can judge it.
+        momentum = bool(mcap and mcap > cap and p["chain"] == "solana"
+                        and mcap <= _f("MC_MOMENTUM_MAX_MCAP_USD", 250_000))
+        if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or (mcap > cap and not momentum):
             return None
         if p["src"] == "gt" and (liq or 0) < _f("MC_MIN_LIQ_USD", 2500):
             return None
@@ -136,8 +142,12 @@ class Scanner:
         if b is not None and s is not None and s > 1.5 * max(b, 1):
             return None                                   # being dumped
         need = int(_f("MC_MIN_CONF_STONK" if p["src"] == "stonkfun" else "MC_MIN_CONF", 2 if p["src"] == "stonkfun" else 3))
-        if len(conf) < need:
+        if len(conf) < need or (momentum and len(conf) < 4):
             return None
+        if momentum:
+            return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
+                    "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
+                    "lanes": ["core1"], "lane": "core1", "potential": "momentum"}
         lanes = ["core1"]
         if len(conf) >= 4 and age_min <= 15:
             lanes.append("core2")

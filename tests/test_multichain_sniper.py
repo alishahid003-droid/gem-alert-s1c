@@ -48,3 +48,14 @@ def test_act_opens_paper_positions_on_non_solana_chain():
     r = m.act(d, 10_000.0)
     assert r.get("opened"), r
     assert m.act(d, 10_001.0) == {"skipped": "already acted"}
+
+
+def test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf():
+    sc = m.Scanner()
+    big = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0)
+    d = sc.evaluate(big, 10_000.0)
+    assert d and d["lanes"] == ["core1"] and "momentum" in d["confirmations"]
+    # EVM above the cap is still refused
+    assert sc.evaluate(_pool(addr="0xbig", chain="bsc", mcap=150_000.0), 10_000.0) is None
+    # above the momentum ceiling is refused too
+    assert sc.evaluate(_pool(addr="SolHuge", chain="solana", mcap=900_000.0), 10_000.0) is None

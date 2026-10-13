@@ -254,6 +254,11 @@ def _fomo_get(path: str, params: Optional[dict] = None, timeout: Optional[float]
             update["remaining"] = int(remaining)
         except (TypeError, ValueError):
             pass
+    # Oct 13 2026: record every credit/limit/reset header the API sends, so we can see WHEN the free bucket
+    # refills (it was still 0 on Oct 13 after a calendar-month rollover, so it is not the 1st).
+    seen = {k: v for k, v in hdrs.items() if "credit" in k or "reset" in k or "ratelimit" in k or "retry" in k}
+    if seen:
+        update["headers_seen"] = seen
     if result.get("status_code") == 402:
         update["backoff_until"] = now + CREDITS_BACKOFF_SECONDS
         update["last_error"] = "credits_exhausted"
