@@ -9,3 +9,7 @@ logs/
 .gem_state_*.tmp
 early_log/
 KILL_SWITCH
+
+# secrets backup copies - never commit
+.env.*
+!.env.example

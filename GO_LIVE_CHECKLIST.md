@@ -4,13 +4,22 @@ Old versions are archived in docs/archive/ (history only - never read them for s
 UPDATE RULE (Claude, after every change): rewrite THIS file, copy it to the Notion master page, then commit. Ali pushes.
 Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=Claude
 
-## 1. STATUS - 13 Oct 2026, 18:15 PKT
+## 1. STATUS - 14 Oct 2026, 01:15 PKT
 - Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 927 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
 - Last pushed commit 344b944. NOT PUSHED YET (18:15): PumpPortal spending guard (early_stream.py, worker_early_watch.py, new test file) + this checklist -> Ali: git add -A, git commit, git push.
 - RUNNING NOW in its own CMD window: `python e2e_test.py --loop` (end-to-end replay test, no CoinGecko key yet = slow pace). First coins become replay-ready ~20:00 PKT; verdict (needs >= 30 entries) expected tonight/overnight. Its first batch (14:31) was useless (coins fetched minutes after launch) and was fixed.
 - Helius key is in .env (SOLANA_RPC_URL, verified format). PumpPortal key NOT yet added: metered-feed guard built first (see section 3). Needs one restart (kills the e2e loop - restart it after).
 - e2e_test.py has no unit tests yet (checked by hand with a mocked HTTP call).
+
+## 1A. LIVE NIGHT TEST (13-14 Oct) - REVIEW THIS FIRST IN THE MORNING
+- LIVE MODE IS ON in a tiny capped form: PumpPortal wallet ~$21 SOL. EXECUTION_ENABLED=true, EARLY_LIVE_LANES=sprint,dev_list, LIVE_MAX_STAKE_USD=5, LIVE_MAX_OPEN=3, LIVE_DAILY_LOSS_USD=20. EXECUTION_SOLANA_PRIVATE_KEY stays commented out.
+- TEMP NIGHT TUNE in .env: EARLY_MIN_BUYERS=6, EARLY_MIN_BUYER_RATE=0.04, EARLY_MIN_BUYS=8, EARLY_MIN_BUY_SELL=2.0. Also EARLY_MAX_ENTRIES_PER_DAY=300, PUMPPORTAL_MAX_WATCHED=40, PUMPPORTAL_MAX_MSG_PER_DAY=20000.
+- EXIT CHANGE (executor/paper_ledger.py, EARLY_RULES): sprint + dev_list now sell 25% at 2x, 20% at 4x, 15% at 10x and leave a 40% RUNNER on the trailing stop. Needs a restart to take effect (restart done 00:57 PKT, ladder change NOT yet restarted as of 01:15).
+- UNDO EVERYTHING: double-click restore_safe.bat (restores .env.SAFE_BACKUP_20261014 and executor/paper_ledger.py.SAFE_BACKUP_20261014), then restart. Safe = sprint only, $8 stake, open 2, old ladder.
+- MORNING TEST (A+C): (1) did any live buy/sell happen, errors? (2) how many dev_list/sprint decisions overnight and how did they end? (3) wallet balance left of the $21; (4) did the 40% runner logic behave (rungs fired, trail)? (5) decide: keep tune, or restore_safe.bat. DO NOT leave the tune on without reviewing.
+- HONEST ODDS: $20 -> $150k needs ~30,000x on one coin (about 75,000x on the 40% runner). Chance per entry is ~1 in 100,000 or worse. Do not plan bills on it.
+- First 35 min after the tune (00:18-00:50 PKT): 744 new coins, only 5 decisions, all dev_list (1 confirmation); no sprint/core1/core2. Sprint needs >=2 confirmations, which need the paid trade feed, which watches only dev-list/repeat-grad coins.
 
 ## 2. TARGETS AND BOOKS (in the app: sprint = "Core 1 Sprint", core1 = "Core 2", core2 = "Core 3")
 - Core 1 Sprint: $100 -> $10,000 in 96h, cash out above target, reseed ~$200. Core 2: $125,000 in ~30 days. Core 3: $1M-$1.5M in ~180 days. Also Compound (daily goal) and copy books (Fomo Followers, Fomo New Wallets, Leaderboard, Dev Launch).
@@ -74,6 +83,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Honest risk: the targets are the growth REQUIRED, not shown performance. Sprint is lottery-like. Live stakes tiny, one lane first.
 
 ## 8. CHANGE LOG (newest first)
+- 14 Oct 01:15 Live night test: dev_list lane live, $5 stake, tune, 40% runner ladder (paper_ledger.py), restore_safe.bat. Section 1A.
+- 13 Oct 23:30 Live mode enabled (sprint, $8 cap) after $21 funding; entry cap raised to 300; PumpPortal metered feed guarded.
 - 13 Oct 16:50 e2e_test.py: unbiased end-to-end replay (real gate, tiers, exits) with --loop, 4h-old coins only, optional free CoinGecko key; commits facdfac, 344b944.
 - 13 Oct 14:20 Single source of truth rewrite; history archived to docs/archive/.
 - 13 Oct 14:10 Fomo: free /v2/me balance check + auto-resume; fomo_me.py.
