@@ -144,3 +144,10 @@ def test_liquidity_collapse_never_books_fake_profit():
     pl.manage(snapshot_fn=snap(460_000, liq=0), now=T0 + 120)
     rows = pl.module_rows("sprint", include_runners=True)
     assert rows and rows[0]["pnl_usd"] < 0 and rows[0]["close_reason"].startswith("liquidity")
+
+
+def test_legacy_paper_traders_retired_by_default(monkeypatch):
+    monkeypatch.setenv("LEGACY_PAPER_ENABLED", "false")
+    assert pl.open_paper("solana", "TOKL", "stage1", "score_band_A", 25.0, 50_000, strategy="scalper") is None
+    assert pl.open_paper("solana", "TOKE", "early_sprint", "early_sprint", 25.0, 50_000, strategy="early",
+                         exit_profile="sprint", module="sprint") is not None

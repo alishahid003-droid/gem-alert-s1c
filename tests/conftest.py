@@ -66,3 +66,12 @@ def _paper_stats_include_all(monkeypatch):
     import executor.paper_ledger as _pl
     monkeypatch.setattr(_pl, "STATS_SINCE_TS", 0.0)
     yield
+
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _legacy_paper_on_for_tests(monkeypatch):
+    """Production keeps the legacy stage/scalper paper traders OFF (LEGACY_PAPER_ENABLED); the ledger tests exercise them."""
+    monkeypatch.setenv("LEGACY_PAPER_ENABLED", "true")

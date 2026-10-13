@@ -113,6 +113,11 @@ def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
     already open, the chain has no buy path, or the price is unknown."""
     if chain not in PAPER_CHAINS or not token or not entry_mcap or entry_mcap <= 0 or not usd:
         return None
+    # Oct 13 2026 (Ali: "retire"): the legacy stage1 / scalper / quick paper traders opened $22-25 positions
+    # outside the books and lost $2,298 on 1,045 trades. Sniper entries (strategy "early") are unaffected;
+    # LEGACY_PAPER_ENABLED=true brings the old traders back. Positions already open are still managed.
+    if strategy in ("stage", "scalper", "quick") and os.environ.get("LEGACY_PAPER_ENABLED", "false").lower() != "true":
+        return None
     now = now if now is not None else time.time()
     book = _open()
     pid = f"{source}:{chain}:{token}"
