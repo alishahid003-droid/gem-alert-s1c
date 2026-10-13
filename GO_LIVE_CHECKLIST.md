@@ -556,3 +556,8 @@ NEXT ACTIONS (in order):
 - [x] books.can_open(book, strong=True): a Standard/Conviction signal with >=5 confirmations (>=4 non-dev signals on the pump.fun worker) may use BOOK_STRONG_EXTRA_SLOTS (default 2) beyond the normal 3/4/5 limit
 - [x] If those are full (or free cash < $5): paper_ledger.swap_out closes the STALEST FLAT position only (age >= 45 min, never ran: peak < 1.5x, no take-profit fired, still >= 0.75x, not live); deep-red positions are left to their own stop; max 1 swap per book per 5 min. Env: SWAP_MIN_AGE_MIN, SWAP_MIN_MULT, BOOK_STRONG_EXTRA_SLOTS
 - Watch: dashboard rows with exit "slot_swap"; if swaps lose money on average, widen SWAP_MIN_MULT to 0.85 or set BOOK_STRONG_EXTRA_SLOTS higher instead
+
+## 13 Oct 2026 ~14:10 - Fomo credits
+- Facts (docs + `python fomo_me.py`): free plan 250,000 credits/month, usedThisMonth 250,000, remaining 0, dailyLimit 10,000; no reset date is published; rotating key / new account does NOT help (shared plan balance; new account = evading the free tier, not done). GET /v2/me works at 0 credits and costs nothing.
+- [x] _fomo_get now checks /v2/me at most every 30 min while out of credits and resumes automatically the moment remaining > 0 (state keys last_me_ts, credits_back_ts show the reset moment). Replaces the blind 6h wait.
+- [ ] Look at credits_back_ts in .gem_alert_state.json (fomo_credit_state) once Fomo resumes -> that is the real reset time; then pace calls (7,500/day budget) for the month

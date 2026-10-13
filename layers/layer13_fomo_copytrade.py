@@ -220,6 +220,20 @@ DEFAULT_CALL_COST = 125          # observed x-credits-cost for /v2/alerts
 CREDITS_BACKOFF_SECONDS = 6 * 3600
 
 
+_ME_CHECK_SECONDS = 1800
+
+
+def _credits_remaining() -> Optional[int]:
+    """GET /v2/me -> credits.remaining (free call). None when unreachable."""
+    try:
+        r = get_json(f"{CONFIG.fomoapi_base_url}/v2/me", headers=_headers(), timeout=CONFIG.http_timeout_seconds)
+        if r.get("ok"):
+            return int(((r.get("json") or {}).get("credits") or {}).get("remaining"))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _daily_budget() -> int:
     import os
     try:
@@ -231,10 +245,25 @@ def _daily_budget() -> int:
 def _fomo_get(path: str, params: Optional[dict] = None, timeout: Optional[float] = None) -> dict:
     gov = state.get_fomo_credit_state()
     now = time.time()
-    if gov.get("backoff_until", 0) > now:
-        return {"ok": False, "status_code": 402,
-                "reason": f"fomoapi.io credits exhausted -- backing off until "
-                          f"{time.strftime('%H:%M UTC', time.gmtime(gov['backoff_until']))}"}
+    if gov.get("backoff_until", 0) > now or gov.get("remaining") == 0:
+        # Oct 13 2026: GET /v2/me answers HTTP 200 with the real balance even at 0 credits and costs nothing, and
+        # the docs give no reset date. So instead of a blind 6-hour wait, ask /v2/me at most every 30 min and resume
+        # the moment credits are back (the check time is saved so the reset moment becomes visible).
+        if now - gov.get("last_me_ts", 0) >= _ME_CHECK_SECONDS:
+            rem = _credits_remaining()
+            gov = {**gov, "last_me_ts": now}
+            if rem is not None:
+                gov["remaining"] = rem
+                if rem > 0:
+                    gov["backoff_until"] = 0
+                    gov["credits_back_ts"] = now
+                else:
+                    gov["backoff_until"] = now + _ME_CHECK_SECONDS
+            state.set_fomo_credit_state(gov)
+        if gov.get("backoff_until", 0) > now or gov.get("remaining") == 0:
+            return {"ok": False, "status_code": 402,
+                    "reason": f"fomoapi.io credits exhausted -- backing off, next /v2/me check "
+                              f"{time.strftime('%H:%M UTC', time.gmtime(gov.get('last_me_ts', now) + _ME_CHECK_SECONDS))}"}
     day = time.strftime("%Y-%m-%d", time.gmtime(now))
     spent = gov.get("spent_today", 0) if gov.get("day") == day else 0
     if spent + DEFAULT_CALL_COST > _daily_budget():
@@ -261,6 +290,7 @@ def _fomo_get(path: str, params: Optional[dict] = None, timeout: Optional[float]
         update["headers_seen"] = seen
     if result.get("status_code") == 402:
         update["backoff_until"] = now + CREDITS_BACKOFF_SECONDS
+        update["last_me_ts"] = now          # the 402 itself is a fresh balance read; first /v2/me check in 30 min
         update["last_error"] = "credits_exhausted"
     state.set_fomo_credit_state({**gov, **update})
     return result
