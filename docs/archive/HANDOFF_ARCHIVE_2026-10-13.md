@@ -1,0 +1,149 @@
+# S1c — Handoff & Status (single source of truth)
+
+_Last updated: Oct 9 2026 (verified against GitHub `main`; no code changes since Oct 6 -- see section 0c). Point of truth for continuity = this file + GitHub `main`.
+Not Notion. A new Claude / Cowork session: read this, then `GO_LIVE_CHECKLIST.md`,
+then run the tests (`python -m pytest -q`, 778 pass)._
+
+## 0. The honest bottom line (read first)
+- **Real money is OFF.** `EXECUTION_ENABLED` not set; the system only alerts + paper-trades.
+- **No strategy has shown a winning edge yet.** The rule search (560 entry/exit
+  rule combos) and the alert replay both show ~6–8% win rate on the coins the
+  system alerts on — because they come from TRENDING lists AFTER the pump.
+  The problem is WHICH coins get picked, not the exits.
+- **The system's own paper-record gate is correctly blocking band B from real
+  money.** Nothing would have been lost live.
+- **Do NOT turn on `SPRINT_MODE` / `EXECUTION_ENABLED` until a signal proves
+  positive on data it has never seen (see Phase 9 / §4).**
+- This is NOT a path to $90k by any near deadline. Honest, not hopeful.
+
+## 0c. Status as of Oct 9 2026 (verified)
+- **Oct 12:** liquidity/mcap rug check live in Layer 0 (9.10). 25 pump.fun dev wallets verified on-chain: 6 VERIFIED, 17 exist/active, 2 RPC errors; not added to the scanner (see `dev_wallet_verification.json`). GitHub main at `b2120fc`. Full Ali-vs-Claude action split is at the top of GO_LIVE_CHECKLIST.md.
+- **Oct 9 (later):** Phase 9 buyer-quality layer built (`layers/layer15_buyer_quality.py`, entry-guard hooks, buyer archive, `backtest_buyer_signals.py`; 9.9 verdict INSUFFICIENT DATA until the archive fills). Fomo DNS fixed; Fomo now blocked by HTTP 402 (credits exhausted). 815 tests pass. Real money still OFF.
+- **Last real code/doc commit: Oct 6 2026 (`35e7ce6`).** Everything after it is the automatic daily `replay_results` commit (Oct 6, 7, 8). No new build work Oct 7-9.
+- **Real money still OFF. No proven edge.** Unchanged from section 0.
+- **GitHub Actions replay is blind:** the Oct 8 `replay_results/alerts-2026-10-08_1319Z.md` shows `UPSTASH BLOCKED -- max requests limit exceeded` and 0 alerts, because the GitHub Secrets still point at the exhausted Upstash DB. Daily replay results are empty until the Secrets are updated or the workflow is moved to local mode. These commits carry no information.
+- **PC runs LOCAL MODE** (`start_local_mode.bat`, folder `Downloads\gem-alert-s1c_6`). Local working copy has uncommitted changes (`.gem_alert_state.json`, `.github/workflows/alert-replay.yml`, plus line-ending churn on ~30 files) -- do not commit them blindly.
+- **Open for Ali:** (1) set `EXECUTION_ENABLED=false` in the PC `.env` (was `true`); (2) Fomo tab DNS fix (`fix_dns.bat`, checklist 11.6); (3) decide Upstash upgrade vs permanent local mode and fix/disable the GitHub replay workflow; (4) confirm which PC folder is the real S1c copy (several `gem-alert-s1c*` copies exist in Downloads).
+- Superseded docs removed Oct 9 (`NEXT_STEPS.md`, `TASKS_LEFT_*.md`, `FINAL_CHECKLIST_2026-09-27.md`); they remain in git history. `GO_LIVE_CHECKLIST.md` is the only live checklist.
+
+## 0b. Oct 5 2026 incident -- Upstash free tier exhausted (READ THIS)
+- The free Upstash DB (500K commands/MONTH) hit its cap: 908K reads / 86K writes.
+  Upstash then answers every call with HTTP 400 "max requests limit exceeded";
+  reads looked empty, so the dashboard showed "never"/0 everywhere and nothing
+  was recorded. Check: `python -c "..."` printing `/dbsize` body, or the
+  console Usage tab. Data is retained; access returns after reset/upgrade.
+- Measured (counting fake Upstash): idle fast-watch tick 10 cmds, dashboard
+  refresh 25, discovery cycle floor 58. Fix pushed in `f741699`: read cache,
+  quota guard (stops calls + refuses real BUYS while blocked), throttled
+  cycles (poll-fast ~30 min, poll-slow ~60 min, madeonsol ~30 min via
+  `POLL_FAST_/POLL_SLOW_/MADEONSOL_MIN_INTERVAL_SECONDS`), fast-watch idle 180 s,
+  dashboard refreshes only while visible (3 min). Heartbeat note now shows the
+  REAL commands/min per runner -- watch it; target < 16K/day total.
+- Oct 5 follow-ups: `eebc58a` daily DB-command counter (dashboard System tab +
+  Telegram daily summary, key `cmd_usage:<UTC day>`, budget 16K/day);
+  `e4e7543` alert-replay workflow commits results to `replay_results/`.
+  Offline idle cost: poll-fast 14 / poll-slow 9 / madeonsol 10 commands per
+  cycle. Per-coin trim (checklist 10.5) waits for live data + the new counter.
+- Oct 6: two-target setup -- see TARGETS.md (sprint $90k/168 h, marathon $1M/150 d, `executor/targets.py`).
+- Oct 6: LOCAL MODE (no Upstash) built -- LOCAL_MODE.md, `local_runner.py`, `start_local_mode.bat`; state.py local backend is multi-process safe.
+- Oct 6 ~9:20 AM PKT: Ali is RUNNING IN LOCAL MODE on the PC (Upstash lines blank, old Task Scheduler jobs disabled, `start_local_mode.bat` started). Dashboard verified on `local_json`; poll-* first heartbeats pending. Starts with EMPTY state (old Upstash data unreadable). `EXECUTION_ENABLED=true` still in his `.env` -- advised `false` until the dashboard looks right.
+- STILL OPEN (Ali): 10.1 new/upgraded Upstash + .env + 2 GitHub Secrets +
+  update.bat; 10.2 confirm EXECUTION_ENABLED + wallet balance; 10.3 replays.
+- Ali's PC `.env` had `EXECUTION_ENABLED=true` + a Solana key (contradicts §0);
+  must be confirmed/turned off while real money has no proven edge.
+- To restore service: new/upgraded Upstash DB, update `UPSTASH_REDIS_REST_URL/TOKEN`
+  in the PC `.env` AND the GitHub Secrets, then `update.bat`.
+
+## 1. Where everything lives
+- **Code of record:** GitHub `main` (all PRs #1–#26 merged; working branch has
+  nothing unmerged).
+- **This file + `GO_LIVE_CHECKLIST.md`** = the running log (Phases 0–9, tests T1–T13).
+- **PC:** `C:\Users\razas\Downloads\gem-alert-s1c_6`. Update with `update.bat`
+  (pull + restart fast watcher + restart dashboard). Dashboard: http://localhost:8787.
+
+## 2. What runs now (all free, no real money)
+| Runner | Where | Cadence |
+|---|---|---|
+| poll-fast / poll-slow | GitHub Actions (cron-job.org) | 10 / 20 min |
+| poll-madeonsol | PC Task Scheduler | 15 min (≤190 MadeOnSol calls/day) |
+| fast-watch | PC Startup | 20–60 s |
+| alert-replay | GitHub | daily 06:07 UTC |
+
+## 3. What is DONE and TESTED
+- Discovery on 4 chains (Solana, BSC, Base alert-only, Robinhood Chain).
+- Scoring (safety), entry guards, exit rules, moonshot (L15), momentum lane (L16),
+  compound aggressor, 5-day sprint, milestones.
+- Rug/honeypot checks, on-chain sell-leg check before every buy.
+- Reliability: retry-once, Telegram alerts, daily summary, Upstash budget.
+- Price-glitch filter (ignore >4x jumps between reads) for paper + real exits.
+- Dashboard: Modules panel, Win-Rate scoreboard (by module/signal/chain/exit).
+- Test tools: `rule_search.py`; replay `--source alerts|fomo|launches`.
+- $2 test-trade DRY RUN passed. 778 automated tests pass.
+
+## 4. What we are WAITING ON (for tomorrow / next session)
+These collect data automatically; run the replay to read them:
+1. **Fomo copy-trade test** — needs Fomo credits (reset daily ~05:00 PKT; a
+   7-day archive of EVERY trader's buys is being recorded).
+   → Run: Actions → "Alert replay" → input **source = fomo**. Ranks which
+   traders are actually profitable to copy.
+2. **Buy-at-launch test** — the launch archive records every new pool.
+   → Run: Actions → "Alert replay" → input **source = launches**. Tests buying
+   early (2 min after launch) without the trending-list hindsight.
+3. **Daily alerts replay** — runs itself 06:07 UTC; current result ~6–8% (bad).
+4. **Momentum-lane paper record** — on the dashboard Modules panel (currently ~16%).
+
+Decision rule: wire a strategy to real money ONLY if it shows **positive
+expectancy on the UNSEEN (newer) half** in one of these tests.
+
+## 5. The plan to make it BETTER (Phase 9 in GO_LIVE_CHECKLIST.md)
+The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
+- 9.1 Smart-wallet-buying signal (per platform; Fomo list ≠ pump.fun ≠ StonkFun).
+- 9.2 Distinct-buyer velocity (unique wallets in first 2–5 min, accelerating).
+- 9.3 Anti-bot filter: funding-source clustering — many independent funders =
+  organic; all from 1–2 funders / brand-new wallets / identical sizes = bot farm → reject.
+- 9.4 Dev/sniper concentration cap (> ~20–30% held → reject).
+- 9.7 Data tier: **Helius (real-time Solana stream, FREE tier to start, ~$50/mo
+  later) + a curated wallet list.** Neither alone is enough. MadeOnSol PRO is
+  polling, not real-time. **Least capital: $0 to start; pay only after a signal
+  proves out.**
+- 9.8 StonkFun/Robinhood: Helius & MadeOnSol are Solana-only → separate data
+  source needed; defer until Solana path proven.
+
+## 6. ALI's open steps (unchanged; none urgent while real money is off)
+- Fund the NEW Solana wallet + `python test_trade.py --usd 1` (needs ~$4 SOL).
+- Only after a test (§4) proves an edge: add `EXECUTION_ENABLED=true` (+ the
+  relevant mode switch) as GitHub Secrets AND in the PC `.env`, then `update.bat`.
+- Paid data (Helius) — optional, only after §4 shows a real edge.
+
+- Oct 12 2026 late: Layer 16 radar (layers/layer16_catalyst_radar.py, tests/test_layer16_catalyst_radar.py, tests/test_radar_wiring.py) wired via scheduler --poll-radar + local_runner thread; B2 guard-context fix in layer0_scoring/_entry_ctx/_handle_scored. 846 tests green.
+- Oct 12 2026 night: module system (layers/modules.py, MODULES.md): Telegram labels, paper positions carry a module, dashboard Modules tab + Module column. 853 tests green.
+- Oct 12 2026 late night: books (executor/books.py) + router (layers/router.py); Core 1 $125K/60d, Core 2 $1M/150d, Compound daily; Fomo new-wallet pipeline (layer13.detect_new_wallet_buys). 863 tests green. See MODULES.md.
+- Oct 12 2026 night 2: PRE-EARLY SNIPER. layers/layer17_early_entry.py (state machine), early_stream.py (PumpPortal ws), worker_early_watch.py (supervised by local_runner, LOCAL_RUNNER_EARLY), diag_early_stream.py. Router is age-first (mcap no longer picks Core). Layer 15 now feeds Compound only. 874 tests green. PumpPortal schema from memory -> verify with diag_early_stream.py. Thresholds EARLY_*/ROUTER_* untuned. Paper only.
+- Oct 12 2026 10:15 PM: diag showed PumpPortal trade feed needs API key (>=0.02 SOL). Patched: PUMPPORTAL_API_KEY support, trades_blocked detection, dev-list entry at creation (tracker.feed_off). 876 tests. Pushed 5783305. Next: Ali decides key vs Helius feed.
+- Oct 12 2026 10:30 PM: single FINAL_CHECKLIST_2026-10-12.md created (24 items, 5 phases). It is THE list.
+- Oct 12 22:45: built recorder (early_recorder.py, analyze_early.py), early exit engine (paper_ledger._manage_early), pumpportal_exec.py live adapter + kill_switch.py, bundle detection, watchdog. 884 tests. 24h plan in FINAL_CHECKLIST.
+- Oct 12 23:35: dns_fallback.py (DoH) for ISP DNS block of api.telegram.org; telegram_alert installs it.
+- Oct 12 23:50: Sniper desk on dashboard Overview (entries+trade links GMGN/pump.fun/Dex, open positions live multiple, paper/live P&L, status); TELEGRAM_ENABLED=false switch. Telegram no longer primary.
+- Oct 13: early_creators.py (repeat_grad), subscribeMigration + grad recording, analyze_early graduation-lift report, MOONSHOT_RESEARCH addendum, FINAL_CHECKLIST_2026-10-13.md
+- Oct 13: Sprint 96h book, Core1=30d, Core2=180d, vault banking (executor/books.py), sprint lane in early tracker. 891 tests.
+- Oct 13 night: see STATUS_2026-10-13_NIGHT.md for exactly where we stand and the morning plan.
+- Oct 13 01:45: MASTER_CHECKLIST.md is now the single checklist.
+- Oct 13 01:50: GO_LIVE_CHECKLIST.md top block = MASTER STATUS & ORDER OF WORK (single source of truth). FINAL_CHECKLIST_*/MASTER_CHECKLIST.md are stubs.
+- Oct 13 01:55: added API BUDGET AUDIT (pace every free API over a month) to master checklist Step 1.
+
+## 13 Oct 2026 08:45 PKT — morning result + fixes
+- First 3 h of paper trading blew out every target book (Sprint $8, Core 2 $0, Core 3 $13). 0 real winners in 42 entries. See MASTER STATUS in GO_LIVE_CHECKLIST.md.
+- Fixed: fake +$505 on drained pool (paper_ledger liquidity-collapse exit), bust-reseed + BUST counter (executor/books.py), non-ASCII print crash (multichain_sniper.py).
+- Tuned: MC_MAX_MCAP_USD 60k, MC_EVM_STAKE_MULT 0.3 (bsc/robinhood).
+- New: api_budget.py (+ hook in utils/http.py) → `python api_budget.py`.
+- Needs restart (Admin CMD: taskkill /F /IM python.exe, then start_local_mode.bat). 900 tests pass.
+
+## 13 Oct 2026 10:05 PKT — end-of-morning state
+See GO_LIVE_CHECKLIST.md Step 1 (DONE this morning / LEFT TO DO). Latest code b9733cc live since 09:37 restart. Next: PumpPortal key (Ali), Helius key (Ali), tune from analyze_early.py at ~01:31 PKT Oct 14.
+
+## 13 Oct 2026 PM
+Exits widened (stop .35 / trail .40 / ladder 20-15-10 / dead-coin 90m) and conviction tiers + biglaunch/Robinhood probe lanes added. 915 tests pass. See GO_LIVE_CHECKLIST.md. Pending: PumpPortal + Helius keys; 24h paper review.
+Winners tracker added (winners_tracker.py, logs/winners_book.json). Full next-actions list is at the bottom of GO_LIVE_CHECKLIST.md. Early_log outcome pricing is suspect - verify before trusting pump.fun runner stats.
+
+## END OF 13 Oct 2026
+Built today (all paper): winners replay + discovery, new exits, conviction tiers, biglaunch/Robinhood lanes, early-lane tiers, serial-launcher block, winners tracker, slot rules, Fomo /v2/me auto-resume. Next actions are the END-OF-DAY block at the bottom of GO_LIVE_CHECKLIST.md (mirrored in Notion master page section 0).
