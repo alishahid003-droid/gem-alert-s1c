@@ -2,8 +2,7 @@ name: Smoke test (fixtures, no keys needed)
 
 on:
   workflow_dispatch: {}
-  push:
-    branches: [ main ]
+  # push trigger REMOVED Oct 13 2026 (Ali: "run failed" emails on every push; the system runs locally now).
 
 jobs:
   fixture-tests:

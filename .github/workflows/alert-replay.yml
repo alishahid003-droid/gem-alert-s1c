@@ -10,8 +10,7 @@ on:
         description: "alerts (system alerts), fomo (copy every Fomo trader's buys) or launches (buy every new coin at launch)"
         required: false
         default: "alerts"
-  schedule:
-    - cron: "7 6 * * *"      # daily: replays the last 7 days of alerts (>= 4 h old)
+  # daily schedule REMOVED Oct 13 2026 (Ali: "run failed" emails; run it by hand with workflow_dispatch).
   push:
     branches: ["claude/**"]
     paths: ["backtest_alert_replay.py", ".github/workflows/alert-replay.yml"]
