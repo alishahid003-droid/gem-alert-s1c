@@ -19,7 +19,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 # host fragment -> (label, per_day, per_minute)
 LIMITS = {
     "madeonsol": ("MadeOnSol", 200, None),
-    "geckoterminal": ("GeckoTerminal", None, 30),
+    "geckoterminal": ("GeckoTerminal", None, 8),   # published 30/min, but measured Oct 13: only ~6 calls/min succeed from Ali's IP
     "dexscreener": ("DexScreener", None, 300),
     "gopluslabs": ("GoPlus", None, 30),
     "birdeye": ("Birdeye", None, 60),

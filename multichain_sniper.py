@@ -275,7 +275,7 @@ def run_loop(stop: Optional[threading.Event] = None):
         except Exception:  # noqa: BLE001
             traceback.print_exc()
         cycle += 1
-        time.sleep(max(2.0, _f("MC_POLL_S", 20) - (time.time() - t0)))
+        time.sleep(max(2.0, _f("MC_POLL_S", 45) - (time.time() - t0)))
 
 
 if __name__ == "__main__":
