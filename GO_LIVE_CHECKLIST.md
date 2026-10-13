@@ -4,10 +4,12 @@ Old versions are archived in docs/archive/ (history only - never read them for s
 UPDATE RULE (Claude, after every change): rewrite THIS file, copy it to the Notion master page, then commit. Ali pushes.
 Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=Claude
 
-## 1. STATUS - 13 Oct 2026, 14:20 PKT
+## 1. STATUS - 13 Oct 2026, 16:55 PKT
 - Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 923 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
-- Last code commit: Fomo /v2/me fix. This rewrite needs one push (no restart).
+- Last commit 344b944 (e2e replay test + loop). Git, folder and Notion are in sync as of 16:55 PKT.
+- RUNNING NOW in its own CMD window: `python e2e_test.py --loop` (end-to-end replay test, no CoinGecko key yet = slow pace). First coins become replay-ready ~20:00 PKT; verdict (needs >= 30 entries) expected tonight/overnight. Its first batch (14:31) was useless (coins fetched minutes after launch) and was fixed.
+- e2e_test.py has no unit tests yet (checked by hand with a mocked HTTP call).
 
 ## 2. TARGETS AND BOOKS (in the app: sprint = "Core 1 Sprint", core1 = "Core 2", core2 = "Core 3")
 - Core 1 Sprint: $100 -> $10,000 in 96h, cash out above target, reseed ~$200. Core 2: $125,000 in ~30 days. Core 3: $1M-$1.5M in ~180 days. Also Compound (daily goal) and copy books (Fomo Followers, Fomo New Wallets, Leaderboard, Dev Launch).
@@ -36,11 +38,13 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 
 ## 5. NEXT ACTIONS - IN ORDER
 ALI:
-1. [ ] (A) Run: git add -A, git commit -m "Single source of truth checklist", git push (no restart needed).
-2. [ ] (A) Keep PC awake (sleep = Never), windows open, dashboard open.
+1. [x] (A) DONE 16:48: pushed (344b944). Everything on GitHub.
+2. [ ] (A) Keep PC awake (sleep = Never), ALL windows open incl. the e2e loop window, dashboard open. Optional: a FREE CoinGecko Demo key in .env as COINGECKO_API_KEY (do NOT pay for any plan; the pricing page shows only paid plans, free signup may be elsewhere on coingecko.com/en/api). Restart the loop after adding it.
 3. [ ] (A) PumpPortal key (~0.02 SOL; send ONLY the exact fee to the address its site shows; Phantom has $1.53 ETH + $0.57 SOL) and a free Helius key -> .env as PUMPPORTAL_API_KEY and SOLANA_RPC_URL. Never paste keys or the seed phrase in chat. Then say "keys are in" and Claude guides the Admin-CMD restart. This enables buyers/pressure, the Conviction tier, curve-phase 10-25k entries with rug filters (creator dump, bundled launch, one-wallet dominance, sell pressure).
 4. [ ] (A) ~01:31 PKT Oct 14: run python analyze_early.py 1, python winners_tracker.py, python api_budget.py and send all three outputs.
+4b. [ ] (A) ~22:00 PKT and again in the morning: paste whatever the e2e loop window shows (full verdict once >= 30 entries).
 CLAUDE (after those outputs):
+4c. [ ] (C) Read the e2e verdict. GO (edge survives removing the best coin, >= 30 entries) -> set up ONE-lane tiny live test ($2-5 stakes) with PumpPortal key. NO-GO -> rework/cut lanes and rerun. Never treat GO as a forecast.
 5. [ ] (C) Verify early_log outcome pricing against GeckoTerminal on sample coins.
 6. [ ] (C) Review 24h paper under the new exits/tiers/lanes/slot swaps (stop-outs, tier mix, slot_swap P&L, biglaunch/Robinhood entries). Only then consider higher stakes.
 7. [ ] (C) Day-2 check of early_log features; read credits_back_ts for the Fomo reset time; API budget audit close-out (every free API must last the month).
@@ -68,6 +72,7 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Honest risk: the targets are the growth REQUIRED, not shown performance. Sprint is lottery-like. Live stakes tiny, one lane first.
 
 ## 8. CHANGE LOG (newest first)
+- 13 Oct 16:50 e2e_test.py: unbiased end-to-end replay (real gate, tiers, exits) with --loop, 4h-old coins only, optional free CoinGecko key; commits facdfac, 344b944.
 - 13 Oct 14:20 Single source of truth rewrite; history archived to docs/archive/.
 - 13 Oct 14:10 Fomo: free /v2/me balance check + auto-resume; fomo_me.py.
 - 13 Oct 14:00 Slot rules (extra slots + stale-flat swap).
