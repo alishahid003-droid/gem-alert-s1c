@@ -107,9 +107,15 @@ class Scanner:
         # Oct 13 2026: 60k stops the moonshot lanes chasing (all 13 first-run entries above $50k lost), but real
         # runners also keep running after 60k. Solana coins up to MC_MOMENTUM_MAX_MCAP_USD may enter ONLY the
         # core1 momentum bucket and only with >=4 confirmations -- its own bucket so the data can judge it.
-        momentum = bool(mcap and mcap > cap and p["chain"] == "solana"
+        chain = p["chain"]
+        rhc = chain in ("robinhood", "robinhood_chain")
+        # Oct 13 2026 winners replay: Robinhood runners open above $60k (MOW/VRAX/CLAUDIA) and Solana runners
+        # can open above $250k (LOAD/Orca CLAUDIA). Both get their own PROBE-size lanes (needs 5 confirmations).
+        wide_cap = _f("MC_RHC_MAX_MCAP_USD", 250_000) if rhc else _f("MC_BIG_MAX_MCAP_USD", 1_000_000) if chain == "solana" else cap
+        big = bool(mcap and mcap > (_f("MC_MOMENTUM_MAX_MCAP_USD", 250_000) if chain == "solana" else cap) and mcap <= wide_cap)
+        momentum = bool(mcap and mcap > cap and chain == "solana"
                         and mcap <= _f("MC_MOMENTUM_MAX_MCAP_USD", 250_000))
-        if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or (mcap > cap and not momentum):
+        if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or (mcap > cap and not momentum and not big):
             return None
         if p["src"] == "gt" and (liq or 0) < _f("MC_MIN_LIQ_USD", 2500):
             return None
@@ -142,12 +148,17 @@ class Scanner:
         if b is not None and s is not None and s > 1.5 * max(b, 1):
             return None                                   # being dumped
         need = int(_f("MC_MIN_CONF_STONK" if p["src"] == "stonkfun" else "MC_MIN_CONF", 2 if p["src"] == "stonkfun" else 3))
-        if len(conf) < need or (momentum and len(conf) < 4):
+        if len(conf) < need or (momentum and len(conf) < 4) or (big and len(conf) < 5):
             return None
+        if big:
+            return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
+                    "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["biglaunch"],
+                    "lanes": ["core1"], "lane": "core1", "potential": "biglaunch", "tier": "probe"}
         if momentum:
             return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
-                    "lanes": ["core1"], "lane": "core1", "potential": "momentum"}
+                    "lanes": ["core1"], "lane": "core1", "potential": "momentum",
+                    "tier": "standard" if len(conf) >= 5 else "probe"}
         lanes = ["core1"]
         if len(conf) >= 4 and age_min <= 15:
             lanes.append("core2")
@@ -157,7 +168,7 @@ class Scanner:
             lanes.append("compound")
         return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                 "liq": liq, "age_min": round(age_min, 1), "confirmations": conf, "lanes": lanes, "lane": lanes[0],
-                "potential": "100x+" if "core2" in lanes else "10x-50x"}
+                "potential": "100x+" if "core2" in lanes else "10x-50x", "tier": tier_of(conf)}
 
 
 def evm_safe(chain: str, addr: str) -> tuple:
@@ -181,6 +192,14 @@ def evm_safe(chain: str, addr: str) -> tuple:
         return True, "unscanned"
 
 
+def tier_of(conf: list) -> str:
+    """probe = 3 confirmations; standard = 4-5; conviction = every core signal incl. buyers AND pressure."""
+    n = len(conf)
+    if n >= 6 and "buyers" in conf and "pressure" in conf:
+        return "conviction"
+    return "standard" if n >= 4 else "probe"
+
+
 def act(d: dict, now: Optional[float] = None) -> dict:
     """Paper entries in every lane book + dashboard feed row. Paper only on these chains."""
     from executor import books, paper_ledger
@@ -196,18 +215,20 @@ def act(d: dict, now: Optional[float] = None) -> dict:
     opened, refused = [], []
     for lane in d["lanes"]:
         can, reason = books.can_open(lane)
-        stake = books.stake_usd(lane) if can else 0.0
+        tier = d.get("tier", "probe")
+        stake = books.tier_stake_usd(lane, tier, d.get("mcap")) if can else 0.0
         if stake and d["chain"] in ("bsc", "robinhood_chain", "robinhood"):
             # Oct 13 2026 first run: bsc 0 wins / 9 (avg -81%), robinhood 0 / 5 (avg -54%): evidence mode.
-            stake = round(stake * (_f("MC_EVM_STAKE_MULT", 0.3) or 0.3), 2)
+            mult = _f("MC_RHC_STAKE_MULT", 0.6) if d["chain"] != "bsc" else _f("MC_EVM_STAKE_MULT", 0.3)
+            stake = round(stake * (mult or 0.3), 2)
             stake = stake if stake >= 5.0 else 0.0
         if not stake:
             refused.append(f"{lane}: {reason}")
             continue
         pos = paper_ledger.open_paper(d["chain"], d["addr"], f"early_{lane}", f"early_{lane}", stake, d["mcap"],
                                       strategy="early", exit_profile=lane, liquidity_usd=d.get("liq"),
-                                      tags={"origin": "multichain", "src": d["src"], "age_min": d["age_min"],
-                                            "confirmations": d["confirmations"], "safety": why}, module=lane)
+                                      tags={"origin": "multichain", "name": str(d["name"])[:24], "src": d["src"], "age_min": d["age_min"],
+                                            "confirmations": d["confirmations"], "tier": d.get("tier", "probe"), "safety": why}, module=lane)
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
     try:
         state.log_full_alert("early_" + d["lane"], d["chain"], d["name"], d["addr"],
@@ -269,7 +290,7 @@ def run_loop(stop: Optional[threading.Event] = None):
                     res = act(d, now)
                     try:
                         print("[multichain] ENTRY", d["chain"], str(d["name"]).encode("ascii", "replace").decode(),
-                              d["confirmations"], res, flush=True)
+                              f"mcap=${d['mcap']:,.0f} age={d['age_min']}m", d["confirmations"], res, flush=True)
                     except Exception:  # noqa: BLE001
                         pass
         except Exception:  # noqa: BLE001

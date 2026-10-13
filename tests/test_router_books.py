@@ -168,3 +168,21 @@ def test_bust_reseeds_book_and_counts(monkeypatch):
     assert len(books.busts("sprint")) == 1
     assert books.total_value("sprint") == 100.0
     assert books.status("sprint")["busts"] == 1
+
+
+def test_tier_stakes_cap_and_loss_brake():
+    eq = books.equity("sprint")
+    pr = books.tier_stake_usd("sprint", "probe")
+    st = books.tier_stake_usd("sprint", "standard")
+    cv = books.tier_stake_usd("sprint", "conviction")
+    assert pr < st < cv <= eq * 0.8
+    assert abs(st - eq * 0.40) < 0.02 or st == books.tier_stake_usd("sprint", "standard")
+    assert books.tier_stake_usd("sprint", "conviction", mcap=1_000.0) == 20.0           # 2% of a $1k coin
+    assert books.tier_stake_usd("sprint", "conviction", mcap=100.0) == 0.0              # $2 < $5 floor
+    assert books.tier_stake_usd("core2", "conviction") < cv                                # calmer long book
+    for i in range(3):                                                                    # 3 straight losses: one tier down
+        paper_ledger.open_paper("solana", f"L{i}", "early_sprint", "early_sprint", 10, 5000, strategy="early",
+                                exit_profile="sprint", now=1000.0 + i, module="sprint")
+        paper_ledger.manage(lambda c, t: {"mcap_usd": 1000, "liquidity_usd": 9999}, now=1100.0 + i, source_prefix="early_")
+    assert books.loss_streak("sprint") == 3
+    assert books.tier_after_brake("conviction", "sprint") == "standard"

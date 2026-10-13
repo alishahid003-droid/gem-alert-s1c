@@ -1,0 +1,1806 @@
+{
+ "named": [
+  {
+   "addr": "D15XZrRbxD5PLJBR5nPpYAq1evZYWrFPJmq4y3BzgC5j",
+   "chain": "solana",
+   "ok": false,
+   "symbol": "FEELSGOOD",
+   "dex": "meteora-damm-v2",
+   "dexes": [
+    "meteora-damm-v2",
+    "meteora-dbc",
+    "pumpswap"
+   ],
+   "created_ts": 1789837196.0,
+   "created": "2026-09-19 16:59",
+   "supply": 100000000000,
+   "mcap_now": 4815831,
+   "candles": 9,
+   "error": "only 9 candles (launch curve phase not indexed?)",
+   "group": "named",
+   "label": "FEELSGOOD"
+  },
+  {
+   "addr": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "PONS",
+   "dex": "uniswap-v3-robinhood",
+   "dexes": [
+    "ekubo-v3-robinhood",
+    "ramses-v3-robinhood",
+    "uniswap-v2-robinhood",
+    "uniswap-v3-robinhood",
+    "uniswap-v4-robinhood",
+    "up-v3"
+   ],
+   "created_ts": 1783975341.0,
+   "created": "2026-07-13 20:42",
+   "supply": 676308352,
+   "mcap_now": 197394364,
+   "candles": 968,
+   "peak": 1436985,
+   "crossed": {
+    "10000": 9,
+    "15000": 10,
+    "20000": 10,
+    "40000": 10,
+    "60000": 11,
+    "80000": 13,
+    "250000": 230
+   },
+   "fired": {
+    "strict": {
+     "minute": 4.7,
+     "mcap": 3180,
+     "conf": [
+      "velocity",
+      "fresh",
+      "growth"
+     ],
+     "momentum": false,
+     "vol5": 1045,
+     "chg5": 68.2,
+     "vol_ratio": 5.63,
+     "n_conf": 3,
+     "peak_mult": 461.8,
+     "dip_before_2x": 1.0,
+     "hit_2x": true,
+     "min_to_peak": 953,
+     "exits": {
+      "0.35": 5.277,
+      "0.45": 5.277,
+      "0.55": 5.277,
+      "0.7": 5.277
+     },
+     "exit_default": "trail"
+    },
+    "proxy": {
+     "minute": 4.7,
+     "mcap": 3180,
+     "conf": [
+      "velocity",
+      "fresh",
+      "growth"
+     ],
+     "momentum": false,
+     "vol5": 1045,
+     "chg5": 68.2,
+     "vol_ratio": 5.63,
+     "n_conf": 3,
+     "peak_mult": 461.8,
+     "dip_before_2x": 1.0,
+     "hit_2x": true,
+     "min_to_peak": 953,
+     "exits": {
+      "0.35": 5.277,
+      "0.45": 5.277,
+      "0.55": 5.277,
+      "0.7": 5.277
+     },
+     "exit_default": "trail"
+    }
+   },
+   "why": {
+    "strict": [],
+    "proxy": []
+   },
+   "group": "named",
+   "label": "PONS"
+  },
+  {
+   "addr": "0xa9db6d3fb987257767b7227b7df5fad099004571",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "PONS",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791333307.0,
+   "created": "2026-10-07 00:35",
+   "supply": 1000000000,
+   "mcap_now": 377301456,
+   "candles": 9,
+   "error": "only 9 candles (launch curve phase not indexed?)",
+   "group": "named",
+   "label": "PONS"
+  },
+  {
+   "addr": "AMC1qwR9KhiyrQBRPrxnfo4JfMeMZqEBvt5tgTytNNoc",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "AMC",
+   "dex": "raydium-clmm",
+   "dexes": [
+    "meteora",
+    "pump-fun",
+    "raydium",
+    "raydium-clmm",
+    "stonkfun"
+   ],
+   "created_ts": 1788530190.0,
+   "created": "2026-09-04 13:56",
+   "supply": 53035,
+   "mcap_now": 158668,
+   "candles": 534,
+   "peak": 173112,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 0
+   },
+   "fired": {
+    "strict": null,
+    "proxy": {
+     "minute": 4.5,
+     "mcap": 149384,
+     "conf": [
+      "volume",
+      "fresh",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": true,
+     "vol5": 10123,
+     "chg5": 2.5,
+     "vol_ratio": 5.24,
+     "n_conf": 4,
+     "peak_mult": 1.18,
+     "dip_before_2x": 0.88,
+     "hit_2x": false,
+     "min_to_peak": 4,
+     "exits": {
+      "0.35": 0.862,
+      "0.45": 0.862,
+      "0.55": 0.862,
+      "0.7": 0.862
+     },
+     "exit_default": "dead"
+    }
+   },
+   "why": {
+    "strict": [
+     [
+      "older than 60 min (age cap)",
+      473
+     ],
+     [
+      "only 1 confirmations (volume), need 4",
+      45
+     ],
+     [
+      "only 2 confirmations (volume, fresh), need 4",
+      10
+     ]
+    ],
+    "proxy": []
+   },
+   "group": "named",
+   "label": "AMC"
+  },
+  {
+   "addr": "39ahtL8ynzE4amH26J29C93PA5172V3ft9UuUcqQS8fz",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "AUTON",
+   "dex": "meteora-damm-v2",
+   "dexes": [
+    "hadron",
+    "meteora",
+    "meteora-damm-v2",
+    "raydium-clmm"
+   ],
+   "created_ts": 1791312220.0,
+   "created": "2026-10-06 18:43",
+   "supply": 997462970,
+   "mcap_now": 18997,
+   "candles": 910,
+   "peak": 7729706,
+   "crossed": {
+    "10000": -1,
+    "15000": -1,
+    "20000": -1,
+    "40000": 0,
+    "60000": 3,
+    "80000": 4,
+    "250000": 37
+   },
+   "fired": {
+    "strict": {
+     "minute": 4.3,
+     "mcap": 86734,
+     "conf": [
+      "velocity",
+      "volume",
+      "fresh",
+      "growth"
+     ],
+     "momentum": true,
+     "vol5": 36471,
+     "chg5": 183.1,
+     "vol_ratio": 6.08,
+     "n_conf": 4,
+     "peak_mult": 92.48,
+     "dip_before_2x": 0.37,
+     "hit_2x": true,
+     "min_to_peak": 221,
+     "exits": {
+      "0.35": 1.571,
+      "0.45": 0.405,
+      "0.55": 0.495,
+      "0.7": 0.63
+     },
+     "exit_default": "stop"
+    },
+    "proxy": {
+     "minute": 4.3,
+     "mcap": 86734,
+     "conf": [
+      "velocity",
+      "volume",
+      "fresh",
+      "growth",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": true,
+     "vol5": 36471,
+     "chg5": 183.1,
+     "vol_ratio": 6.08,
+     "n_conf": 6,
+     "peak_mult": 92.48,
+     "dip_before_2x": 0.37,
+     "hit_2x": true,
+     "min_to_peak": 221,
+     "exits": {
+      "0.35": 1.571,
+      "0.45": 0.405,
+      "0.55": 0.495,
+      "0.7": 0.63
+     },
+     "exit_default": "stop"
+    }
+   },
+   "why": {
+    "strict": [],
+    "proxy": []
+   },
+   "group": "named",
+   "label": "AUTON"
+  },
+  {
+   "addr": "HgTGdc29D5bDMrDvsCLnorxz899VyDj7ZN7FPa6vpump",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "VEIL",
+   "dex": "pumpswap",
+   "dexes": [
+    "hadron",
+    "meteora",
+    "meteora-damm-v2",
+    "pump-fun",
+    "pumpswap"
+   ],
+   "created_ts": 1791831681.0,
+   "created": "2026-10-12 19:01",
+   "supply": 979033888,
+   "mcap_now": 2612937,
+   "candles": 715,
+   "peak": 4194313,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 2,
+    "250000": 50
+   },
+   "fired": {
+    "strict": {
+     "minute": 14.7,
+     "mcap": 109009,
+     "conf": [
+      "velocity",
+      "volume",
+      "fresh",
+      "growth"
+     ],
+     "momentum": true,
+     "vol5": 32203,
+     "chg5": 31.9,
+     "vol_ratio": 1.05,
+     "n_conf": 4,
+     "peak_mult": 43.59,
+     "dip_before_2x": 0.83,
+     "hit_2x": true,
+     "min_to_peak": 109,
+     "exits": {
+      "0.35": 0.765,
+      "0.45": 0.765,
+      "0.55": 0.765,
+      "0.7": 0.765
+     },
+     "exit_default": "dead"
+    },
+    "proxy": {
+     "minute": 4.7,
+     "mcap": 101053,
+     "conf": [
+      "velocity",
+      "volume",
+      "fresh",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": true,
+     "vol5": 26158,
+     "chg5": 41.4,
+     "vol_ratio": 4.26,
+     "n_conf": 5,
+     "peak_mult": 47.02,
+     "dip_before_2x": 0.78,
+     "hit_2x": true,
+     "min_to_peak": 119,
+     "exits": {
+      "0.35": 0.817,
+      "0.45": 0.817,
+      "0.55": 0.817,
+      "0.7": 0.817
+     },
+     "exit_default": "dead"
+    }
+   },
+   "why": {
+    "strict": [
+     [
+      "only 2 confirmations (volume, fresh), need 4",
+      8
+     ],
+     [
+      "only 3 confirmations (velocity, volume, fresh), need 4",
+      2
+     ]
+    ],
+    "proxy": []
+   },
+   "group": "named",
+   "label": "VEIL"
+  },
+  {
+   "addr": "8sWe4GzK1YqG3vyzKHf8ZyB1WB5asofw2o6TqgFePtPo",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "LOAD",
+   "dex": "meteora-damm-v2",
+   "dexes": [
+    "hadron",
+    "manifest",
+    "meteora",
+    "meteora-damm-v2",
+    "orca"
+   ],
+   "created_ts": 1791831675.0,
+   "created": "2026-10-12 19:01",
+   "supply": 972744997,
+   "mcap_now": 8204943,
+   "candles": 547,
+   "peak": 11768198,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 0,
+    "250000": 0
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above momentum cap (>250k)",
+      542
+     ]
+    ],
+    "proxy": [
+     [
+      "above momentum cap (>250k)",
+      542
+     ]
+    ]
+   },
+   "group": "named",
+   "label": "LOAD"
+  },
+  {
+   "addr": "AFF64fWHnW9Vkw5CZPMK3Xe1w23iTXGQe4sFntSaEDg2",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "CLAUDIA",
+   "dex": "orca",
+   "dexes": [
+    "orca"
+   ],
+   "created_ts": 1791692641.0,
+   "created": "2026-10-11 04:24",
+   "supply": 1000000000,
+   "mcap_now": 7375258,
+   "candles": 45,
+   "peak": 7460572,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 0,
+    "250000": 0
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above momentum cap (>250k)",
+      40
+     ]
+    ],
+    "proxy": [
+     [
+      "above momentum cap (>250k)",
+      40
+     ]
+    ]
+   },
+   "group": "named",
+   "label": "CLAUDIA"
+  }
+ ],
+ "other_solana": [
+  {
+   "addr": "ApZuxdpzMrbEYTGEzeY9afh5pj9d6qPRJCTgQYiipbKg",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "CYBERLEEK",
+   "dex": "raydium",
+   "dexes": [
+    "manifest",
+    "meteora",
+    "meteora-damm-v2",
+    "orca",
+    "pumpswap",
+    "raydium",
+    "raydium-clmm",
+    "stonkfun"
+   ],
+   "created_ts": 1786828046.0,
+   "created": "2026-08-15 21:07",
+   "supply": 729888819,
+   "mcap_now": 1613836,
+   "candles": 205,
+   "peak": 77339,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 14,
+    "60000": 195
+   },
+   "fired": {
+    "strict": {
+     "minute": 15.6,
+     "mcap": 44114,
+     "conf": [
+      "velocity",
+      "volume",
+      "growth"
+     ],
+     "momentum": false,
+     "vol5": 23219,
+     "chg5": 76.5,
+     "vol_ratio": 520882.02,
+     "n_conf": 3,
+     "peak_mult": 1.87,
+     "dip_before_2x": 0.72,
+     "hit_2x": false,
+     "min_to_peak": 182,
+     "exits": {
+      "0.35": 0.654,
+      "0.45": 0.654,
+      "0.55": 0.654,
+      "0.7": 0.654
+     },
+     "exit_default": "dead"
+    },
+    "proxy": {
+     "minute": 15.6,
+     "mcap": 44114,
+     "conf": [
+      "velocity",
+      "volume",
+      "growth",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": false,
+     "vol5": 23219,
+     "chg5": 76.5,
+     "vol_ratio": 520882.02,
+     "n_conf": 5,
+     "peak_mult": 1.87,
+     "dip_before_2x": 0.72,
+     "hit_2x": false,
+     "min_to_peak": 182,
+     "exits": {
+      "0.35": 0.654,
+      "0.45": 0.654,
+      "0.55": 0.654,
+      "0.7": 0.654
+     },
+     "exit_default": "dead"
+    }
+   },
+   "why": {
+    "strict": [],
+    "proxy": []
+   },
+   "group": "other_solana",
+   "label": "CYBERLEEK"
+  },
+  {
+   "addr": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+   "chain": "solana",
+   "ok": false,
+   "error": "GeckoTerminal free plan will not serve history this old (HTTP 401)",
+   "group": "other_solana",
+   "label": "PENGU"
+  },
+  {
+   "addr": "2j5SaS7xy776qCBpyPQbZjyQSAtKiFgrwjfErthnW2ZM",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "CLAUDIA",
+   "dex": "pumpswap",
+   "dexes": [
+    "hadron",
+    "manifest",
+    "meteora",
+    "meteora-damm-v2",
+    "pump-fun",
+    "pumpswap"
+   ],
+   "created_ts": 1791337470.0,
+   "created": "2026-10-07 01:44",
+   "supply": 946238161,
+   "mcap_now": 4548580,
+   "candles": 1000,
+   "peak": 1184716,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 6,
+    "60000": 8,
+    "80000": 8,
+    "250000": 24
+   },
+   "fired": {
+    "strict": {
+     "minute": 5.5,
+     "mcap": 41111,
+     "conf": [
+      "volume",
+      "fresh",
+      "growth"
+     ],
+     "momentum": false,
+     "vol5": 85503,
+     "chg5": 13.5,
+     "vol_ratio": 2.83,
+     "n_conf": 3,
+     "peak_mult": 31.17,
+     "dip_before_2x": 0.72,
+     "hit_2x": true,
+     "min_to_peak": 147,
+     "exits": {
+      "0.35": 1.758,
+      "0.45": 1.758,
+      "0.55": 1.758,
+      "0.7": 1.758
+     },
+     "exit_default": "trail"
+    },
+    "proxy": {
+     "minute": 5.5,
+     "mcap": 41111,
+     "conf": [
+      "volume",
+      "fresh",
+      "growth",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": false,
+     "vol5": 85503,
+     "chg5": 13.5,
+     "vol_ratio": 2.83,
+     "n_conf": 5,
+     "peak_mult": 31.17,
+     "dip_before_2x": 0.72,
+     "hit_2x": true,
+     "min_to_peak": 147,
+     "exits": {
+      "0.35": 1.758,
+      "0.45": 1.758,
+      "0.55": 1.758,
+      "0.7": 1.758
+     },
+     "exit_default": "trail"
+    }
+   },
+   "why": {
+    "strict": [],
+    "proxy": []
+   },
+   "group": "other_solana",
+   "label": "CLAUDIA"
+  },
+  {
+   "addr": "6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "STONK",
+   "dex": "raydium-clmm",
+   "dexes": [
+    "hadron",
+    "meteora",
+    "orca",
+    "raydium",
+    "raydium-clmm"
+   ],
+   "created_ts": 1784833637.0,
+   "created": "2026-07-23 19:07",
+   "supply": 793694892,
+   "mcap_now": 109041302,
+   "candles": 328,
+   "peak": 742882,
+   "crossed": {
+    "10000": 55,
+    "15000": 55,
+    "20000": 55,
+    "40000": 55,
+    "60000": 55,
+    "80000": 55,
+    "250000": 55
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above momentum cap (>250k)",
+      323
+     ]
+    ],
+    "proxy": [
+     [
+      "above momentum cap (>250k)",
+      323
+     ]
+    ]
+   },
+   "group": "other_solana",
+   "label": "STONK"
+  }
+ ],
+ "pumpfun": [
+  {
+   "addr": "GTBxUiw6wJdmmkCGZgRHLyYxqu1vG4KtRpeox6yDpump",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "JEANPHIL",
+   "dex": "pumpswap",
+   "dexes": [
+    "hadron",
+    "meteora",
+    "pump-fun",
+    "pumpswap",
+    "raydium"
+   ],
+   "created_ts": 1789844819.0,
+   "created": "2026-09-19 19:06",
+   "supply": 969472169,
+   "mcap_now": 7146217,
+   "candles": 1000,
+   "peak": 6282050,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 1,
+    "80000": 4,
+    "250000": 50
+   },
+   "fired": {
+    "strict": {
+     "minute": 5.0,
+     "mcap": 101485,
+     "conf": [
+      "velocity",
+      "volume",
+      "fresh",
+      "growth"
+     ],
+     "momentum": true,
+     "vol5": 61893,
+     "chg5": 140.6,
+     "vol_ratio": 10.24,
+     "n_conf": 4,
+     "peak_mult": 64.2,
+     "dip_before_2x": 0.59,
+     "hit_2x": true,
+     "min_to_peak": 979,
+     "exits": {
+      "0.35": 0.65,
+      "0.45": 0.65,
+      "0.55": 0.65,
+      "0.7": 0.63
+     },
+     "exit_default": "dead"
+    },
+    "proxy": {
+     "minute": 5.0,
+     "mcap": 101485,
+     "conf": [
+      "velocity",
+      "volume",
+      "fresh",
+      "growth",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": true,
+     "vol5": 61893,
+     "chg5": 140.6,
+     "vol_ratio": 10.24,
+     "n_conf": 6,
+     "peak_mult": 64.2,
+     "dip_before_2x": 0.59,
+     "hit_2x": true,
+     "min_to_peak": 979,
+     "exits": {
+      "0.35": 0.65,
+      "0.45": 0.65,
+      "0.55": 0.65,
+      "0.7": 0.63
+     },
+     "exit_default": "dead"
+    }
+   },
+   "why": {
+    "strict": [],
+    "proxy": []
+   },
+   "group": "pumpfun",
+   "label": "JEANPHIL"
+  },
+  {
+   "addr": "5tCju6YNxHq5zrA6tGndr6F7TK42mpUFmeE31cSFpump",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "swordcat",
+   "dex": "pumpswap",
+   "dexes": [
+    "manifest",
+    "meteora",
+    "pump-fun",
+    "pumpswap",
+    "stonkfun"
+   ],
+   "created_ts": 1790586789.0,
+   "created": "2026-09-28 09:13",
+   "supply": 960009453,
+   "mcap_now": 3027429,
+   "candles": 1000,
+   "peak": 1815113,
+   "crossed": {
+    "10000": 1,
+    "15000": 1,
+    "20000": 1,
+    "40000": 1,
+    "60000": 2,
+    "80000": 75,
+    "250000": 93
+   },
+   "fired": {
+    "strict": {
+     "minute": 17.9,
+     "mcap": 23855,
+     "conf": [
+      "velocity",
+      "volume",
+      "growth"
+     ],
+     "momentum": false,
+     "vol5": 9497,
+     "chg5": 22.8,
+     "vol_ratio": 0.34,
+     "n_conf": 3,
+     "peak_mult": 80.33,
+     "dip_before_2x": 0.49,
+     "hit_2x": true,
+     "min_to_peak": 270,
+     "exits": {
+      "0.35": 0.97,
+      "0.45": 0.97,
+      "0.55": 0.495,
+      "0.7": 0.63
+     },
+     "exit_default": "stop"
+    },
+    "proxy": {
+     "minute": 7.8,
+     "mcap": 52766,
+     "conf": [
+      "volume",
+      "fresh",
+      "buyers",
+      "pressure"
+     ],
+     "momentum": false,
+     "vol5": 23233,
+     "chg5": 3.3,
+     "vol_ratio": 0.9,
+     "n_conf": 4,
+     "peak_mult": 36.32,
+     "dip_before_2x": 0.22,
+     "hit_2x": true,
+     "min_to_peak": 280,
+     "exits": {
+      "0.35": 0.315,
+      "0.45": 0.405,
+      "0.55": 0.495,
+      "0.7": 0.63
+     },
+     "exit_default": "stop"
+    }
+   },
+   "why": {
+    "strict": [
+     [
+      "only 2 confirmations (volume, fresh), need 3",
+      10
+     ],
+     [
+      "only 1 confirmations (volume), need 3",
+      2
+     ]
+    ],
+    "proxy": [
+     [
+      "only 2 confirmations (volume, fresh), need 3",
+      2
+     ]
+    ]
+   },
+   "group": "pumpfun",
+   "label": "swordcat"
+  }
+ ],
+ "other_bsc": [
+  {
+   "addr": "0x66661c7229901f568f16bd1551b3ba826f83ce49",
+   "chain": "bsc",
+   "ok": false,
+   "symbol": "DEBIT",
+   "dex": "pancakeswap-infinity-clmm",
+   "dexes": [
+    "pancakeswap-infinity-clmm",
+    "pancakeswap-v3-bsc",
+    "uniswap-bsc",
+    "uniswap-v2-bsc",
+    "uniswap-v4-bsc"
+   ],
+   "created_ts": 1787576182.0,
+   "created": "2026-08-24 12:56",
+   "supply": 99999476,
+   "mcap_now": 180441397,
+   "candles": 0,
+   "error": "only 0 candles (launch curve phase not indexed?)",
+   "group": "other_bsc",
+   "label": "DEBIT"
+  },
+  {
+   "addr": "0x1d80392d12caaaf9e333bb0bb7f021eacf297fe6",
+   "chain": "bsc",
+   "ok": false,
+   "symbol": "pPOLY",
+   "dex": "pancakeswap-infinity-clmm",
+   "dexes": [
+    "pancakeswap-infinity-clmm",
+    "pancakeswap-v3-bsc",
+    "uniswap-bsc",
+    "uniswap-v4-bsc"
+   ],
+   "created_ts": 1789891020.0,
+   "created": "2026-09-20 07:57",
+   "supply": 322581,
+   "mcap_now": 5365303,
+   "candles": 0,
+   "error": "only 0 candles (launch curve phase not indexed?)",
+   "group": "other_bsc",
+   "label": "pPOLY"
+  },
+  {
+   "addr": "0xb0f09ea9ae0515c3551080d4a745c8115aa30e37",
+   "chain": "bsc",
+   "ok": false,
+   "symbol": "DOS",
+   "dex": "pancakeswap-infinity-clmm",
+   "dexes": [
+    "pancakeswap-infinity-clmm",
+    "pancakeswap-v3-bsc",
+    "pancakeswap_v2",
+    "uniswap-bsc",
+    "uniswap-v4-bsc"
+   ],
+   "created_ts": 1786263050.0,
+   "created": "2026-08-09 08:10",
+   "supply": 39511680,
+   "mcap_now": 56345351,
+   "candles": 0,
+   "error": "only 0 candles (launch curve phase not indexed?)",
+   "group": "other_bsc",
+   "label": "DOS"
+  },
+  {
+   "addr": "0xc69b16cf18cea1e5d0bb6a1a9db802097790ddd2",
+   "chain": "bsc",
+   "ok": false,
+   "symbol": "CNPY",
+   "dex": "pancakeswap-infinity-clmm",
+   "dexes": [
+    "pancakeswap-infinity-clmm",
+    "pancakeswap_v2",
+    "uniswap-v4-bsc"
+   ],
+   "created_ts": 1788644356.0,
+   "created": "2026-09-05 21:39",
+   "supply": 31719232,
+   "mcap_now": 8460858,
+   "candles": 0,
+   "error": "only 0 candles (launch curve phase not indexed?)",
+   "group": "other_bsc",
+   "label": "CNPY"
+  }
+ ],
+ "robinhood": [
+  {
+   "addr": "0xd060f448de7bccb6e54b0cb8d5bc871c8d339eec",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "NVDA",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791333319.0,
+   "created": "2026-10-07 00:35",
+   "supply": 72002,
+   "mcap_now": 16640284,
+   "candles": 5,
+   "error": "only 5 candles (launch curve phase not indexed?)",
+   "group": "robinhood",
+   "label": "NVDA"
+  },
+  {
+   "addr": "0xce8cfbd3776d8f6920757d3bb0d56a89bdf01e18",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "SUSD",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791332353.0,
+   "created": "2026-10-07 00:19",
+   "supply": 104368401,
+   "mcap_now": 106240668,
+   "candles": 5,
+   "error": "only 5 candles (launch curve phase not indexed?)",
+   "group": "robinhood",
+   "label": "AI"
+  },
+  {
+   "addr": "0xd8098154e30f9f4ee5a411d294f65fe2d6e01e18",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "BONER",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791512399.0,
+   "created": "2026-10-09 02:19",
+   "supply": 999946322,
+   "mcap_now": 41620124,
+   "candles": 8,
+   "error": "only 8 candles (launch curve phase not indexed?)",
+   "group": "robinhood",
+   "label": "BONER"
+  },
+  {
+   "addr": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "MOW",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1789301944.0,
+   "created": "2026-09-13 12:19",
+   "supply": 1000000000,
+   "mcap_now": 112881506,
+   "candles": 121,
+   "peak": 110120778,
+   "crossed": {
+    "10000": 3,
+    "15000": 3,
+    "20000": 3,
+    "40000": 3,
+    "60000": 3,
+    "80000": 3,
+    "250000": 3
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      116
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      116
+     ]
+    ]
+   },
+   "group": "robinhood",
+   "label": "MOW"
+  },
+  {
+   "addr": "0xaa07f927b255756e947eafb2778db2c3fc9a28a3",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "SUSD",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791330333.0,
+   "created": "2026-10-06 23:45",
+   "supply": 48776006,
+   "mcap_now": 49081657,
+   "candles": 3,
+   "error": "only 3 candles (launch curve phase not indexed?)",
+   "group": "robinhood",
+   "label": "ORBIO"
+  },
+  {
+   "addr": "0x049e53a8f2fdf15c49eb22cd9ef28c4580599705",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "BTIGR",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791781880.0,
+   "created": "2026-10-12 05:11",
+   "supply": 100000000000,
+   "mcap_now": 25726,
+   "candles": 64,
+   "peak": 19516134,
+   "crossed": {
+    "10000": 6,
+    "15000": 6,
+    "20000": 6,
+    "40000": 6,
+    "60000": 6,
+    "80000": 14,
+    "250000": 14
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      35
+     ],
+     [
+      "older than 60 min (age cap)",
+      24
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      35
+     ],
+     [
+      "older than 60 min (age cap)",
+      24
+     ]
+    ]
+   },
+   "group": "robinhood",
+   "label": "BTIGR"
+  },
+  {
+   "addr": "0x27ac3e9ff321326cabd2095013a6e23041e1eecd",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "EQVTA",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791774302.0,
+   "created": "2026-10-12 03:05",
+   "supply": 100000000000,
+   "mcap_now": 32390,
+   "candles": 5,
+   "error": "only 5 candles (launch curve phase not indexed?)",
+   "group": "robinhood",
+   "label": "EQVTA"
+  },
+  {
+   "addr": "0xa20baf0c1176cccab01c1db0a9c53a822cb418b4",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "CASHCAT",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791380912.0,
+   "created": "2026-10-07 13:48",
+   "supply": 1000000000,
+   "mcap_now": 126487228,
+   "candles": 9,
+   "error": "only 9 candles (launch curve phase not indexed?)",
+   "group": "robinhood",
+   "label": "CASHCAT"
+  },
+  {
+   "addr": "0x43fc3c8440d85d7df99ecfbc6a267de8327f923b",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "CLAUDIA",
+   "dex": "uniswap-v3-robinhood",
+   "dexes": [
+    "uniswap-v3-robinhood",
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791771385.0,
+   "created": "2026-10-12 02:16",
+   "supply": 1000000000,
+   "mcap_now": 16717657,
+   "candles": 982,
+   "peak": 20454648,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 0,
+    "250000": 0
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      977
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      977
+     ]
+    ]
+   },
+   "group": "robinhood",
+   "label": "CLAUDIA"
+  },
+  {
+   "addr": "0x117cc2133c37b721f49de2a7a74833232b3b4c0c",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "SPY",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "alandale-cl",
+    "ramses-v3-robinhood",
+    "uniswap-v3-robinhood",
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1784014110.0,
+   "created": "2026-07-14 07:28",
+   "supply": 23361,
+   "mcap_now": 18278304,
+   "candles": 102,
+   "peak": 18325522,
+   "crossed": {
+    "10000": 32,
+    "15000": 32,
+    "20000": 32,
+    "40000": 32,
+    "60000": 32,
+    "80000": 32,
+    "250000": 32
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      97
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      97
+     ]
+    ]
+   },
+   "group": "robinhood",
+   "label": "SPY"
+  },
+  {
+   "addr": "0x94641b97010608c3827fb058074889f19868ff33",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "VRAX",
+   "dex": "pons-v2-dex",
+   "dexes": [
+    "pons-v2-dex",
+    "uniswap-v3-robinhood",
+    "uniswap-v4-robinhood",
+    "up-v3"
+   ],
+   "created_ts": 1790724563.0,
+   "created": "2026-09-29 23:29",
+   "supply": 999997723,
+   "mcap_now": 3851593,
+   "candles": 1000,
+   "peak": 7240853,
+   "crossed": {
+    "10000": 1,
+    "15000": 1,
+    "20000": 1,
+    "40000": 1,
+    "60000": 1,
+    "80000": 1,
+    "250000": 1
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      995
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      995
+     ]
+    ]
+   },
+   "group": "robinhood",
+   "label": "VRAX"
+  },
+  {
+   "addr": "0xb8ad1bc415cf11851e819635efd8c0c4f9ab9062",
+   "chain": "robinhood",
+   "ok": true,
+   "symbol": "STANDARD",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791511086.0,
+   "created": "2026-10-09 01:58",
+   "supply": 83629297,
+   "mcap_now": 16298047,
+   "candles": 12,
+   "peak": 16314181,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 0,
+    "250000": 0
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      7
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      7
+     ]
+    ]
+   },
+   "group": "robinhood",
+   "label": "STANDARD"
+  }
+ ],
+ "our_losers": [
+  {
+   "addr": "0xbac7f655c732f1314b896012cfd20f91884d7777",
+   "chain": "bsc",
+   "ok": true,
+   "symbol": "BAI",
+   "dex": "pancakeswap_v2",
+   "dexes": [
+    "pancakeswap_v2"
+   ],
+   "created_ts": 1791837063.0,
+   "created": "2026-10-12 20:31",
+   "supply": 1000000000,
+   "mcap_now": 1,
+   "candles": 13,
+   "peak": 114420,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 2,
+    "60000": 2,
+    "80000": 4
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      6
+     ],
+     [
+      "below min mcap",
+      2
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      6
+     ],
+     [
+      "below min mcap",
+      2
+     ]
+    ]
+   },
+   "group": "our_losers",
+   "label": "0xbac7"
+  },
+  {
+   "addr": "6NmGZKHv9U9CiSoaMUyJTufpoBsrnnBkhop2ojubkjep",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "Normie",
+   "dex": "raydium-clmm",
+   "dexes": [
+    "raydium-clmm"
+   ],
+   "created_ts": 1791837158.0,
+   "created": "2026-10-12 20:32",
+   "supply": 1000000000,
+   "mcap_now": 484374,
+   "candles": 637,
+   "peak": 612053,
+   "crossed": {
+    "10000": -1,
+    "15000": -1,
+    "20000": -1,
+    "40000": -1,
+    "60000": -1,
+    "80000": -1,
+    "250000": -1
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above momentum cap (>250k)",
+      630
+     ],
+     [
+      "only 2 confirmations (volume, fresh), need 3",
+      1
+     ],
+     [
+      "only 2 confirmations (volume, fresh), need 4",
+      1
+     ]
+    ],
+    "proxy": [
+     [
+      "above momentum cap (>250k)",
+      630
+     ],
+     [
+      "only 2 confirmations (volume, fresh), need 3",
+      1
+     ],
+     [
+      "only 2 confirmations (volume, fresh), need 4",
+      1
+     ]
+    ]
+   },
+   "group": "our_losers",
+   "label": "6NmGZK"
+  },
+  {
+   "addr": "0x442a6ec1ac7d5394f4f8a414b01d632b502d4c59",
+   "chain": "bsc",
+   "ok": true,
+   "symbol": "RA",
+   "dex": "pancakeswap_v2",
+   "dexes": [
+    "pancakeswap_v2"
+   ],
+   "created_ts": 1791836789.0,
+   "created": "2026-10-12 20:26",
+   "supply": 1000000000,
+   "mcap_now": 1,
+   "candles": 25,
+   "peak": 496996,
+   "crossed": {
+    "10000": 1,
+    "15000": 1,
+    "20000": 1,
+    "40000": 1,
+    "60000": 1,
+    "80000": 1,
+    "250000": 4
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      17
+     ],
+     [
+      "below min mcap",
+      3
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      17
+     ],
+     [
+      "below min mcap",
+      3
+     ]
+    ]
+   },
+   "group": "our_losers",
+   "label": "0x442a"
+  },
+  {
+   "addr": "3giscunzUDApdZ8Bpn81ZLPkvZTQQhfPGU18729AD1pM",
+   "chain": "solana",
+   "ok": true,
+   "symbol": "CLAWSHIRE",
+   "dex": "pump-fun",
+   "dexes": [
+    "pump-fun"
+   ],
+   "created_ts": 1791837896.0,
+   "created": "2026-10-12 20:44",
+   "supply": 1000000000,
+   "mcap_now": 3000,
+   "candles": 12,
+   "peak": 12934,
+   "crossed": {
+    "10000": 1
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "only 2 confirmations (volume, fresh), need 3",
+      5
+     ],
+     [
+      "only 0 confirmations (none), need 3",
+      1
+     ],
+     [
+      "below min mcap",
+      1
+     ]
+    ],
+    "proxy": [
+     [
+      "only 2 confirmations (volume, fresh), need 3",
+      5
+     ],
+     [
+      "only 0 confirmations (none), need 3",
+      1
+     ],
+     [
+      "below min mcap",
+      1
+     ]
+    ]
+   },
+   "group": "our_losers",
+   "label": "3giscu"
+  },
+  {
+   "addr": "0x4e5d5181d7269160a36119ac166847ca3d7f6b0c",
+   "chain": "bsc",
+   "ok": true,
+   "symbol": "FAIR",
+   "dex": "pancakeswap_v2",
+   "dexes": [
+    "pancakeswap_v2"
+   ],
+   "created_ts": 1791836579.0,
+   "created": "2026-10-12 20:22",
+   "supply": 1000000000,
+   "mcap_now": 0,
+   "candles": 29,
+   "peak": 226596,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 1,
+    "80000": 3
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      22
+     ],
+     [
+      "below min mcap",
+      2
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      22
+     ],
+     [
+      "below min mcap",
+      2
+     ]
+    ]
+   },
+   "group": "our_losers",
+   "label": "0x4e5d"
+  },
+  {
+   "addr": "EF8hU2RHaxJid6ey4LrYViYhrdiPRjp2aPeADw8dpump",
+   "chain": "solana",
+   "ok": false,
+   "symbol": "WalterJr",
+   "dex": "pump-fun",
+   "dexes": [
+    "pump-fun",
+    "pumpswap"
+   ],
+   "created_ts": 1791836966.0,
+   "created": "2026-10-12 20:29",
+   "supply": 969100602,
+   "mcap_now": 39638,
+   "candles": 2,
+   "error": "only 2 candles (launch curve phase not indexed?)",
+   "group": "our_losers",
+   "label": "EF8hU2"
+  },
+  {
+   "addr": "2zh8daMFQikNvjW1MMnq2gN5JveHs4rbmumVSHorpump",
+   "chain": "solana",
+   "ok": false,
+   "symbol": "CYNTHIA",
+   "dex": "pump-fun",
+   "dexes": [
+    "pump-fun"
+   ],
+   "created_ts": 1791839087.0,
+   "created": "2026-10-12 21:04",
+   "supply": 1000000000,
+   "mcap_now": 3020,
+   "candles": 7,
+   "error": "only 7 candles (launch curve phase not indexed?)",
+   "group": "our_losers",
+   "label": "2zh8da"
+  },
+  {
+   "addr": "DX6i2ksw1gvVFVfBL3S4jGbcyuEztgfZWH3e2ZoXYeRS",
+   "chain": "solana",
+   "ok": false,
+   "symbol": "DOPE",
+   "dex": "meteora-dbc",
+   "dexes": [
+    "meteora-damm-v2",
+    "meteora-dbc"
+   ],
+   "created_ts": 1791839097.0,
+   "created": "2026-10-12 21:04",
+   "supply": 999953699,
+   "mcap_now": 40807,
+   "candles": 3,
+   "error": "only 3 candles (launch curve phase not indexed?)",
+   "group": "our_losers",
+   "label": "DX6i2k"
+  },
+  {
+   "addr": "0x952882c75f38b3853fdc51064d161923f4a07777",
+   "chain": "bsc",
+   "ok": true,
+   "symbol": "BAI",
+   "dex": "pancakeswap_v2",
+   "dexes": [
+    "pancakeswap_v2"
+   ],
+   "created_ts": 1791839294.0,
+   "created": "2026-10-12 21:08",
+   "supply": 1000000000,
+   "mcap_now": 0,
+   "candles": 12,
+   "peak": 162025,
+   "crossed": {
+    "10000": 0,
+    "15000": 0,
+    "20000": 0,
+    "40000": 0,
+    "60000": 0,
+    "80000": 1
+   },
+   "fired": {
+    "strict": null,
+    "proxy": null
+   },
+   "why": {
+    "strict": [
+     [
+      "above cap (>60k, non-Solana)",
+      5
+     ],
+     [
+      "below min mcap",
+      2
+     ]
+    ],
+    "proxy": [
+     [
+      "above cap (>60k, non-Solana)",
+      5
+     ],
+     [
+      "below min mcap",
+      2
+     ]
+    ]
+   },
+   "group": "our_losers",
+   "label": "0x9528"
+  },
+  {
+   "addr": "0x22989ed608ab9aee708da2cf5d5783b45b417777",
+   "chain": "robinhood",
+   "ok": false,
+   "symbol": "VEIL",
+   "dex": "uniswap-v4-robinhood",
+   "dexes": [
+    "uniswap-v4-robinhood"
+   ],
+   "created_ts": 1791839455.0,
+   "created": "2026-10-12 21:10",
+   "supply": 1000000000,
+   "mcap_now": 132717,
+   "candles": 4,
+   "error": "only 4 candles (launch curve phase not indexed?)",
+   "group": "our_losers",
+   "label": "0x2298"
+  }
+ ]
+}

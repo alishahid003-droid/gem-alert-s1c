@@ -191,10 +191,10 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
 
 
 EARLY_RULES = {
-    "sprint": ({2: 0.35, 4: 0.30, 10: 0.20}, 0.55, 0.55),
+    "sprint": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
     # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
-    "core2": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.55),
-    "core1": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
+    "core2": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
+    "core1": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
     "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
     "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.70),
     "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.70),
@@ -222,7 +222,7 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
         why = ("stop_loss", f"hard stop at {mult:.2f}x")
     elif peak >= 2.0 and mult <= peak * trail:
         why = ("trailing_stop", f"{mult:.1f}x is {int((1 - trail) * 100)}% below the {peak:.1f}x peak")
-    elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "20")) and peak < 1.5 and mult < 1.2:
+    elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "90")) and peak < 1.5 and mult < 1.2:
         why = ("time_stop", f"no move after {age_min:.0f} min")
     elif age_min >= float(os.environ.get("EARLY_MAX_HOLD_MIN", "1440")):
         why = ("max_hold", "24h hold limit")

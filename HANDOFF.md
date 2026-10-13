@@ -140,3 +140,6 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 
 ## 13 Oct 2026 10:05 PKT — end-of-morning state
 See GO_LIVE_CHECKLIST.md Step 1 (DONE this morning / LEFT TO DO). Latest code b9733cc live since 09:37 restart. Next: PumpPortal key (Ali), Helius key (Ali), tune from analyze_early.py at ~01:31 PKT Oct 14.
+
+## 13 Oct 2026 PM
+Exits widened (stop .35 / trail .40 / ladder 20-15-10 / dead-coin 90m) and conviction tiers + biglaunch/Robinhood probe lanes added. 915 tests pass. See GO_LIVE_CHECKLIST.md. Pending: PumpPortal + Helius keys; 24h paper review.

@@ -522,3 +522,12 @@ OPEN -- ALI
 - [ ] After 3-7 days: send Modules tab numbers; run `python backtest_buyer_signals.py`
 OPEN -- CLAUDE
 - [ ] Build free trade feed (Helius) if chosen; tune EARLY_*/ROUTER_* from data; faster paper exits; book-driven copy stakes
+
+## 13 Oct 2026 PM - winners replay -> exits + tiers (paper only)
+- [x] replay_coin.py / discover_winners.py: replay winners on minute candles (Solana, BSC, Robinhood, Base); originals picked automatically
+- [x] Finding: live exits wasted winners ($100 -> $124). Fixed in paper_ledger.EARLY_RULES: stop 0.35, trail 0.40, ladder 20/15/10% at 2x/4x/10x, dead-coin kill 90 min
+- [x] Conviction tiers (books.tier_stake_usd): probe 15% / standard 40% / conviction 60% of balance, x book scale (sprint 1.0, core1 0.8, core2 0.6), pace-adjusted, max 80%, stake <= 2% of coin mcap, loss-streak brake (-1 tier per 3 losses)
+- [x] New lanes (probe only, core1): Solana $250k-$1M "biglaunch" (>=5 conf), Robinhood up to $250k (>=5 conf, stake x0.6)
+- [ ] PumpPortal key + Helius key into .env -> turns on the curve-phase early tracker (10-25k entries with creator-dump / bundle / sell-pressure rug filters) and buyers/pressure signals (needed for conviction tier)
+- [ ] Watch 24h of paper: tier mix, stop-outs, biglaunch/Robinhood entries; then decide on raising stakes
+- NOTE: replay figures ($17k-$256k) are winners-only upper bounds, not forecasts

@@ -253,6 +253,53 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
     return round(max(0.0, out), 2) if out >= 5.0 else 0.0
 
 
+# ---- conviction tiers (Oct 13 2026) -------------------------------------------------------------
+# Stake = tier % of the book's trading balance, scaled per book so the 4-day sprint is the most
+# aggressive and the 180-day book the calmest, then pace-adjusted like stake_usd(). Hard caps: the tier
+# max, free cash, and a fraction of the coin's own market cap so the fill stays realistic.
+TIER_PCT = {"probe": 0.15, "standard": 0.40, "conviction": 0.60}
+TIER_ORDER = ("probe", "standard", "conviction")
+TIER_BOOK_SCALE = {"sprint": 1.0, "core1": 0.8, "core2": 0.6}
+TIER_MAX_SHARE = 0.80
+
+
+def loss_streak(book_id: str) -> int:
+    """Consecutive losing closes (newest first) for this book's sniper positions."""
+    from executor import paper_ledger
+    rows = [r for r in paper_ledger._closed() if (r.get("module") or "") == book_id and r.get("strategy") == "early"]
+    rows.sort(key=lambda r: r.get("closed_ts") or r.get("opened_ts") or 0, reverse=True)
+    n = 0
+    for r in rows:
+        if float(r.get("pnl_usd") or 0) < 0:
+            n += 1
+        else:
+            break
+    return n
+
+
+def tier_after_brake(tier: str, book_id: str) -> str:
+    """Losing-streak brake: every 3 straight losses drops one tier until a win resets it."""
+    i = TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
+    return TIER_ORDER[max(0, i - loss_streak(book_id) // 3)]
+
+
+def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: Optional[float] = None) -> float:
+    c = cfg(book_id)
+    eq = equity(book_id)
+    if eq < 5.0 or c["kind"] != "moonshot" or book_id not in TIER_BOOK_SCALE:
+        return stake_usd(book_id, now)
+    tier = tier_after_brake(tier, book_id)
+    base = eq * TIER_PCT[tier] * TIER_BOOK_SCALE[book_id]
+    r = pace(book_id, now).get("ratio_to_path")
+    if r is not None and r < 0.75:
+        base *= 1.25
+    elif r is not None and r > 1.5:
+        base *= 0.8
+    cap_mc = _f("TIER_MAX_MCAP_FRAC", 0.02) * mcap if mcap else float("inf")
+    out = min(base, eq * TIER_MAX_SHARE, free_equity(book_id), cap_mc)
+    return round(out, 2) if out >= 5.0 else 0.0
+
+
 def can_open(book_id: str) -> tuple:
     check_cashout(book_id)
     check_bust(book_id)

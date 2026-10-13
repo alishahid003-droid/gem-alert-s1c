@@ -29,12 +29,12 @@ def _run(mcap, now):
 def test_take_profits_then_trailing_stop():
     pos = _open()
     assert pos["cost_pct"] >= 0.10
-    _run(10500, 1010)                      # 2.1x -> sell 40%
+    _run(10500, 1010)                      # 2.1x -> sell 20%
     p = paper_ledger._open()["early_core2:solana:MINT1"]
-    assert abs(p["remaining"] - 0.60) < 1e-6
+    assert abs(p["remaining"] - 0.80) < 1e-6
     _run(25000, 1020)                      # 5x -> 4x rung sells 25%
     _run(40000, 1030)                      # 8x peak
-    _run(20000, 1040)                      # 4x = 50% of peak -> trailing stop (0.55)
+    _run(15000, 1040)                      # 3x = 37% of peak -> trailing stop (0.40)
     assert not paper_ledger._open()
     closed = paper_ledger._closed()[-1]
     assert closed["exit_type"] == "trailing_stop" and closed["pnl_usd"] > 20
@@ -42,11 +42,11 @@ def test_take_profits_then_trailing_stop():
 
 def test_hard_stop_and_dead_coin_time_stop():
     _open()
-    _run(2500, 1010)                       # 0.5x -> stop
+    _run(1500, 1010)                       # 0.3x -> stop (0.35)
     assert paper_ledger._closed()[-1]["exit_type"] == "stop_loss"
     paper_ledger.open_paper("solana", "M2", "early_core1", "early_core1", 10, 5000, strategy="early",
                             exit_profile="core1", now=1000.0)
-    paper_ledger.manage(lambda c, t: {"mcap_usd": 5200, "liquidity_usd": 9999}, now=1000 + 25 * 60, source_prefix="early_")
+    paper_ledger.manage(lambda c, t: {"mcap_usd": 5200, "liquidity_usd": 9999}, now=1000 + 100 * 60, source_prefix="early_")
     assert paper_ledger._closed()[-1]["exit_type"] == "time_stop"
 
 
@@ -73,8 +73,8 @@ def test_live_sell_is_mirrored(monkeypatch):
     calls = []
     monkeypatch.setattr(pumpportal_exec, "sell", lambda m, pct: calls.append((m, round(pct))) or {"ok": True})
     _open(live=True)
-    _run(10500, 1010)                      # 40% of original at 100% remaining
-    assert calls == [("MINT1", 40)]
+    _run(10500, 1010)                      # 20% of original at 100% remaining
+    assert calls == [("MINT1", 20)]
 
 
 def test_daily_loss_cap(monkeypatch):
@@ -83,7 +83,7 @@ def test_daily_loss_cap(monkeypatch):
     monkeypatch.setenv("EARLY_LIVE_LANES", "core2")
     monkeypatch.setenv("LIVE_DAILY_LOSS_USD", "3")
     _open(live=True, usd=5.0, now=time.time())
-    _run(2000, time.time() + 1)            # stop loss on a live position
+    _run(1500, time.time() + 1)            # stop loss on a live position
     assert paper_ledger._closed()[-1]["pnl_usd"] < -3
     assert "daily loss cap" in pumpportal_exec.allowed("core2", 5)[1]
 

@@ -58,4 +58,21 @@ def test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf():
     # EVM above the cap is still refused
     assert sc.evaluate(_pool(addr="0xbig", chain="bsc", mcap=150_000.0), 10_000.0) is None
     # above the momentum ceiling is refused too
-    assert sc.evaluate(_pool(addr="SolHuge", chain="solana", mcap=900_000.0), 10_000.0) is None
+    assert sc.evaluate(_pool(addr="SolHuge", chain="solana", mcap=1_500_000.0), 10_000.0) is None
+
+
+def test_big_launch_and_robinhood_lanes_are_probe_only():
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0)
+    assert d and d["lanes"] == ["core1"] and d["tier"] == "probe" and "biglaunch" in d["confirmations"]
+    r = sc.evaluate(_pool(addr="0xrh", chain="robinhood", mcap=180_000.0), 10_000.0)
+    assert r and r["lanes"] == ["core1"] and r["tier"] == "probe"
+    assert sc.evaluate(_pool(addr="0xrh2", chain="robinhood", mcap=400_000.0), 10_000.0) is None
+    assert sc.evaluate(_pool(addr="0xbsc", chain="bsc", mcap=180_000.0), 10_000.0) is None
+
+
+def test_tier_of():
+    assert m.tier_of(["a", "b", "c"]) == "probe"
+    assert m.tier_of(["a", "b", "c", "d"]) == "standard"
+    assert m.tier_of(["buyers", "pressure", "c", "d", "e", "f"]) == "conviction"
+    assert m.tier_of(["a", "b", "c", "d", "e", "f"]) == "standard"
