@@ -117,10 +117,10 @@ def act(decision: dict, send=None, now=None) -> dict:
         _RECORDER.on_decision(decision, now)
     live_done = []
     for lane in decision.get("lanes") or [decision["lane"]]:
-        ok, why = books.can_open(lane)
         conf = decision.get("confirmations") or []
         strong = [c for c in conf if c not in ("dev_list", "repeat_grad")]     # dev_list lane: 0/69 graduated (Oct 13)
         tier = "conviction" if len(strong) >= 4 else "standard" if len(strong) >= 2 else "probe"
+        ok, why = books.can_open(lane, strong=len(strong) >= 4)
         stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
         if not stake:
             refused.append(f"{lane}: {why}")

@@ -300,17 +300,41 @@ def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: O
     return round(out, 2) if out >= 5.0 else 0.0
 
 
-def can_open(book_id: str) -> tuple:
+def can_open(book_id: str, strong: bool = False) -> tuple:
+    """strong=True (a Standard/Conviction signal with >=5 confirmations) may use BOOK_STRONG_EXTRA_SLOTS (default 2)
+    beyond the normal position limit, and when even those are full may swap out the stalest flat position
+    (paper_ledger.swap_out) -- at most one swap per book every 5 minutes."""
     check_cashout(book_id)
     check_bust(book_id)
     eq = equity(book_id)
     if eq < 5.0:
         return False, f"{book_id} book is empty (${eq:.2f})"
-    if open_count(book_id) >= max_open(book_id, eq):
-        return False, f"{book_id}: {max_open(book_id, eq)} open position(s) is the limit at ${eq:,.0f}"
-    if free_equity(book_id) < 5.0:
+    limit = max_open(book_id, eq)
+    extra = int(_f("BOOK_STRONG_EXTRA_SLOTS", 2) or 0) if strong else 0
+    n_open = open_count(book_id)
+    need_cash = free_equity(book_id) < 5.0
+    if n_open >= limit + extra or (need_cash and strong):
+        if strong and _try_swap(book_id):
+            n_open, need_cash = open_count(book_id), free_equity(book_id) < 5.0
+        if n_open >= limit + extra:
+            return False, f"{book_id}: {limit} open position(s) is the limit at ${eq:,.0f}" + (f" (+{extra} for strong signals, all used)" if extra else "")
+    if need_cash:
         return False, f"{book_id}: balance is fully committed (${committed_usd(book_id):,.0f} open)"
-    return True, "ok"
+    return True, "ok" if n_open < limit else "ok (strong-signal extra slot)"
+
+
+def _try_swap(book_id: str, now: Optional[float] = None) -> bool:
+    now = now if now is not None else time.time()
+    key = f"swap_last:{book_id}"
+    last = state.get_value(key)
+    if isinstance(last, (int, float)) and now - last < 300:
+        return False
+    from executor import paper_ledger
+    row = paper_ledger.swap_out(book_id, now)
+    if row:
+        state.set_value(key, now)
+        return True
+    return False
 
 
 def daily_pnl(book_id: str, now: Optional[float] = None) -> float:

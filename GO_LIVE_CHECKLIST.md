@@ -551,3 +551,8 @@ NEXT ACTIONS (in order):
 5. [ ] Claude: day-2 check of early_log features (only repeat-graduate creator 4x lift and serial-launcher 0.3x looked real; dev-buy-size "lift" was a self-graduation artifact)
 6. [ ] Claude: review 24h of paper under new exits/tiers (stop-outs, tier mix, biglaunch/Robinhood entries) before any stake increase
 7. [ ] Later: live adapters (Four.meme/BSC, StonkFun, Base, Robinhood), burner wallets, keys only in .env; live money only after proven edge, tiny stakes
+
+## 13 Oct 2026 ~14:00 - slot rules (built, push pending)
+- [x] books.can_open(book, strong=True): a Standard/Conviction signal with >=5 confirmations (>=4 non-dev signals on the pump.fun worker) may use BOOK_STRONG_EXTRA_SLOTS (default 2) beyond the normal 3/4/5 limit
+- [x] If those are full (or free cash < $5): paper_ledger.swap_out closes the STALEST FLAT position only (age >= 45 min, never ran: peak < 1.5x, no take-profit fired, still >= 0.75x, not live); deep-red positions are left to their own stop; max 1 swap per book per 5 min. Env: SWAP_MIN_AGE_MIN, SWAP_MIN_MULT, BOOK_STRONG_EXTRA_SLOTS
+- Watch: dashboard rows with exit "slot_swap"; if swaps lose money on average, widen SWAP_MIN_MULT to 0.85 or set BOOK_STRONG_EXTRA_SLOTS higher instead

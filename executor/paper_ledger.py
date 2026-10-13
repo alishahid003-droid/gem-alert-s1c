@@ -171,6 +171,38 @@ def _close(pos: dict, exit_type: str, reason: str, now: float) -> dict:
     return pos
 
 
+def swap_out(module_id: str, now: Optional[float] = None) -> Optional[dict]:
+    """Slot swap (Oct 13 2026): frees a slot for a STRONG new signal by closing this module's stalest flat position.
+    Only a position that is old (>= SWAP_MIN_AGE_MIN, default 45), never ran (peak < 1.5x) and is not deep in the
+    red (>= SWAP_MIN_MULT, default 0.75x -- anything lower is left to its own stop) qualifies; the oldest goes first.
+    The loss is bounded (<= 25% + cost) and the stake goes back to the book. Returns the closed row or None."""
+    now = now if now is not None else time.time()
+    min_age = float(os.environ.get("SWAP_MIN_AGE_MIN", "45")) * 60.0
+    min_mult = float(os.environ.get("SWAP_MIN_MULT", "0.75"))
+    book = _open()
+    best = None
+    for pid, pos in book.items():
+        if pos.get("strategy") != "early" or _module_of(pos) != module_id or pos.get("live"):
+            continue
+        last = pos.get("last_mcap")
+        if not last or now - pos["opened_ts"] < min_age:
+            continue
+        if pos["peak_mcap"] / pos["entry_mcap"] >= 1.5 or last / pos["entry_mcap"] < min_mult or pos.get("rungs_fired"):
+            continue
+        if best is None or pos["opened_ts"] < best[1]["opened_ts"]:
+            best = (pid, pos)
+    if best is None:
+        return None
+    pid, pos = best
+    mult = pos["last_mcap"] / pos["entry_mcap"]
+    _sell(pos, pos["remaining"], pos["last_mcap"], "slot_swap", now)
+    row = _close(pos, "slot_swap", f"swapped out at {mult:.2f}x to free a slot for a stronger signal", now)
+    del book[pid]
+    state.set_value(OPEN_KEY, book)
+    state.set_value(CLOSED_KEY, (_closed_raw() + [row])[-MAX_CLOSED_KEPT:])
+    return row
+
+
 def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
     """Compound-scalper exits (executor.compound_scalper.scalp_exit_decision)
     on a paper position. Returns True when the position closed."""

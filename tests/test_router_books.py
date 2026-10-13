@@ -186,3 +186,44 @@ def test_tier_stakes_cap_and_loss_brake():
         paper_ledger.manage(lambda c, t: {"mcap_usd": 1000, "liquidity_usd": 9999}, now=1100.0 + i, source_prefix="early_")
     assert books.loss_streak("sprint") == 3
     assert books.tier_after_brake("conviction", "sprint") == "standard"
+
+
+def _fill(book, n, now=1000.0, start=0):
+    for i in range(start, start + n):
+        paper_ledger.open_paper("solana", f"S{i}", f"early_{book}", f"early_{book}", 5, 5000, strategy="early",
+                                exit_profile=book, now=now + i, module=book)
+
+
+def test_strong_signal_gets_extra_slots_then_swaps_stale_flat_position(monkeypatch):
+    monkeypatch.setenv("BOOK_STRONG_EXTRA_SLOTS", "2")
+    _fill("core1", 3)
+    ok, why = books.can_open("core1")
+    assert not ok and "limit" in why                                   # a normal signal is refused at 3/3
+    ok, why = books.can_open("core1", strong=True)
+    assert ok and "extra slot" in why                                  # a strong one gets slot 4
+    _fill("core1", 2, start=3)                                         # 5 open = limit + 2: all slots used
+    ok, why = books.can_open("core1", strong=True)
+    assert not ok and "all used" in why                                # nothing stale/flat to swap yet
+    # make S0 an old flat position (0.9x, never ran) -> it may be swapped out
+    book = paper_ledger._open()
+    pos = [p for p in book.values() if p["token"] == "S0"][0]
+    pos["last_mcap"] = pos["entry_mcap"] * 0.9
+    state.set_value(paper_ledger.OPEN_KEY, book)
+    now = pos["opened_ts"] + 50 * 60
+    assert books._try_swap("core1", now) is True
+    assert paper_ledger._closed()[-1]["exit_type"] == "slot_swap"
+    assert books._try_swap("core1", now + 10) is False                 # rate limit: one swap per 5 minutes
+
+
+def test_swap_never_touches_deep_loss_runner_or_young_position():
+    _fill("core1", 3)
+    book = paper_ledger._open()
+    mults = {"S0": 0.5, "S1": 2.0, "S2": 0.95}                         # S0 deep red, S1 ran, S2 young
+    for p in book.values():
+        p["last_mcap"] = p["entry_mcap"] * mults[p["token"]]
+        p["peak_mcap"] = max(p["peak_mcap"], p["last_mcap"])
+    state.set_value(paper_ledger.OPEN_KEY, book)
+    assert paper_ledger.swap_out("core1", now=1000.0 + 10 * 60) is None                       # everything under 45 min old
+    row = paper_ledger.swap_out("core1", now=1000.0 + 60 * 60 * 5)                            # 5h later: only the flat S2 qualifies
+    assert row and row["token"] == "S2" and row["exit_type"] == "slot_swap"
+    assert paper_ledger.swap_out("core1", now=1000.0 + 60 * 60 * 5) is None                   # S0 deep red + S1 runner are kept

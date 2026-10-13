@@ -214,8 +214,8 @@ def act(d: dict, now: Optional[float] = None) -> dict:
     state.cache_set(key, True)
     opened, refused = [], []
     for lane in d["lanes"]:
-        can, reason = books.can_open(lane)
         tier = d.get("tier", "probe")
+        can, reason = books.can_open(lane, strong=tier in ("standard", "conviction") and len(d["confirmations"]) >= 5)
         stake = books.tier_stake_usd(lane, tier, d.get("mcap")) if can else 0.0
         if stake and d["chain"] in ("bsc", "robinhood_chain", "robinhood"):
             # Oct 13 2026 first run: bsc 0 wins / 9 (avg -81%), robinhood 0 / 5 (avg -54%): evidence mode.
