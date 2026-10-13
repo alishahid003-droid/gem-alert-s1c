@@ -103,7 +103,7 @@ class Scanner:
     def evaluate(self, p: dict, now: float) -> Optional[dict]:
         k = self.see(p, now)
         mcap, liq = p.get("mcap"), p.get("liq")
-        if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or mcap > _f("MC_MAX_MCAP_USD", 1_500_000):
+        if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or mcap > _f("MC_MAX_MCAP_USD", 60_000):
             return None
         if p["src"] == "gt" and (liq or 0) < _f("MC_MIN_LIQ_USD", 2500):
             return None
@@ -187,6 +187,10 @@ def act(d: dict, now: Optional[float] = None) -> dict:
     for lane in d["lanes"]:
         can, reason = books.can_open(lane)
         stake = books.stake_usd(lane) if can else 0.0
+        if stake and d["chain"] in ("bsc", "robinhood_chain", "robinhood"):
+            # Oct 13 2026 first run: bsc 0 wins / 9 (avg -81%), robinhood 0 / 5 (avg -54%): evidence mode.
+            stake = round(stake * (_f("MC_EVM_STAKE_MULT", 0.3) or 0.3), 2)
+            stake = stake if stake >= 5.0 else 0.0
         if not stake:
             refused.append(f"{lane}: {reason}")
             continue
@@ -252,7 +256,12 @@ def run_loop(stop: Optional[threading.Event] = None):
             for p in batches:
                 d = sc.evaluate(p, now)
                 if d:
-                    print("[multichain] ENTRY", d["chain"], d["name"], d["confirmations"], act(d, now), flush=True)
+                    res = act(d, now)
+                    try:
+                        print("[multichain] ENTRY", d["chain"], str(d["name"]).encode("ascii", "replace").decode(),
+                              d["confirmations"], res, flush=True)
+                    except Exception:  # noqa: BLE001
+                        pass
         except Exception:  # noqa: BLE001
             traceback.print_exc()
         cycle += 1

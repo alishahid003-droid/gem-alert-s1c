@@ -284,7 +284,10 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 pos["entry_mcap"] = mcap
                 pos["peak_mcap"] = mcap
         if liq is not None and liq < DEAD_LIQUIDITY_USD:
-            _sell(pos, pos["remaining"], mcap, "liquidity collapsed", now)
+            # Oct 13 2026: this used to sell at the (glitched) mcap read -- a pool with no liquidity
+            # booked a fake +$505 on one sprint coin and inflated every stake after it. A drained pool
+            # cannot be sold into: the remaining slice is worth ~nothing.
+            _sell(pos, pos["remaining"], pos["entry_mcap"] * 0.01, "liquidity collapsed", now)
             closed_now.append(_close(pos, "rug_liquidity", f"liquidity ${liq:,.0f}", now))
             del book[pid]
             continue

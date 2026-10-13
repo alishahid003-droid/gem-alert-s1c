@@ -2,7 +2,7 @@
 
 # S1c — Go-Live & 80% Win-Rate Checklist (single source of truth)
 
-# ▶ MASTER STATUS & ORDER OF WORK — updated 13 Oct 2026, 01:50 PKT  (THE single source of truth)
+# ▶ MASTER STATUS & ORDER OF WORK — updated 13 Oct 2026, 08:45 PKT  (THE single source of truth)
 
 **UPDATE RULE (Claude, every time):** after EVERY build, test, restart or result — update this block, then HANDOFF.md, then the Notion S1c "CURRENT STATE" banner, then commit. Ali pushes with `git push origin main`. Nothing is "done" until its DONE-WHEN is met. Older sections below this block are history; if they disagree with this block, THIS BLOCK wins.
 Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · 🔴 broken/blocked · (A)=Ali · (C)=Claude · (B)=both
@@ -46,10 +46,10 @@ Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · �
 ### Step 1 — Run the evidence clock (NOW → ~01:31 PKT Oct 14)
 - ✅ (A) Restart from an ADMINISTRATOR CMD (old admin python processes silently blocked every normal restart; this is why the sniper never ran before 01:31) 
 - 🟡 (A) PC awake, Windows sleep = Never, minimized windows left open; restart ONLY via Admin CMD: `taskkill /F /IM python.exe` then `start_local_mode.bat`
-- ⬜ (C) Morning: read logs + dashboard; confirm Base/StonkFun/BSC/Robinhood entries; sanity-check stakes and open positions
-- ⬜ (C) FIX Compound book $0.00 (lane never opens)
-- ⬜ (C) **API BUDGET AUDIT (Ali's rule: every free API must last the whole MONTH, not run out in a day).** Measure real calls/day of EVERY API now that non-Solana chains + StonkFun + multichain sniper were added: MadeOnSol (hard cap ~200/day; used 94 on Oct 12, 175 on Oct 9), Fomo credits (0 left, HTTP 402), GeckoTerminal (free 30 calls/min; multichain loop uses ~12/min + pollers + backtest share it; 1x HTTP 429 already seen), DexScreener, Birdeye (EVM usage 40 on Oct 12; free monthly compute cap), GoPlus (one call per EVM entry), PumpPortal, Jupiter, StonkFun (300/min), RPCs. Output: table calls/day vs limit vs "days it lasts". Then build a central API budget ledger: per-API daily quota = monthly limit / 30, pacing + back-off on 429, a dashboard line, and a Telegram/dashboard warning at 80%. Multichain loop must back off on 429 and never touch MadeOnSol. DONE-WHEN: table shows every API lasts >= 30 days at current rates (or the rate is cut to fit).
-- ⬜ (C) TUNE multichain entries (too loose: 3-confirmation coins entering Core 1; max-3-open cap fills fast) → raise `MC_MIN_CONF`, `MC_MIN_LIQ_USD`, etc.
+- ✅ (C) Morning: read logs + state (08:00 PKT). RESULT of first 3 h (01:31–04:47 PKT, 42 paper entries): **every target book blown out** — Core 1 Sprint $100→$8, Core 2 →$0, Core 3 →$13, Compound $0. 0 real winners (best coin peaked 2.2x then fell). Solana 0/26 real wins avg -45%; BSC 0/9 avg -81%; Robinhood 0/5 avg -54%; Base 1 trade; entry mcap >$50k: 0/13 avg -82%; <$5k never moved (12 time-stops). This is the honest first reading: the current entry rules have no edge yet.
+- ✅ (C) FIXED 08:30: (1) BUG: a drained pool booked a fake +$505 profit on one Sprint coin (sold at a glitched price) which inflated Sprint stakes to $135/$114 and hid real losses → liquidity-collapse exits now book ~total loss (test added). (2) Books that bust (<$10, nothing open) now auto-reseed at $100, count the BUST on the dashboard and keep trading, so the 24h evidence run is not starved (Compound was stuck at $0). (3) multichain log crash on non-ASCII coin names fixed. Needs restart to take effect.
+- 🟡 (C) **API BUDGET AUDIT** — built `api_budget.py` + hook in `utils/http.py`: every call logged per API in `logs\api_calls_<date>.log`; `python api_budget.py` prints calls today / projected day / busiest minute vs limit / month projection / 429 count. MadeOnSol confirmed 200/day (BASIC, 6,000/mo): 95-175/day used Oct 9-12, 27 so far today, existing guard keeps routine ≤190 — OK. GeckoTerminal 30/min shared by all pollers, only 1 HTTP 429 seen. Fomo credits exhausted (402, Ali top-up). STILL TO DO after restart: read a full day of `api_budget.py` output and add hard back-off where any API projects over its allowance.
+- ✅ (C) TUNED multichain from the 3 h data: `MC_MAX_MCAP_USD` 1.5M → 60,000 (no chasing; every >$50k entry lost), BSC/Robinhood stakes ×0.3 (`MC_EVM_STAKE_MULT`) until they show wins. pump.fun early thresholds NOT touched yet (3 h is too small a sample; use `analyze_early.py` at 01:31 PKT Oct 14).
 - ⬜ (B) Re-run `run_checks.bat` (backtest top/new + feed health) once the sniper has run a few hours; (C) reads logs\check_*.txt
 - ⬜ (A) ~01:31 PKT Oct 14: `python analyze_early.py`, send output → (C) tune EARLY_*/MC_*/ROUTER_*, stakes, take-profit ladder, bank_pct
 ### Step 2 — Decide go/no-go per lane (Claude + Ali, from Step 1 data)

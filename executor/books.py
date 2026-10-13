@@ -89,7 +89,46 @@ def withdrawn(book_id: str) -> float:
 def realized_pnl(book_id: str) -> float:
     """Paper P&L of the current cycle (cashed-out profit is subtracted: it left the book)."""
     gross = sum(float(r.get("pnl_usd") or 0.0) for r in _rows(book_id))
-    return round(gross - withdrawn(book_id), 2)
+    return round(gross - withdrawn(book_id) - bust_offset(book_id), 2)
+
+
+BUST_KEY = "books_busts_v1"
+
+
+def busts(book_id: str) -> list:
+    rec = state.get_value(BUST_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    return list(rec.get(book_id) or [])
+
+
+def bust_offset(book_id: str) -> float:
+    """Realized P&L the book had when it was reseeded after a bust (those losses are history now)."""
+    return round(sum(float(b.get("realized_at_bust") or 0.0) for b in busts(book_id)), 2)
+
+
+def check_bust(book_id: str, now: Optional[float] = None) -> Optional[dict]:
+    """A moonshot/daily book whose total value fell below BUST_BELOW_USD (default $10 of a $100 seed)
+    is BUST: log it (the bust count is a headline metric -- how often does $100 die?), reseed the
+    book at its seed and restart its clock so the 24h evidence run keeps producing trades.
+    Paper only. Oct 13 2026: all three target books were empty 3 hours into the first run."""
+    if BOOKS[book_id]["kind"] not in ("moonshot", "daily"):
+        return None
+    c = cfg(book_id)
+    if total_value(book_id) >= (_f("BUST_BELOW_USD", 10.0) or 10.0):
+        return None
+    if open_count(book_id) > 0:
+        return None            # let open slices resolve first
+    now = now if now is not None else time.time()
+    rec = state.get_value(BUST_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec.setdefault(book_id, []).append({"ts": now, "realized_at_bust": realized_pnl(book_id) + bust_offset(book_id),
+                                        "value": total_value(book_id)})
+    state.set_value(BUST_KEY, rec)
+    starts = state.get_value(BOOKS_KEY)
+    starts = starts if isinstance(starts, dict) else {}
+    starts[book_id] = {"start_ts": now}
+    state.set_value(BOOKS_KEY, starts)
+    return rec[book_id][-1]
 
 
 def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
@@ -215,6 +254,7 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
 
 def can_open(book_id: str) -> tuple:
     check_cashout(book_id)
+    check_bust(book_id)
     eq = equity(book_id)
     if eq < 5.0:
         return False, f"{book_id} book is empty (${eq:.2f})"
@@ -234,9 +274,10 @@ def daily_pnl(book_id: str, now: Optional[float] = None) -> float:
 def status(book_id: str, now: Optional[float] = None) -> dict:
     now = now if now is not None else time.time()
     check_cashout(book_id, now)
+    check_bust(book_id, now)
     c = cfg(book_id)
     eq = equity(book_id)
-    out = {"id": book_id, "name": c["name"], "kind": c["kind"], "seed": c["seed"], "equity": eq,
+    out = {"busts": len(busts(book_id)), "id": book_id, "name": c["name"], "kind": c["kind"], "seed": c["seed"], "equity": eq,
            "banked": banked(book_id), "cashed_out": withdrawn(book_id), "cashouts": cashouts(book_id), "total_value": total_value(book_id),
            "realized_pnl": realized_pnl(book_id), "open": open_count(book_id),
            "stake_next": stake_usd(book_id, now), "max_open": max_open(book_id, eq)}

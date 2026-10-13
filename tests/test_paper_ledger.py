@@ -135,3 +135,12 @@ def test_pre_fix_trades_excluded_from_stats(monkeypatch):
     monkeypatch.setattr(pl, "STATS_SINCE_TS", T0 + 1)
     assert pl.scoreboard()["overall"]["n"] == 0             # excluded from win rate
     assert len(pl._closed_raw()) == 1                        # but kept for history
+
+
+def test_liquidity_collapse_never_books_fake_profit():
+    """Oct 13 2026: a drained pool with a glitched huge mcap read booked +$505 on a $30 stake."""
+    pl.open_paper("solana", "TOKX", "early_sprint", "early_sprint", 30.0, 23_000, strategy="early",
+                  exit_profile="sprint", module="sprint", now=T0)
+    pl.manage(snapshot_fn=snap(460_000, liq=0), now=T0 + 120)
+    rows = pl.module_rows("sprint", include_runners=True)
+    assert rows and rows[0]["pnl_usd"] < 0 and rows[0]["close_reason"].startswith("liquidity")

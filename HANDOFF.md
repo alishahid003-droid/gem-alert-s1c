@@ -130,3 +130,10 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Oct 13 01:45: MASTER_CHECKLIST.md is now the single checklist.
 - Oct 13 01:50: GO_LIVE_CHECKLIST.md top block = MASTER STATUS & ORDER OF WORK (single source of truth). FINAL_CHECKLIST_*/MASTER_CHECKLIST.md are stubs.
 - Oct 13 01:55: added API BUDGET AUDIT (pace every free API over a month) to master checklist Step 1.
+
+## 13 Oct 2026 08:45 PKT — morning result + fixes
+- First 3 h of paper trading blew out every target book (Sprint $8, Core 2 $0, Core 3 $13). 0 real winners in 42 entries. See MASTER STATUS in GO_LIVE_CHECKLIST.md.
+- Fixed: fake +$505 on drained pool (paper_ledger liquidity-collapse exit), bust-reseed + BUST counter (executor/books.py), non-ASCII print crash (multichain_sniper.py).
+- Tuned: MC_MAX_MCAP_USD 60k, MC_EVM_STAKE_MULT 0.3 (bsc/robinhood).
+- New: api_budget.py (+ hook in utils/http.py) → `python api_budget.py`.
+- Needs restart (Admin CMD: taskkill /F /IM python.exe, then start_local_mode.bat). 900 tests pass.

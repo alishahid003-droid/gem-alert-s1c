@@ -87,6 +87,11 @@ def _request_with_429_retry(method, url, headers=None, params=None, data=None, j
             resp = _get_session().request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
         except (requests.ConnectionError, requests.Timeout) as e:
             raise ApiUnreachable(f"{method} {url} failed at network level: {e}") from e
+        try:
+            import api_budget          # per-API call ledger (Oct 13 2026): audit calls/day vs free-tier limits
+            api_budget.record(url, resp.status_code)
+        except Exception:  # noqa: BLE001
+            pass
         if resp.status_code != 429 or attempts >= _MAX_429_RETRIES:
             return resp
         wait_s = _retry_after_seconds(resp)

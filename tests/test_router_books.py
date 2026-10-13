@@ -153,3 +153,18 @@ def test_sprint_cashout_resets_to_reseed(monkeypatch):
     assert books.withdrawn("sprint") == 10_400.0
     assert books.check_cashout("sprint") is None
     assert books.check_cashout("core1") is None   # only the sprint book cashes out
+
+
+def test_bust_reseeds_book_and_counts(monkeypatch):
+    """Book below $10 with nothing open is BUST: reseeded at seed, counted, trading continues."""
+    from executor import books
+    monkeypatch.setattr(books, "_rows", lambda b: [{"pnl_usd": -95.0}])
+    monkeypatch.setattr(books, "open_count", lambda b: 0)
+    store = {}
+    monkeypatch.setattr(books.state, "get_value", lambda k, d=None: store.get(k, d))
+    monkeypatch.setattr(books.state, "set_value", lambda k, v: store.__setitem__(k, v))
+    assert books.total_value("sprint") == 5.0
+    ok, why = books.can_open("sprint")
+    assert len(books.busts("sprint")) == 1
+    assert books.total_value("sprint") == 100.0
+    assert books.status("sprint")["busts"] == 1
