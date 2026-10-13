@@ -203,3 +203,10 @@ def test_non_dev_needs_buyers_without_feed():
           "marketCapSol": 28, "name": "x", "symbol": "X"}
     t.on_create(ev, now=100.0)
     assert t.evaluate("M2", now=101.0) is None
+
+
+def test_serial_launcher_is_not_tracked():
+    t = EarlyTracker()
+    t.launches_fn = lambda c: 45 if c == "spam" else 1
+    assert t.on_create(create("S1", creator="spam"), now=T0) is False
+    assert t.on_create(create("S2", creator="newdev"), now=T0) is True

@@ -118,7 +118,10 @@ def act(decision: dict, send=None, now=None) -> dict:
     live_done = []
     for lane in decision.get("lanes") or [decision["lane"]]:
         ok, why = books.can_open(lane)
-        stake = books.stake_usd(lane) if ok else 0.0
+        conf = decision.get("confirmations") or []
+        strong = [c for c in conf if c not in ("dev_list", "repeat_grad")]     # dev_list lane: 0/69 graduated (Oct 13)
+        tier = "conviction" if len(strong) >= 4 else "standard" if len(strong) >= 2 else "probe"
+        stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
         if not stake:
             refused.append(f"{lane}: {why}")
             continue
@@ -185,6 +188,7 @@ async def main_async():
     from early_creators import Creators
     creators = Creators()
     tracker.creator_fn = creators.repeat_grad
+    tracker.launches_fn = lambda c: creators.snapshot(c).get("creator_launches", 0)
 
     def on_event(e):
         counters["events"] += 1

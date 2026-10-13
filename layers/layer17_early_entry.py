@@ -72,6 +72,7 @@ class EarlyTracker:
                  hot_terms_fn: Optional[Callable[[], Set[str]]] = None):
         self.recs: Dict[str, Rec] = {}
         self.dev_list = set(dev_list or [])
+        self.launches_fn = lambda c: 0       # how many launches this creator has made (serial spammers: 0.3x lift, Oct 13 study)
         self.creator_fn = lambda c: False    # repeat-graduate creator (early_creators.Creators.repeat_grad)
         self.feed_off = False               # True when the per-coin trade feed is unavailable (no API key)
         self.smart_fn = smart_fn or (lambda: set())
@@ -90,6 +91,9 @@ class EarlyTracker:
         self.stats["created"] += 1
         dev_tokens = _num(e.get("initialBuy") if e.get("initialBuy") is not None else e.get("tokenAmount"))
         if self.blacklist_fn(creator) or dev_tokens / SUPPLY > _f("EARLY_MAX_DEV_PCT", 0.25):
+            self.stats["skipped"] += 1
+            return False
+        if self.launches_fn(creator) > int(_f("EARLY_MAX_CREATOR_LAUNCHES", 20)):
             self.stats["skipped"] += 1
             return False
         if len(self.recs) >= int(_f("EARLY_MAX_TRACKED", 1500)):

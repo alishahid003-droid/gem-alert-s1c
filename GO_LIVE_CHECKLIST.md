@@ -531,3 +531,5 @@ OPEN -- CLAUDE
 - [ ] PumpPortal key + Helius key into .env -> turns on the curve-phase early tracker (10-25k entries with creator-dump / bundle / sell-pressure rug filters) and buyers/pressure signals (needed for conviction tier)
 - [ ] Watch 24h of paper: tier mix, stop-outs, biglaunch/Robinhood entries; then decide on raising stakes
 - NOTE: replay figures ($17k-$256k) are winners-only upper bounds, not forecasts
+- [x] 13 Oct early_log study (6,295 launches, day 1): dev_list lane 0/69 graduated (median 0.53x) -> now probe size only. "Dev bought 3+ SOL = 3.7x lift" was an ARTIFACT (97% of those coins have dev holding ~79% of supply, self-graduating; our 25% dev cap already blocks them). Among tradable coins dev-buy size has no edge (1.0x). Real signals: creator graduated before 4.1x (5.0% vs 1.2%), serial launcher (>20 launches) 0.3x -> blocked (EARLY_MAX_CREATOR_LAUNCHES). early worker stakes now use tiers (probe/standard/conviction by non-dev confirmations).
+- [ ] Re-run analyze_early.py on day 2 (a feature is real only if it repeats); needs PUMPPORTAL_API_KEY for buyers/pressure
