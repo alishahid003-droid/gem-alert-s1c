@@ -51,6 +51,10 @@ LATER (live path, one step at a time, only after proven paper edge):
 11. [ ] Other chains in this order: Four.meme/BSC -> StonkFun -> Base -> Robinhood. Each needs a burner wallet (key only in .env), an adapter built by Claude (paper first), and a $2-5 live test.
 12. [ ] Run to targets: Sprint cash-out at $10k (withdraw by hand, reseed $200); weekly review of vault/stakes/pace.
 
+## 5A. FAST VERDICT TEST (added 13 Oct 14:40) - replaces waiting for weeks of paper
+- e2e_test.py = end-to-end replay of the real entry gate + tiers + exits on an UNBIASED sample of new pools (winners AND duds), 4 chains. Prints per-book result with confidence range, result without the best coin, GO / NO-GO.
+- Ali runs (CMD): `python e2e_test.py --collect 150` (about 25-40 min, 1 API call per coin), repeat every few hours; `python e2e_test.py` prints the verdict from cache with no API calls. Needs >= 30 entries for a verdict.
+- GO means: a tiny live test ($2-5 stakes, ONE lane) is justified. Not a forecast.
 ## 6. KNOWN ISSUES
 - Entry rules are still unproven; the new exits/tiers have had no live-paper day yet.
 - Pump.fun per-coin trade feed OFF (needs key). Solana public RPC gives HTTP 429 (needs Helius). Fomo credits 0 (reset date unknown). GeckoTerminal ~6 calls/min. Only coins with a DEX pool are visible on EVM chains.
