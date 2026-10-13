@@ -137,3 +137,6 @@ The edge is NOT "early" — it's "early AND a proven smart wallet is buying".
 - Tuned: MC_MAX_MCAP_USD 60k, MC_EVM_STAKE_MULT 0.3 (bsc/robinhood).
 - New: api_budget.py (+ hook in utils/http.py) → `python api_budget.py`.
 - Needs restart (Admin CMD: taskkill /F /IM python.exe, then start_local_mode.bat). 900 tests pass.
+
+## 13 Oct 2026 10:05 PKT — end-of-morning state
+See GO_LIVE_CHECKLIST.md Step 1 (DONE this morning / LEFT TO DO). Latest code b9733cc live since 09:37 restart. Next: PumpPortal key (Ali), Helius key (Ali), tune from analyze_early.py at ~01:31 PKT Oct 14.

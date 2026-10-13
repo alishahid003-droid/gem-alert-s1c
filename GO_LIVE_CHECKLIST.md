@@ -2,12 +2,12 @@
 
 # S1c — Go-Live & 80% Win-Rate Checklist (single source of truth)
 
-# ▶ MASTER STATUS & ORDER OF WORK — updated 13 Oct 2026, 09:50 PKT  (THE single source of truth)
+# ▶ MASTER STATUS & ORDER OF WORK — updated 13 Oct 2026, 10:05 PKT  (THE single source of truth)
 
 **UPDATE RULE (Claude, every time):** after EVERY build, test, restart or result — update this block, then HANDOFF.md, then the Notion S1c "CURRENT STATE" banner, then commit. Ali pushes with `git push origin main`. Nothing is "done" until its DONE-WHEN is met. Older sections below this block are history; if they disagree with this block, THIS BLOCK wins.
 Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · 🔴 broken/blocked · (A)=Ali · (C)=Claude · (B)=both
 
-**One-line state:** everything is PAPER. Sniper + multi-chain sniper have been running since 01:31 PKT Oct 13 (first real evidence run). No live trades anywhere. Live-trading adapter exists only for pump.fun (needs key); other platforms need adapters + wallets. 897 tests pass (mocked data only).
+**One-line state (10:05 PKT Oct 13):** everything is PAPER. First 3 h blew out every target book (0 real winners / 42 entries) → this morning: fake-profit bug fixed, books reseed on bust, legacy scalper retired, multichain tightened, API ledger + shared rate gate built, GitHub failure emails stopped. Latest code (b9733cc) is live since the 09:37 restart; sniper + pump.fun watcher running; GeckoTerminal now 0 refusals. No live trades anywhere. 903 tests pass (mocked data only). The 24 h evidence clock restarted effectively at 09:37 PKT (analyze_early.py still works on the recorder data from 01:31).
 
 ## 1. WHAT HAS BEEN BUILT
 | Area | What | Status |
@@ -27,7 +27,7 @@ Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · �
 ## 2. WHAT IS BEING TESTED RIGHT NOW
 | Test | What it proves | Started | Status / result so far | Where to read |
 |---|---|---|---|---|
-| T1 24h evidence run (pump.fun recorder + multichain paper entries) | which launch features lift graduation odds on OUR data; paper P&L per book/lane/chain | 01:31 PKT Oct 13 (clock ends ~01:31 Oct 14) | 🟡 running. Logs 01:33 show early-watch started, multichain started, Robinhood slug = `robinhood`, paper entries on Solana/BSC/Robinhood/Base | logs\local_runner.log, logs\local_early-watch.log, dashboard, then `python analyze_early.py` |
+| T1 24h evidence run (pump.fun recorder + multichain paper entries) | which launch features lift graduation odds on OUR data; paper P&L per book/lane/chain | 01:31 PKT Oct 13 (recorder never stopped; sniper fixes live 09:37) | 🟡 running. First 3 h: 0 winners / 42 entries (Solana 0/26, BSC 0/9, Robinhood 0/5); fixes applied; new bucket (Solana momentum ≤$250k, Core 2 only) being measured | logs\local_runner.log, logs\local_early-watch.log, dashboard, `python analyze_early.py`, `python api_budget.py` |
 | T2 Exit-engine backtest on real graduated pump.fun coins (`run_checks.bat`) | do the exit rules make money on real post-graduation price paths (NOT an entry-edge test: pre-graduation prices aren't public) | 01:07 PKT | 🔴 run 1 crashed (Windows unicode) + fake 1,000,000x glitch spikes → both fixed (be02027). Partial 92-coin file is rough/unusable. Deliberately STOPPED so it doesn't share GeckoTerminal quota with T1 | logs\check_backtest_top.txt / _new.txt after re-run |
 | T3 Feed health (solana/bsc/base/robinhood/StonkFun) | each data feed actually responds on Ali's PC | — | 🟡 partly confirmed in sniper logs (all four chains + StonkFun producing candidates); full dump pending | logs\check_health.txt |
 | T4 Live trade test | real buy+sell works | — | ⬜ not started (needs Phase 2) | — |
@@ -44,22 +44,27 @@ Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · �
 
 ## 4. ORDER OF WORK (do top to bottom; what's next is the first ⬜)
 ### Step 1 — Run the evidence clock (NOW → ~01:31 PKT Oct 14)
-- ✅ (A) Restart from an ADMINISTRATOR CMD (old admin python processes silently blocked every normal restart; this is why the sniper never ran before 01:31) 
-- 🟡 (A) PC awake, Windows sleep = Never, minimized windows left open; restart ONLY via Admin CMD: `taskkill /F /IM python.exe` then `start_local_mode.bat`
-- ✅ (C) Morning: read logs + state (08:00 PKT). RESULT of first 3 h (01:31–04:47 PKT, 42 paper entries): **every target book blown out** — Core 1 Sprint $100→$8, Core 2 →$0, Core 3 →$13, Compound $0. 0 real winners (best coin peaked 2.2x then fell). Solana 0/26 real wins avg -45%; BSC 0/9 avg -81%; Robinhood 0/5 avg -54%; Base 1 trade; entry mcap >$50k: 0/13 avg -82%; <$5k never moved (12 time-stops). This is the honest first reading: the current entry rules have no edge yet.
-- ✅ (C) FIXED 08:30: (1) BUG: a drained pool booked a fake +$505 profit on one Sprint coin (sold at a glitched price) which inflated Sprint stakes to $135/$114 and hid real losses → liquidity-collapse exits now book ~total loss (test added). (2) Books that bust (<$10, nothing open) now auto-reseed at $100, count the BUST on the dashboard and keep trading, so the 24h evidence run is not starved (Compound was stuck at $0). (3) multichain log crash on non-ASCII coin names fixed. Needs restart to take effect.
-- ✅ (A) 08:49 PKT: pushed 15f3f33; Admin CMD killed python and restarted `start_local_mode.bat` (new fixes live).
-- 🟡 (C) API STATUS 08:55 (first 1 h of ledger, `python api_budget.py`): all within limits — MadeOnSol 6 calls today (cap 200/day), GeckoTerminal busiest minute 12/30 (3 HTTP 429), DexScreener 51/300 per min, GoPlus 17/30 per min, StonkFun 12 total, Birdeye 1. Solana public RPC is the weak point: 68 HTTP 429 → free Helius key (A) needed. FOMO: free bucket is 250,000 credits/month and was drained in hours on Sept 30 (before the credit governor existed); `remaining` has been 0 every day Oct 10–13, i.e. it did NOT refill on Oct 1, so the reset date is NOT the calendar month — unknown until the API tells us. Now saving every credit/reset header the API sends (`headers_seen` in fomo_credit_state); the governor probes once per 6 h at ~1 call. Free fixes: wait for the refill, or live without Fomo (all other feeds work). Do NOT pay.
-- ✅ (C) 09:20 Runner bucket: `MC_MAX_MCAP_USD`=60k still blocks the moonshot lanes (Sprint/Core 2/Core 3) from chasing, BUT Solana coins up to `MC_MOMENTUM_MAX_MCAP_USD`=250k may now enter ONLY Core 2 ("core1" book) as a "momentum" entry, needing ≥4 confirmations. Own bucket → data will judge it. KEY FINDING: pump.fun per-coin trade feed is OFF (no PumpPortal key) so velocity / pressure / smart-wallet confirmations CANNOT fire on pump.fun coins — only dev_list + narrative can. That is why the pump.fun entries look random. PumpPortal key + 0.02 SOL (A) is the single biggest quality upgrade.
-- ✅ (A) 09:03 pushed d159747; 09:04 restarted again (momentum bucket live).
-- 🔴→✅ (C) 09:40 found after restart: (1) GeckoTerminal: 222 HTTP 429 in 1 h (shared 30/min across processes) → built a SHARED per-minute gate (`api_budget.gate`, 80% of each API's per-minute limit, uses the shared call log) hooked in utils/http.py. (2) The old fake +$505 row still sat in history (Sprint showed $894) → healed centrally in paper_ledger (a rug exit can never be a profit). (3) Compound's 22 open positions are LEGACY scalper/stage1 paper trades that bypass the books (-$2,075 on 1,032 rows, $25 stakes) — they blocked the bust-reseed; bust now only waits for a book's own sniper positions. TO DECIDE: retire the legacy scalper/stage1 paper trader or move it under book limits (it is why Compound is $0).
-- ✅ (C) 09:15 RETIRED (Ali: "retire") the legacy stage1 / scalper / quick paper traders (outside the books, -$2,298 on 1,045 trades, why Compound sat at $0). `LEGACY_PAPER_ENABLED=false` by default; sniper entries unaffected; the 22 already-open legacy positions just run out. Compound now only trades from sniper confluence (≥3 confirmations). 903 tests pass.
-- ✅ (A) 09:32 pushed f956065 (GitHub "run failed" emails stopped: smoke-test no longer runs on push, alert-replay no longer scheduled); 09:24 clean restart (retire + gate live).
-- 🔴→🟡 (C) 09:40 GeckoTerminal MEASURED: the gate held calls to ≤24/min but 122 of 176 calls still got HTTP 429 → from Ali's IP only ~6 calls/min succeed (published 30/min is not what we get). Gate cap now 8/min (→6 effective), multichain poll 20 s → 45 s. Multichain sees fewer pools per minute until GeckoTerminal is replaced/complemented (candidates: DexScreener new-pairs, StonkFun API, Birdeye) — TO DO after tonight's data. Needs restart.
-- 🟡 (C) **API BUDGET AUDIT** — built `api_budget.py` + hook in `utils/http.py`: every call logged per API in `logs\api_calls_<date>.log`; `python api_budget.py` prints calls today / projected day / busiest minute vs limit / month projection / 429 count. MadeOnSol confirmed 200/day (BASIC, 6,000/mo): 95-175/day used Oct 9-12, 27 so far today, existing guard keeps routine ≤190 — OK. GeckoTerminal 30/min shared by all pollers, only 1 HTTP 429 seen. Fomo credits exhausted (402, Ali top-up). STILL TO DO after restart: read a full day of `api_budget.py` output and add hard back-off where any API projects over its allowance.
-- ✅ (C) TUNED multichain from the 3 h data: `MC_MAX_MCAP_USD` 1.5M → 60,000 (no chasing; every >$50k entry lost), BSC/Robinhood stakes ×0.3 (`MC_EVM_STAKE_MULT`) until they show wins. pump.fun early thresholds NOT touched yet (3 h is too small a sample; use `analyze_early.py` at 01:31 PKT Oct 14).
-- ⬜ (B) Re-run `run_checks.bat` (backtest top/new + feed health) once the sniper has run a few hours; (C) reads logs\check_*.txt
-- ⬜ (A) ~01:31 PKT Oct 14: `python analyze_early.py`, send output → (C) tune EARLY_*/MC_*/ROUTER_*, stakes, take-profit ladder, bank_pct
+**DONE this morning (13 Oct):**
+- ✅ Restart from Administrator CMD works (5 clean restarts; latest 09:37, code b9733cc). Pushed: 15f3f33, d159747, 02183e6, 9c2cf44, f956065, b9733cc.
+- ✅ Morning read: first 3 h blew out every target book — Sprint $100→$8, Core 2 →$0, Core 3 →$13, Compound $0; 0 real winners; Solana 0/26 avg -45%, BSC 0/9 avg -81%, Robinhood 0/5 avg -54%, entries >$50k 0/13.
+- ✅ BUG fixed: drained pool booked fake +$505 (inflated Sprint stakes to $135/$114); history healed (Sprint real balance $0, not $894).
+- ✅ Books auto-reseed at $100 when busted (BUST counter on dashboard); waits only for that book's own sniper positions.
+- ✅ Legacy stage1/scalper/quick paper traders RETIRED (Ali: "retire"; -$2,298 on 1,045 trades; `LEGACY_PAPER_ENABLED=false`).
+- ✅ Multichain tuned: `MC_MAX_MCAP_USD` 60k; BSC/Robinhood stakes ×0.3; Solana momentum bucket up to $250k (Core 2 only, ≥4 confirmations); poll 45 s; non-ASCII crash fixed.
+- ✅ API budget: `api_budget.py` ledger + shared per-minute gate in utils/http.py. MadeOnSol 200/day (using ~95-175), DexScreener/GoPlus/StonkFun fine; GeckoTerminal measured ~6 ok calls/min from Ali's IP → cap 8/min, 0 refusals after fix. Solana public RPC still returns HTTP 429.
+- ✅ Fomo finding: free 250,000 credits/month drained Sept 30, still 0 on Oct 13 (not a calendar-month reset); credit/reset headers now saved to find the real reset; do not pay.
+- ✅ GitHub "run failed" emails stopped (smoke-test off push, alert-replay unscheduled).
+- ✅ KEY FINDING: pump.fun per-coin trade feed is OFF (no PumpPortal key) → only dev_list + narrative confirmations can fire on pump.fun coins; velocity/pressure/smart-wallet cannot. Biggest quality upgrade = PumpPortal key + 0.02 SOL.
+**LEFT TO DO (actionable, in order):**
+- 🟡 (A) PC awake, Windows sleep = Never, minimized windows left open; restart ONLY via Admin CMD (`taskkill /F /IM python.exe` then `start_local_mode.bat`)
+- ⬜ (C) Check logs/dashboard 2–3 more times today (Core 2 momentum bucket entries, bust counts, any Traceback, `python api_budget.py`); fix anything found
+- ⬜ (A) PumpPortal API key + 0.02 SOL → `PUMPPORTAL_API_KEY` in .env (turns on trade feed; do this TODAY so tonight's data has buyer/pressure/smart-wallet signals) — Ali said he'd look into it; (C) sets it up step by step
+- ⬜ (A) Free Helius key → `SOLANA_RPC_URL` (public Solana node keeps returning HTTP 429)
+- ⬜ (C) GeckoTerminal is only ~6 calls/min: add DexScreener/Birdeye/StonkFun as complementary pool discovery so multichain sees more new pools (after tonight's data)
+- ⬜ (C) API BUDGET AUDIT close-out: read a full day of `python api_budget.py` output (tomorrow) and add hard back-off for anything projecting over its monthly allowance; Fomo reset date from `headers_seen`
+- ⬜ (B) Re-run `run_checks.bat` (exit backtest top/new + feed health) once GeckoTerminal quota allows (it competes with the sniper); (C) reads logs\check_*.txt
+- ⬜ (A) ~01:31 PKT Oct 14: `python analyze_early.py`, send output → (C) tune EARLY_*/MC_*/ROUTER_*, stakes, take-profit ladder (hold moon bags), bank_pct; per-lane/per-chain go/no-go
+- ⬜ (A) screenshots of 50x+ coins (name + chain) for calibration (FEELSGOOD 882x logged as case #1)
 ### Step 2 — Decide go/no-go per lane (Claude + Ali, from Step 1 data)
 - ⬜ (C) Verdict per lane/chain: keep, cut or rework (no live on hope). Gate: positive paper P&L after the cost model, ≥50 entries in the lane
 - ⬜ (C) Verify dev-list wallets (only 6/25 verified); decide use
@@ -78,11 +83,11 @@ Legend: ✅ done & verified · 🟡 built, running/under test · ⬜ to do · �
 - ⬜ (A) Top up Fomo credits (HTTP 402) — Fomo books dead until then · ⬜ (A) Windows sleep = Never · ⬜ (A) free Helius key · ⬜ (A) send screenshots of 50x+ coins (name+chain) for calibration (12.13) · ⬜ (A) keep `EXECUTION_ENABLED=false` until Step 3
 
 ## 5. KNOWN ISSUES
-- 🔴 Compound book $0.00 — lane refuses entries (fix in Step 1)
-- 🟡 Multichain thresholds loose/untuned; only coins with a DEX pool are visible; ~20 newest pools per call (busy chains miss some)
+- ✅ Compound $0 fixed: legacy scalper/stage1 trader retired; bust-reseed added (13 Oct)
+- 🟡 Entry rules have shown NO edge in first 3 h (0 winners / 42); tuned from that data (mcap cap, EVM stake ×0.3) but still unproven; only coins with a DEX pool are visible; ~20 newest pools per call
 - 🟡 Per-coin pump.fun trade feed OFF (needs key) → only dev-list entries at creation + launch-level signals until then
 - 🟡 Paper fills optimistic vs real; Robinhood memecoin swap support unverified
-- 🟡 API budgets not yet audited after adding multichain/StonkFun/non-Solana (see Step 1 API BUDGET AUDIT); 1 GeckoTerminal 429 seen at 01:33
+- 🟡 GeckoTerminal only ~6 calls/min from our IP → multichain sees fewer pools; Solana public RPC HTTP 429 (Helius key); Fomo credits 0 (reset date unknown)
 - ✅ Fixed 13 Oct: restart script couldn't kill admin-level python (use Admin CMD); backtest unicode crash + glitch wicks
 
 ## 6. TEST / EVENT LOG (newest first)
