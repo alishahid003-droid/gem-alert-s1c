@@ -4,11 +4,12 @@ Old versions are archived in docs/archive/ (history only - never read them for s
 UPDATE RULE (Claude, after every change): rewrite THIS file, copy it to the Notion master page, then commit. Ali pushes.
 Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=Claude
 
-## 1. STATUS - 13 Oct 2026, 16:55 PKT
-- Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 923 tests pass.
+## 1. STATUS - 13 Oct 2026, 18:15 PKT
+- Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 927 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
-- Last commit 344b944 (e2e replay test + loop). Git, folder and Notion are in sync as of 16:55 PKT.
+- Last pushed commit 344b944. NOT PUSHED YET (18:15): PumpPortal spending guard (early_stream.py, worker_early_watch.py, new test file) + this checklist -> Ali: git add -A, git commit, git push.
 - RUNNING NOW in its own CMD window: `python e2e_test.py --loop` (end-to-end replay test, no CoinGecko key yet = slow pace). First coins become replay-ready ~20:00 PKT; verdict (needs >= 30 entries) expected tonight/overnight. Its first batch (14:31) was useless (coins fetched minutes after launch) and was fixed.
+- Helius key is in .env (SOLANA_RPC_URL, verified format). PumpPortal key NOT yet added: metered-feed guard built first (see section 3). Needs one restart (kills the e2e loop - restart it after).
 - e2e_test.py has no unit tests yet (checked by hand with a mocked HTTP call).
 
 ## 2. TARGETS AND BOOKS (in the app: sprint = "Core 1 Sprint", core1 = "Core 2", core2 = "Core 3")
@@ -26,7 +27,8 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 - [x] WINNERS TOOLS: replay_coin.py + discover_winners.py (replay known winners on minute candles, picks the original from copycats automatically, Solana/BSC/Base/Robinhood); winners_tracker.py (logs/winners_book.json: every coin the scanner sees, peaks re-checked at +3h/+24h/+72h, winners >= $1M, whether the sniper entered them). Run: python winners_tracker.py
 - [x] Evidence tools: analyze_early.py, backtest_sniper.py, api_budget.py (per-API call ledger + shared rate gate), fomo_me.py, kill_switch.py, run_checks.bat.
 - [x] Fomo: credits exhausted (0 of 250,000, daily limit 10,000, no published reset date). System now checks the free GET /v2/me every 30 min and resumes by itself when credits return; the moment is saved as credits_back_ts in .gem_alert_state.json (fomo_credit_state). Rotating the key / new account does not help and is NOT to be done.
-- [x] Infra: local mode, DNS-over-HTTPS fallback, dashboard is the only alert place (Telegram off), legacy stage/scalper paper traders retired.
+- PUMPPORTAL METERED FEED GUARD (built 13 Oct 18:15, untested live): PumpPortal bills the keyed per-coin trade feed 0.01 SOL per 10,000 messages from the key's linked wallet, and the wallet must keep >= 0.02 SOL. So: the free launch/graduation socket stays KEYLESS; the key goes only on a separate trade socket; PUMPPORTAL_MAX_MSG_PER_DAY (default 10,000 = ~0.01 SOL/day) pauses the feed until 00:00 UTC; PUMPPORTAL_MAX_WATCHED (default 20) limits coins watched; only repeat-graduate and dev-list launches are watched. Dashboard/log show trade_msgs and est_spend. Fund the linked wallet ~0.04 SOL (0.02 reserve + ~2 days of feed).
+- Infra: local mode, DNS-over-HTTPS fallback, dashboard is the only alert place (Telegram off), legacy stage/scalper paper traders retired.
 
 ## 4. KEY FINDINGS (honest)
 - First 3 h of paper (Oct 13 morning): 0 winners / 42 entries; entries above $50k lost; BSC 0/9, Robinhood 0/5, Solana 0/26 - old rules had no edge.
@@ -40,7 +42,7 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 ALI:
 1. [x] (A) DONE 16:48: pushed (344b944). Everything on GitHub.
 2. [ ] (A) Keep PC awake (sleep = Never), ALL windows open incl. the e2e loop window, dashboard open. Optional: a FREE CoinGecko Demo key in .env as COINGECKO_API_KEY (do NOT pay for any plan; the pricing page shows only paid plans, free signup may be elsewhere on coingecko.com/en/api). Restart the loop after adding it.
-3. [ ] (A) PumpPortal key (~0.02 SOL; send ONLY the exact fee to the address its site shows; Phantom has $1.53 ETH + $0.57 SOL) and a free Helius key -> .env as PUMPPORTAL_API_KEY and SOLANA_RPC_URL. Never paste keys or the seed phrase in chat. Then say "keys are in" and Claude guides the Admin-CMD restart. This enables buyers/pressure, the Conviction tier, curve-phase 10-25k entries with rug filters (creator dump, bundled launch, one-wallet dominance, sell pressure).
+3. [ ] (A) Helius: DONE (key in .env). PumpPortal key (METERED, see section 3): open pumpportal.fun/trading-api/setup, it creates a wallet + API key; save any private key privately (never in chat/.env); fund ONLY that linked wallet ~0.04 SOL from Phantom (0.02 must stay as reserve; the rest is the spending cap); then add PUMPPORTAL_API_KEY=... to .env, keep EXECUTION_ENABLED=false (key + EXECUTION_ENABLED=true = live trading). Tell Claude "keys are in" -> one Admin-CMD restart, then restart `python e2e_test.py --loop`.
 4. [ ] (A) ~01:31 PKT Oct 14: run python analyze_early.py 1, python winners_tracker.py, python api_budget.py and send all three outputs.
 4b. [ ] (A) ~22:00 PKT and again in the morning: paste whatever the e2e loop window shows (full verdict once >= 30 entries).
 CLAUDE (after those outputs):
@@ -68,7 +70,7 @@ LATER (live path, one step at a time, only after proven paper edge):
 
 ## 7. STANDING RULES (Ali)
 - One source of truth only (this file = Notion master page). Dashboard is the only alert place. Free APIs only, paced to last a month. 24h plans. No padded checklists. Ali pays for nothing. No investor outreach. Claude/scripts find winner coins' addresses and tell originals from copycats themselves - never ask Ali for addresses or screenshots coin by coin.
-- Security: keys and wallet secrets only in .env, never in chat; the Phantom seed phrase/private key is never shared or entered anywhere; PumpPortal gets only the exact fee amount to the address its site shows; live money only after proven edge and only tiny stakes.
+- Security: keys and wallet secrets only in .env, never in chat; the Phantom seed phrase/private key is never shared or entered anywhere; the PumpPortal linked wallet is funded only ~0.04 SOL, never more; live money only after proven edge and only tiny stakes.
 - Honest risk: the targets are the growth REQUIRED, not shown performance. Sprint is lottery-like. Live stakes tiny, one lane first.
 
 ## 8. CHANGE LOG (newest first)

@@ -207,6 +207,8 @@ async def main_async():
             if dec:
                 counters["entries"] += 1
                 loop.run_in_executor(None, act, dec)
+            if stream.trade_url and not (who in tracker.dev_list or creators.repeat_grad(who or "")):
+                return None          # metered trade feed: watch only the lanes with a proven signal (repeat graduate / dev list)
             return [e["mint"]]
         if kind == "migrate" or (e.get("pool") and kind not in ("buy", "sell", "create")):
             counters["grads"] = counters.get("grads", 0) + 1
@@ -234,13 +236,15 @@ async def main_async():
                 if gone:
                     await stream.unsubscribe_trades(gone)
                 snap = dict(tracker.stats, tracked_now=len(tracker.recs), events=counters["events"],
-                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error, trades_blocked=stream.trades_blocked, grads=counters.get("grads", 0), creators_known=len(creators.t),
+                            entries=counters["entries"], reconnects=stream.reconnects, error=stream.last_error, trades_blocked=stream.trades_blocked, trade_msgs=stream.trade_msgs, spend_est_sol=stream.spend_est_sol, budget_exhausted=stream.budget_exhausted, grads=counters.get("grads", 0), creators_known=len(creators.t),
                             last_event_ago=round(time.time() - stream.last_event_ts, 1) if stream.last_event_ts else None,
                             ts=time.time())
                 state.set_value("early_stats", snap)
                 note = (f"events={snap['events']} tracked={snap['tracked_now']} entries={snap['entries']} "
                         f"reconnects={snap['reconnects']}" + (f" err={snap['error']}" if snap["error"] else "")
-                        + (" TRADE-FEED-OFF(need PUMPPORTAL_API_KEY)" if stream.trades_blocked else ""))
+                        + (" TRADE-FEED-OFF(need PUMPPORTAL_API_KEY)" if stream.trades_blocked else "")
+                        + (f" trade_msgs={stream.trade_msgs} est_spend={stream.spend_est_sol}SOL" if stream.trade_url else "")
+                        + (" BUDGET-REACHED" if stream.budget_exhausted else ""))
                 state.record_runner_heartbeat("early-watch", "local-pc", note)
                 print(f"[early-watch] {note}", flush=True)
             except Exception:  # noqa: BLE001
