@@ -84,6 +84,11 @@ def _request_with_429_retry(method, url, headers=None, params=None, data=None, j
     attempts = 0
     while True:
         try:
+            import api_budget          # shared per-minute pacing across all runner processes
+            api_budget.gate(url)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             resp = _get_session().request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
         except (requests.ConnectionError, requests.Timeout) as e:
             raise ApiUnreachable(f"{method} {url} failed at network level: {e}") from e

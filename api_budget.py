@@ -118,3 +118,44 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# Shared per-minute pacing (Oct 13 2026: GeckoTerminal returned 222 HTTP 429 in one hour -- several processes
+# share its 30 calls/min). The call log is shared by every process, so it doubles as the limiter's memory.
+GATE_FRACTION = 0.8
+
+
+def _recent_calls(frag: str, window: float = 60.0) -> int:
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    path = os.path.join(LOG_DIR, f"api_calls_{day}.log")
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 65536))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return 0
+    cut = time.time() - window
+    n = 0
+    for ln in lines:
+        p = ln.split()
+        if len(p) == 3 and p[0].isdigit() and int(p[0]) >= cut and frag in p[1].lower():
+            n += 1
+    return n
+
+
+def gate(url: str, max_wait: float = 25.0) -> None:
+    """Block (up to max_wait s) while this API is at GATE_FRACTION of its per-minute limit. Never raises."""
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).netloc or "").lower()
+        for frag, (_name, _d, per_min) in LIMITS.items():
+            if per_min and frag in host:
+                cap = max(1, int(per_min * GATE_FRACTION))
+                waited = 0.0
+                while waited < max_wait and _recent_calls(frag) >= cap:
+                    time.sleep(2.0)
+                    waited += 2.0
+                return
+    except Exception:  # noqa: BLE001
+        pass

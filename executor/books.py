@@ -116,8 +116,9 @@ def check_bust(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     c = cfg(book_id)
     if total_value(book_id) >= (_f("BUST_BELOW_USD", 10.0) or 10.0):
         return None
-    if open_count(book_id) > 0:
-        return None            # let open slices resolve first
+    from executor import paper_ledger
+    if any(p.get("strategy") == "early" and p.get("module") == book_id for p in paper_ledger._open().values()):
+        return None            # let this book's open sniper slices resolve first (legacy scalper/stage1 rows don't count)
     now = now if now is not None else time.time()
     rec = state.get_value(BUST_KEY)
     rec = rec if isinstance(rec, dict) else {}

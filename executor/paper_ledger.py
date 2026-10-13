@@ -87,8 +87,20 @@ def _closed_raw() -> list:
 STATS_SINCE_TS = float(os.environ.get("PAPER_STATS_SINCE_TS", "1790833500"))
 
 
+def _heal(r: dict) -> dict:
+    """A rug / drained-pool exit can never be a profit. Rows closed before the Oct 13 2026 fix booked a
+    glitched mcap read as a fake gain (+$505 on a $30 stake); count them as the total loss they were."""
+    if r.get("exit_type") == "rug_liquidity" and float(r.get("pnl_usd") or 0) > 0:
+        r = dict(r)
+        r["pnl_usd"] = -float(r.get("usd") or 0)
+        r["pnl_pct"] = -100.0
+        r["win"] = False
+        r["healed"] = True
+    return r
+
+
 def _closed() -> list:
-    return [r for r in _closed_raw() if (r.get("opened_ts") or 0) >= STATS_SINCE_TS]
+    return [_heal(r) for r in _closed_raw() if (r.get("opened_ts") or 0) >= STATS_SINCE_TS]
 
 
 def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
