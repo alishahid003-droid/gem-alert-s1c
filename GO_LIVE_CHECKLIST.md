@@ -533,3 +533,21 @@ OPEN -- CLAUDE
 - NOTE: replay figures ($17k-$256k) are winners-only upper bounds, not forecasts
 - [x] 13 Oct early_log study (6,295 launches, day 1): dev_list lane 0/69 graduated (median 0.53x) -> now probe size only. "Dev bought 3+ SOL = 3.7x lift" was an ARTIFACT (97% of those coins have dev holding ~79% of supply, self-graduating; our 25% dev cap already blocks them). Among tradable coins dev-buy size has no edge (1.0x). Real signals: creator graduated before 4.1x (5.0% vs 1.2%), serial launcher (>20 launches) 0.3x -> blocked (EARLY_MAX_CREATOR_LAUNCHES). early worker stakes now use tiers (probe/standard/conviction by non-dev confirmations).
 - [ ] Re-run analyze_early.py on day 2 (a feature is real only if it repeats); needs PUMPPORTAL_API_KEY for buyers/pressure
+
+## 13 Oct 2026 - winners tracker + where we stand (single source of truth)
+DONE today (all paper, EXECUTION_ENABLED=false; pushed to git up to a3d858b, winners tracker not yet pushed):
+- [x] replay_coin.py / discover_winners.py - replay known winners on minute candles, originals auto-picked (Solana/BSC/Base/Robinhood)
+- [x] Exits: stop 0.35 / trail 0.40 / ladder 20-15-10% at 2x/4x/10x / dead-coin kill 90m (was $100 -> $124; replay with new exits $17.9k-$30k, winners-only upper bound)
+- [x] Conviction tiers 15/40/60% (x book scale 1.0/0.8/0.6, max 80%, <=2% of coin mcap, -1 tier per 3 straight losses)
+- [x] New probe lanes: Solana $250k-$1M biglaunch, Robinhood up to $250k
+- [x] Early (pump.fun) worker: tier stakes, serial launchers (>20 launches) not tracked, dev_list lane probe-size (0/69 graduated)
+- [x] winners_tracker.py: logs/winners_book.json fed by the multichain scanner (every pool seen), re-checks peaks at +3h/+24h/+72h in batches of 30 (1 API call per 3 cycles); `python winners_tracker.py` prints winners (>= $1M), first-seen mcap, whether the sniper entered, plus pump.fun curve runners from early_log
+- [x] Entry log shows name/mcap/age; 920+ tests pass
+NEXT ACTIONS (in order):
+1. [ ] Ali: restart (Admin CMD taskkill /F /IM python.exe, then start_local_mode.bat) after the final push
+2. [ ] Ali: PumpPortal key (~0.02 SOL, exact amount to the address its site shows) + free Helius key into .env (PUMPPORTAL_API_KEY, SOLANA_RPC_URL) -> enables buyer/pressure signals, Conviction tier, curve-phase 10-25k entries with rug filters
+3. [ ] Ali: tomorrow ~01:31 PKT run `python analyze_early.py 1` and `python winners_tracker.py`, send both
+4. [ ] Claude: verify early_log outcome pricing (some outcomes show impossible mcaps, e.g. $4k launch -> $300M); until verified the pump.fun runner list and the ">=10x" columns are NOT trusted (clipped at $20M)
+5. [ ] Claude: day-2 check of early_log features (only repeat-graduate creator 4x lift and serial-launcher 0.3x looked real; dev-buy-size "lift" was a self-graduation artifact)
+6. [ ] Claude: review 24h of paper under new exits/tiers (stop-outs, tier mix, biglaunch/Robinhood entries) before any stake increase
+7. [ ] Later: live adapters (Four.meme/BSC, StonkFun, Base, Robinhood), burner wallets, keys only in .env; live money only after proven edge, tiny stakes

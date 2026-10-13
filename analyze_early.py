@@ -37,6 +37,8 @@ def mult(m, cp):
         return None
     if not o.get("listed") or not o.get("mcap_usd"):
         return 0.0                                  # not listed / no price = dead
+    if o["mcap_usd"] > 2e7:
+        return None                                 # implausible pump.fun mcap (> $20M): bad price data, skip
     return o["mcap_usd"] / (float(c["mcap_sol"]) * SOL)
 
 

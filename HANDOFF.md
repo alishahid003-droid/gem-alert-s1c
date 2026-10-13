@@ -143,3 +143,4 @@ See GO_LIVE_CHECKLIST.md Step 1 (DONE this morning / LEFT TO DO). Latest code b9
 
 ## 13 Oct 2026 PM
 Exits widened (stop .35 / trail .40 / ladder 20-15-10 / dead-coin 90m) and conviction tiers + biglaunch/Robinhood probe lanes added. 915 tests pass. See GO_LIVE_CHECKLIST.md. Pending: PumpPortal + Helius keys; 24h paper review.
+Winners tracker added (winners_tracker.py, logs/winners_book.json). Full next-actions list is at the bottom of GO_LIVE_CHECKLIST.md. Early_log outcome pricing is suspect - verify before trusting pump.fun runner stats.

@@ -261,6 +261,11 @@ def run_loop(stop: Optional[threading.Event] = None):
     slugs = dict(GT_SLUGS)
     rhc = None
     cycle = 0
+    try:
+        from winners_tracker import Book, gt_multi_fetch
+        book = Book()
+    except Exception:  # noqa: BLE001
+        book = None
     print("[multichain] sniper loop started (solana non-pump + StonkFun, bsc, base, robinhood)", flush=True)
     while not (stop and stop.is_set()):
         t0 = time.time()
@@ -285,14 +290,23 @@ def run_loop(stop: Optional[threading.Event] = None):
                 pass
             now = time.time()
             for p in batches:
+                if book is not None:
+                    book.record(p, now)
                 d = sc.evaluate(p, now)
                 if d:
                     res = act(d, now)
+                    if book is not None and res.get("opened"):
+                        book.mark_entered(d["chain"], d["addr"])
                     try:
                         print("[multichain] ENTRY", d["chain"], str(d["name"]).encode("ascii", "replace").decode(),
                               f"mcap=${d['mcap']:,.0f} age={d['age_min']}m", d["confirmations"], res, flush=True)
                     except Exception:  # noqa: BLE001
                         pass
+            if book is not None:
+                if cycle % 3 == 2:
+                    book.revisit(gt_multi_fetch, slugs, now, max_batches=1)     # 1 API call per 3 cycles
+                book.prune(now)
+                book.save()
         except Exception:  # noqa: BLE001
             traceback.print_exc()
         cycle += 1
