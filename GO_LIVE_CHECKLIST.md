@@ -53,7 +53,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 
 ## 5A. FAST VERDICT TEST (added 13 Oct 14:40) - replaces waiting for weeks of paper
 - e2e_test.py = end-to-end replay of the real entry gate + tiers + exits on an UNBIASED sample of new pools (winners AND duds), 4 chains. Prints per-book result with confidence range, result without the best coin, GO / NO-GO.
-- Ali runs (CMD): `python e2e_test.py --collect 150` (about 25-40 min, 1 API call per coin), repeat every few hours; `python e2e_test.py` prints the verdict from cache with no API calls. Needs >= 30 entries for a verdict.
+- Ali runs (CMD, own window, leave open): `python e2e_test.py --loop` - lists new pools every cycle, replays each coin once it is 4 h old (full path known), prints the verdict automatically once >= 30 entries. Ctrl+C prints the current verdict. `python e2e_test.py` prints the verdict from cache with no API calls. FIRST BATCH (14:31) WAS USELESS: coins were fetched minutes after creation (median 2 candles); fixed.
+- Pace: without a key GeckoTerminal allows ~75 coins/h from Ali's IP (6-10 h for 30 entries). With a FREE CoinGecko Demo API key (own quota, ~26 calls/min, 10,000/month) in .env as COINGECKO_API_KEY the test runs ~5x faster; it uses it automatically and stops at 4,000 calls (E2E_MAX_CALLS). DexScreener has no price history so it cannot feed this test.
 - GO means: a tiny live test ($2-5 stakes, ONE lane) is justified. Not a forecast.
 ## 6. KNOWN ISSUES
 - Entry rules are still unproven; the new exits/tiers have had no live-paper day yet.
