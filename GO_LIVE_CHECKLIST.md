@@ -12,6 +12,15 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 - Helius key is in .env (SOLANA_RPC_URL, verified format). PumpPortal key NOT yet added: metered-feed guard built first (see section 3). Needs one restart (kills the e2e loop - restart it after).
 - e2e_test.py has no unit tests yet (checked by hand with a mocked HTTP call).
 
+## 1D. LIVE SETTINGS FROM 14 OCT 20:20 PKT (restart done by Ali)
+- LIVE: only the Bills stream (profile fast_sprint -> lane sprint). `.env`: EXECUTION_ENABLED=true, EARLY_LIVE_LANES=sprint, EARLY_FREE_CONFIRM=live, LIVE_MAX_STAKE_USD=5, LIVE_MAX_OPEN=3, LIVE_DAILY_LOSS_USD=12. Backup of the previous .env: `.env.SAFE_BACKUP_PRELIVE_20261014` (never commit; ignored by git).
+- PAPER (keep running 24-48 h for tuning data): Core 2 (fast_core), Core 3 (fast_moon), Compound. They cannot go live (gate says "lane not live").
+- STOP INSTANTLY: `python kill_switch.py` or create an empty file KILL_SWITCH in the project folder (new buys stop, sells still work).
+- UNDO LIVE: set EARLY_FREE_CONFIRM=paper in .env and restart, or run restore_safe.bat.
+- CHECK: `python streams.py` (four streams), `logs\live_exec.log` (every live reply with tx signature), Solscan for the PumpPortal wallet.
+- A stream goes live only after 30+ closed paper trades, positive after costs and without the best coin. Core/Compound go live later on that rule.
+- Next review: ~6 h after restart (live fills, fees vs paper, first 30 Bills closes), then ~24 h (snapshot data -> tune the entry filter).
+
 ## 1C. FOUR MONEY STREAMS + FAST ROUTER (14 Oct, 15:00 PKT) - THE STRUCTURE
 Ali's aim: the system works toward four money targets automatically, each with its own balance, entry window and exits.
 | Stream (book id) | Aim | Entry | Exits (profile) | Live? |
