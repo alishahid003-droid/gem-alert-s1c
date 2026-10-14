@@ -143,3 +143,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - New: entry SCORE (layers/fast_lane.py score()), live needs FAST_LIVE_MIN_SCORE (default 5). On 86 logged signals it looked good (score>=5: 75% reach 1.4x) but that was in-sample, 12 coins.
 - Collective report: `python collect_report.py` (writes COLLECT_REPORT.txt). First run on 971 coins: score does NOT separate winners (score>=5: 3% reach 2x, mean x0.89 after costs; all coins mean x0.79). No proven edge yet. Re-run after 24 h (several thousand coins) before any live decision.
 - Paper streams keep running and collecting.
+
+## 1G. Free trend feeds (14 Oct, 17:50 PKT)
+- New `trend_feeds.py`: every 2 min pulls Google Trends (16 countries), Reddit r/all + r/popular names, Wikipedia most-viewed into `radar_hot_terms` (the key the early watcher already reads). A coin whose name/ticker matches a trending term gets `narrative`; the FIRST coin ever to match a trending phrase also gets `narrative_first` (score +2). Terms are forgotten after 48 h.
+- Needs one restart of the worker to load. KILL_SWITCH stays (live OFF). Watch `logs/local_early-watch.log` for `[trends] N terms`.
+- Measured, not trusted: confirmations are logged in early_log, so the 24 h report shows if `narrative` / `narrative_first` coins really run more often.

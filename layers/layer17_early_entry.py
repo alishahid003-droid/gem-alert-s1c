@@ -109,6 +109,8 @@ class EarlyTracker:
         self.trusted_fn = trusted_fn or (lambda w: False)
         self.blacklist_fn = blacklist_fn or (lambda w: False)
         self.hot_terms_fn = hot_terms_fn or (lambda: set())
+        self.claim_fn = None               # claim_fn(term, mint) -> True if this is the FIRST coin to match a trending phrase
+        self._phr_cache = (None, ())
         self.stats = {"created": 0, "tracked": 0, "skipped": 0, "decisions": 0}
 
     # ------------------------------------------------------------------ intake
@@ -208,6 +210,22 @@ class EarlyTracker:
             words = {w for w in (r.symbol + " " + r.name).lower().replace("-", " ").split() if len(w) >= 3}
             if (r.symbol or "").lower() in terms or words & terms:
                 out.append("narrative")
+            # trending PHRASES (e.g. a viral person's full name) match even when written as one word, and the first coin wins "narrative_first"
+            sq = "".join(ch for ch in ((r.symbol or "") + (r.name or "")).lower() if ch.isalnum())
+            if sq:
+                if self._phr_cache[0] is not terms:
+                    ph = tuple((t, t.replace(" ", "")) for t in terms if " " in t and len(t) >= 7)
+                    self._phr_cache = (terms, ph)
+                for t, tsq in self._phr_cache[1]:
+                    if tsq in sq:
+                        if "narrative" not in out:
+                            out.append("narrative")
+                        try:
+                            if self.claim_fn and self.claim_fn(t, r.mint):
+                                out.append("narrative_first")
+                        except Exception:  # noqa: BLE001
+                            pass
+                        break
         return out
 
     def block_reason(self, r: Rec) -> Optional[str]:

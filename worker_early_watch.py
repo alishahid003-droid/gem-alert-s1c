@@ -86,7 +86,24 @@ def hot_terms() -> set:
     return _cached("hot", 60, fetch) or set()
 
 
+def claim_trend_term(term: str, mint: str) -> bool:
+    """True only for the first coin that ever matched this trending phrase (state key trend_first_v1)."""
+    rec = state.get_value("trend_first_v1")
+    rec = rec if isinstance(rec, dict) else {}
+    if term in rec:
+        return rec[term] == mint
+    rec[term] = mint
+    state.set_value("trend_first_v1", rec)
+    return True
+
+
 def make_tracker() -> EarlyTracker:
+    t = _make_tracker()
+    t.claim_fn = claim_trend_term
+    return t
+
+
+def _make_tracker() -> EarlyTracker:
     return EarlyTracker(dev_list=load_dev_list(), smart_fn=smart_wallets,
                         trusted_fn=state.is_deployer_trusted, blacklist_fn=state.is_deployer_blacklisted,
                         hot_terms_fn=hot_terms)
@@ -391,6 +408,19 @@ async def main_async():
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
 
+    async def trend_refresher():
+        """Every 2 min: pull the free trend feeds (Google Trends, Reddit, Wikipedia) into the hot-terms list."""
+        import trend_feeds
+        while True:
+            try:
+                n, notes = await loop.run_in_executor(None, trend_feeds.refresh, state)
+                counters["trend_terms"] = n
+                if notes:
+                    print(f"[trends] {n} terms; issues: {', '.join(notes[:4])}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(int(os.environ.get("TREND_REFRESH_S", "120")))
+
     async def live_guard():
         while True:
             await asyncio.sleep(8)
@@ -419,7 +449,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()

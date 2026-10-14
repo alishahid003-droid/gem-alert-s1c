@@ -204,3 +204,33 @@ def test_viral_meme_and_movie_names_count_as_famous():
     for nm in ("Elon Beast", "Moo Deng", "Pikachu Coin", "Deadpool", "Messi Cat", "Labubu"):
         assert e._famous_rx().search(nm), nm
     assert not e._famous_rx().search("Zorblax Token")
+
+
+def test_trend_feed_parsing_and_first_coin_claim():
+    import trend_feeds as tf
+    from layers import layer17_early_entry as e
+    assert tf.parse_google_rss("<rss><channel><item><title>John Phil</title></item></channel></rss>") == ["John Phil"]
+    assert tf.parse_reddit('{"data":{"children":[{"data":{"title":"Moo Deng goes viral again"}}]}}') == ["Moo Deng"]
+    terms = tf.terms_from_titles(["John Phil"])
+    assert "john phil" in terms and "johnphil" in terms
+    t = e.EarlyTracker(hot_terms_fn=lambda: set(terms))
+    claimed = {}
+    t.claim_fn = lambda term, mint: claimed.setdefault(term, mint) == mint
+    import time
+    r1 = e.Rec("M1", "JOHNPHIL", "John Phil Coin", "c", time.time(), 0, 1, 30)
+    r2 = e.Rec("M2", "PHILJOHN2", "johnphil again", "c", time.time(), 0, 1, 30)
+    import time as _t
+    c1, c2 = t.confirmations(r1, _t.time()), t.confirmations(r2, _t.time())
+    assert "narrative" in c1 and "narrative_first" in c1
+    assert "narrative" in c2 and "narrative_first" not in c2
+    assert fast_lane.score({"confirmations": ["narrative", "narrative_first"], "fb": 50, "fs": 10, "mcap_sol": 35}) >= 5
+
+
+def test_trend_refresh_writes_state_without_network(monkeypatch):
+    import trend_feeds as tf
+    store = {}
+    class S:
+        get_value = staticmethod(lambda k: store.get(k))
+        set_value = staticmethod(lambda k, v: store.__setitem__(k, v))
+    n, notes = tf.refresh(S, now=1000.0, fetch=lambda now: ({"google": ["Moo Deng"], "reddit": [], "wiki": ["Taylor Swift"]}, ["x"]))
+    assert n >= 4 and "moo deng" in store["radar_hot_terms"]["terms"] and store["trend_terms_v1"]["moo deng"]["src"] == ["google"]
