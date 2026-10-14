@@ -8,6 +8,8 @@ git pull
 echo === Stopping old copies ===
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'worker_fast_watch|run_fast_watch|worker_early_watch|local_runner|dashboard\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 timeout /t 3 /nobreak > nul
+if exist KILL_SWITCH del /f /q KILL_SWITCH
+echo === Live safety file cleared; fixed code is now the only code running ===
 echo === Starting fast watcher ===
 start "GemAlert FastWatch" /min cmd /c "%~dp0run_fast_watch.bat"
 echo === Starting cycle supervisor ===
