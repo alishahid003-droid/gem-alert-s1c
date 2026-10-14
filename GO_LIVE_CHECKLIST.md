@@ -150,3 +150,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Measured, not trusted: confirmations are logged in early_log, so the 24 h report shows if `narrative` / `narrative_first` coins really run more often.
 
 - 1G update (18:15 PKT): sources now also Bluesky + Mastodon trending, X (Twitter) trends via trends24 mirror, TikTok Creative Center hashtags (best effort). Instagram / Facebook have no public trend feed: their trends show up through Google Trends / X / TikTok. Trend terms live in state key `trend_terms_v1` (separate from the old Radar's `radar_hot_terms`; the worker reads both). Started by `start_local_mode.bat` through local_runner -> worker_early_watch.py; `e2e_test.py` is unrelated. Check log lines `[trends] N terms; issues: ...` to see which feeds refuse.
+
+## 1H. Data is split by version (14 Oct, 18:45 PKT)
+- Every worker start now writes a `{"t":"run","code":hash,"env":hash,"live":bool}` row to early_log, and `collect_report.py` also finds every past restart in logs/local_early-watch.log (25 so far) and prints a BY VERSION table so mixed-version data is never read as one blob.
+- Fixed a report flaw: coins younger than 65 min (outcome checks not in yet) are no longer counted as dead.
+- First clean read (1,230 coins, 4 versions): about 3% reach 2x in every version; new-ladder mean about x0.74-0.82 in each; score>=5 (36 coins) mean x0.88. Same story across versions = the result is stable, not a blend artefact. Still no edge.

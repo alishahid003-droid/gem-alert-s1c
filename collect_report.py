@@ -1,6 +1,6 @@
 """Collective report: every coin we watched (thousands), scored at an entry-like moment, versus what it did later.
 Read-only. Run:  python collect_report.py   -> prints and writes COLLECT_REPORT.txt
-Entry-like moment = first price snapshot with age 30-130 s and a real market cap. Confirmations are approximated from snapshot
+Coins younger than 65 min are skipped (outcome not in yet). Entry-like moment = first price snapshot with age 30-130 s and a real market cap. Confirmations are approximated from snapshot
 numbers (pressure: buys>=15 and buys>1.5x sells; velocity: volume>=$2500); famous name from the coin name."""
 import json, glob, collections, sys, time
 sys.path.insert(0, '.')
@@ -24,7 +24,10 @@ for r in rows:
         first[r['mint']] = r
 rx = _famous_rx()
 data = []
+NOW = time.time()
 for m, sn in first.items():
+    if NOW - sn['ts'] < 3900:      # younger than ~65 min: its 60-min price check has not happened yet, so do NOT count it as dead
+        continue
     e = sn['mc']
     path = [(oc.get(m, {}).get(k) / e if oc.get(m, {}).get(k) else None) for k in (5, 15, 60)]
     conf = []
@@ -42,6 +45,42 @@ def stat(rows_):
     n = len(rows_)
     pk = [max([v for v in p if v] or [0]) for _, p, _, _ in rows_]
     return n, 100 * sum(x >= 1.4 for x in pk) / n, 100 * sum(x >= 2 for x in pk) / n, 100 * sum(x >= 5 for x in pk) / n, 100 * sum(x == 0 for x in pk) / n
+# ---- version epochs: one per worker start (parsed from the log) so mixed-version data can be compared -------------
+import re as _re, os as _os
+epochs = []
+try:
+    for line in open('logs/local_early-watch.log', errors='ignore'):
+        m_ = _re.match(r'=== (\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d) early-watch start ===', line)
+        if m_:
+            y, mo, d_, h_, mi, se = map(int, m_.groups())
+            epochs.append(time.mktime((y, mo, d_, h_, mi, se, 0, 0, 0)) - time.timezone - 5 * 3600 if False else
+                          __import__('calendar').timegm((y, mo, d_, h_, mi, se)) - 5 * 3600)   # PC clock is PKT (UTC+5)
+except OSError:
+    pass
+for r_ in rows:
+    if r_.get('t') == 'run': epochs.append(r_['ts'])
+epochs = sorted(set(round(e) for e in epochs))
+def epoch_of(ts):
+    k = -1
+    for i, e in enumerate(epochs):
+        if ts >= e: k = i
+    return k
+P(f'worker restarts found: {len(epochs)}  (each = a possibly different code/settings version)')
+ep = collections.defaultdict(list)
+for s_, p_, d_, m_ in data:
+    ep[epoch_of(first[m_]['ts'])].append((s_, p_, d_, m_))
+P('\nBY VERSION (restart time PKT)   coins  reach2x  mean x(new ladder)  | score>=5: coins  reach2x')
+lad0, stop0, trail0, ta0 = RULES['NEW3 1.4x/2.5x/6x/15x stop.55 trail.55@1.4x']
+for k in sorted(ep):
+    c = ep[k]
+    if len(c) < 20: continue
+    st = time.strftime('%d %H:%M', time.gmtime(epochs[k] + 5 * 3600)) if k >= 0 else 'before first'
+    n_, a_, b_, cc_, d2_ = stat(c)
+    r_ = [sim(x[1], lad0, stop0, trail0, ta0) if any(x[1]) else 0.0 for x in c]
+    hi = [x for x in c if x[0] >= 5]
+    hs = f'{len(hi):4d}  {stat(hi)[2]:5.0f}%' if len(hi) >= 3 else '   -     -'
+    P(f'  {st:20s}            {n_:5d}   {b_:5.0f}%      x{sum(r_)/n_:4.2f}              | {hs}')
+P('If "reach2x" and "mean x" swing a lot between versions, the pooled table below is a blend and should not be trusted alone.')
 P('\nscore   n    reach1.4x  reach2x  reach5x   dead/unpriced')
 by = collections.defaultdict(list)
 for x in data: by[x[0]].append(x)

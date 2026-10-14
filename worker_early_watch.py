@@ -275,6 +275,20 @@ async def main_async():
     global _RECORDER
     from early_recorder import Recorder
     _RECORDER = recorder = Recorder()
+    try:                                  # version stamp: which code + settings produced the data that follows
+        import hashlib
+        h = hashlib.sha1()
+        for f in ("worker_early_watch.py", "layers/layer17_early_entry.py", "layers/fast_lane.py", "executor/paper_ledger.py",
+                  "executor/pumpportal_exec.py", "trend_feeds.py", "early_recorder.py"):
+            try:
+                h.update(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), f), "rb").read())
+            except OSError:
+                pass
+        env = {k: v for k, v in sorted(os.environ.items()) if k.startswith(("EARLY_", "FAST_", "LIVE_", "TREND_")) or k in ("EXECUTION_ENABLED",)}
+        recorder.on_run({"code": h.hexdigest()[:10], "env": hashlib.sha1(repr(env).encode()).hexdigest()[:8],
+                         "live": os.path.exists("KILL_SWITCH") is False and os.environ.get("EXECUTION_ENABLED", "") == "true"})
+    except Exception:  # noqa: BLE001
+        pass
     from early_creators import Creators
     creators = Creators()
     tracker.creator_fn = creators.repeat_grad

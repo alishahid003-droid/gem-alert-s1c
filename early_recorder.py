@@ -50,6 +50,10 @@ class Recorder:
         self._write({"t": "decision", "ts": round(now or time.time(), 1), **{k: d.get(k) for k in (
             "mint", "lane", "lanes", "age_s", "mcap_sol", "buyers", "buys", "sells", "confirmations", "fb", "fs", "fv")}}, now)
 
+    def on_run(self, info: dict, now: Optional[float] = None):
+        """Version stamp written at every worker start: later analysis splits the data by code/settings version."""
+        self._write({"t": "run", **info}, now)
+
     def on_snap(self, mint: str, age_s: float, buys: int, sells: int, vol: float, mc_usd: float, now: Optional[float] = None):
         """Free DexScreener 5-min snapshot of a young coin (14 Oct): lets us learn which early profiles become winners."""
         self._write({"t": "snap", "ts": round(now or time.time(), 1), "mint": mint, "age": round(age_s, 1),
