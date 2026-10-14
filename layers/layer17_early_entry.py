@@ -43,7 +43,7 @@ def _f(name: str, default: float) -> float:
 class Rec:
     __slots__ = ("mint", "symbol", "name", "creator", "created", "dev_tokens", "init_sol", "mcap_sol0", "mcap_sol",
                  "buyers", "buys", "sells", "buy_sol", "sell_sol", "creator_sold", "smart", "decided", "trades",
-                 "fast", "last_ts", "peak_sol")
+                 "fast", "last_ts", "peak_sol", "free_buys", "free_sells", "free_vol", "free_ts")
 
     def __init__(self, mint, symbol, name, creator, created, dev_tokens, init_sol, mcap_sol):
         self.mint, self.symbol, self.name, self.creator, self.created = mint, symbol, name, creator, created
@@ -57,6 +57,9 @@ class Rec:
         self.fast: Set[str] = set()          # wallets that bought within the first seconds (bundle/sniper signature)
         self.last_ts = created
         self.peak_sol = mcap_sol
+        self.free_buys = self.free_sells = 0     # free DexScreener txn counts (14 Oct): the metered trade feed only watches dev coins
+        self.free_vol = 0.0
+        self.free_ts = 0.0
 
 
 def _num(x) -> float:
@@ -133,6 +136,20 @@ class EarlyTracker:
                 r.creator_sold += _num(e.get("tokenAmount"))
         return self.evaluate(r.mint, now)
 
+    def on_free(self, mint: str, buys: int, sells: int, vol_usd: float, mcap_sol: Optional[float] = None,
+                now: Optional[float] = None) -> Optional[dict]:
+        """Free-data path (DexScreener 5-minute txn counts). Gives non-dev coins buying-pressure and volume
+        confirmations without the paid trade feed. Returns a decision the first time the coin qualifies."""
+        now = now if now is not None else time.time()
+        r = self.recs.get(mint)
+        if r is None or r.decided:
+            return None
+        r.free_buys, r.free_sells, r.free_vol, r.free_ts = int(buys or 0), int(sells or 0), float(vol_usd or 0), now
+        if mcap_sol and mcap_sol > 0:
+            r.mcap_sol = mcap_sol
+            r.peak_sol = max(r.peak_sol, mcap_sol)
+        return self.evaluate(mint, now)
+
     # --------------------------------------------------------------- decisions
     def confirmations(self, r: Rec, now: float) -> List[str]:
         out = []
@@ -151,6 +168,12 @@ class EarlyTracker:
             out.append("velocity")
         if r.buys >= int(_f("EARLY_MIN_BUYS", 12)) and r.buys / max(r.sells, 1) >= _f("EARLY_MIN_BUY_SELL", 2.5):
             out.append("pressure")
+        if r.free_ts:
+            if r.free_buys >= int(_f("EARLY_FREE_MIN_BUYS", 20)) and \
+                    r.free_buys / max(r.free_sells, 1) >= _f("EARLY_FREE_MIN_BUY_SELL", 1.6):
+                out.append("pressure_free")
+            if r.free_vol >= _f("EARLY_FREE_MIN_VOL_USD", 2500):
+                out.append("velocity_free")
         terms = self.hot_terms_fn()
         if terms:
             words = {w for w in (r.symbol + " " + r.name).lower().replace("-", " ").split() if len(w) >= 3}
@@ -171,6 +194,8 @@ class EarlyTracker:
             return f"bundled launch ({len(r.fast)} wallets bought in the first seconds)"
         if r.trades >= 10 and r.sells > r.buys * _f("EARLY_MAX_SELL_RATIO", 0.8):
             return "sell pressure"
+        if r.free_ts and r.free_buys + r.free_sells >= 10 and r.free_sells > r.free_buys * _f("EARLY_MAX_SELL_RATIO", 0.8):
+            return "sell pressure (free data)"
         return None
 
     def evaluate(self, mint: str, now: Optional[float] = None) -> Optional[dict]:
@@ -185,9 +210,19 @@ class EarlyTracker:
         if why_block:
             r.decided = True
             return None
+        # PRICE SANITY (14 Oct): a brand-new coin cannot be 8x its create print or above a hard cap within seconds.
+        # XTO showed 240,253 SOL (~$36M) at 1.4s old; the old code entered it at that bogus print (dev_list had no mcap cap).
+        _cap = _f("EARLY_SANITY_MAX_MCAP_SOL", 300)
+        _jump = _f("EARLY_SANITY_MAX_JUMP", 8)
+        if r.mcap_sol > _cap or (r.mcap_sol0 and r.mcap_sol > r.mcap_sol0 * _jump + 10):
+            r.decided = True
+            self.stats["skipped"] += 1
+            self.stats["insane_price"] = self.stats.get("insane_price", 0) + 1
+            return None
         conf = self.confirmations(r, now)
         # thin = too few independent buyers seen. Then ONLY a dev-list launch may enter (needs no trade feed).
-        thin = len(r.buyers) < int(_f("EARLY_MIN_BUYERS_ANY", 4))
+        thin = len(r.buyers) < int(_f("EARLY_MIN_BUYERS_ANY", 4)) and \
+            not (r.free_ts and r.free_buys >= int(_f("EARLY_FREE_MIN_BUYS", 20)))
         dev_min = int(_f("EARLY_DEV_MIN_BUYERS", 0)) if self.feed_off else int(_f("EARLY_MIN_BUYERS_ANY", 4))
         devish = "dev_list" in conf or "repeat_grad" in conf
         if thin and not (devish and len(r.buyers) >= dev_min):
@@ -218,7 +253,7 @@ class EarlyTracker:
         return {"lane": lane, "lanes": lanes, "mint": r.mint, "symbol": r.symbol, "name": r.name, "creator": r.creator,
                 "age_s": round(age, 1), "mcap_sol": round(r.mcap_sol, 2), "entry_mcap_sol": round(r.mcap_sol, 2),
                 "buyers": len(r.buyers), "buys": r.buys, "sells": r.sells, "confirmations": conf,
-                "smart": sorted(r.smart)[:3], "potential": "100x+" if "core2" in lanes else "10x-50x" if "core1" in lanes
+                "smart": sorted(r.smart)[:3], "uses_free": any(c.endswith("_free") for c in conf), "potential": "100x+" if "core2" in lanes else "10x-50x" if "core1" in lanes
                 else "2x-10x" if "compound" in lanes else "copy"}
 
     # ------------------------------------------------------------------ upkeep

@@ -71,7 +71,15 @@ def _post(data: dict) -> dict:
         j = r.json()
     except ValueError:
         j = {"raw": r.text[:200]}
-    ok = r.status_code == 200 and not (isinstance(j, dict) and j.get("errors"))
+    # 14 Oct fix: only count as done when PumpPortal returns a tx signature (a 200 with an error body was being counted as a fill)
+    ok = (r.status_code == 200 and isinstance(j, dict) and bool(j.get("signature"))
+          and not j.get("errors") and not j.get("error"))
+    try:  # raw response log (no key) so we can see exactly what PumpPortal said
+        import time as _t
+        with open(os.path.join("logs", "live_exec.log"), "a", encoding="utf-8") as _f:
+            _f.write(f"{_t.strftime('%Y-%m-%d %H:%M:%S')} {data.get('action')} {str(data.get('mint'))[:10]} status={r.status_code} ok={ok} resp={str(j)[:300]}\n")
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": ok, "status": r.status_code, "resp": j}
 
 
@@ -79,7 +87,7 @@ def buy(mint: str, usd: float, sol_usd: float) -> dict:
     sol = round(usd / max(sol_usd, 1e-6), 4)
     return _post({"action": "buy", "mint": mint, "amount": sol, "denominatedInSol": "true",
                   "slippage": int(_env_f("LIVE_SLIPPAGE_PCT", 25)),
-                  "priorityFee": _env_f("LIVE_PRIORITY_FEE_SOL", 0.0005), "pool": "pump"})
+                  "priorityFee": _env_f("LIVE_PRIORITY_FEE_SOL", 0.0005), "pool": "auto"})
 
 
 def sell(mint: str, pct: float) -> dict:
@@ -87,4 +95,4 @@ def sell(mint: str, pct: float) -> dict:
         return {"ok": False, "reason": "no key"}
     return _post({"action": "sell", "mint": mint, "amount": f"{max(1, min(100, round(pct)))}%",
                   "denominatedInSol": "false", "slippage": int(_env_f("LIVE_SLIPPAGE_PCT", 25)),
-                  "priorityFee": _env_f("LIVE_PRIORITY_FEE_SOL", 0.0005), "pool": "pump"})
+                  "priorityFee": _env_f("LIVE_PRIORITY_FEE_SOL", 0.0005), "pool": "auto"})

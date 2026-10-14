@@ -62,6 +62,7 @@ def test_live_gating_and_kill_switch(monkeypatch):
     monkeypatch.setenv("EXECUTION_ENABLED", "true")
     monkeypatch.setenv("PUMPPORTAL_API_KEY", "k")
     monkeypatch.setenv("EARLY_LIVE_LANES", "core2")
+    monkeypatch.setenv("LIVE_MAX_STAKE_USD", "5")
     ok, why, stake = pumpportal_exec.allowed("core2", 20)
     assert ok and stake == 5.0                     # capped by LIVE_MAX_STAKE_USD default
     assert pumpportal_exec.allowed("core1", 20)[0] is False

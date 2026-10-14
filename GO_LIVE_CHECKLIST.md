@@ -12,6 +12,16 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 - Helius key is in .env (SOLANA_RPC_URL, verified format). PumpPortal key NOT yet added: metered-feed guard built first (see section 3). Needs one restart (kills the e2e loop - restart it after).
 - e2e_test.py has no unit tests yet (checked by hand with a mocked HTTP call).
 
+## 1B. 14 OCT (daytime) - WHAT BROKE OVERNIGHT AND WHAT WAS FIXED
+- Live buy "worked" only in the ledger: executor counted HTTP 200 with an error body as filled. Wallet showed no buy. FIXED: `executor/pumpportal_exec.py` now needs a tx `signature`, logs every reply to `logs/live_exec.log`, pool = "auto" (was "pump", fails on graduated coins). Backup: `.SAFE_BACKUP_20261014`.
+- MANUAL TEST PASSED (09:13 PKT, `live_test.py`): buy 0.00438 SOL of RUSO then sell all, both Finalized/Success on Solscan, cost ~$0.27 total. Order path proven; automatic buy/stop-loss sell NOT yet proven live.
+- Stake bug: paper stake rounded to $0 so live buy never fired -> patched in `worker_early_watch.py` (kept).
+- PumpPortal trade feed dropped with HTTP 502 at ~03:15 PKT; restart reconnects.
+- XTO bogus price ($36M at 1.4 s old, dev_list had no mcap cap) -> NEW price sanity check in `layers/layer17_early_entry.py` (EARLY_SANITY_MAX_MCAP_SOL=300, EARLY_SANITY_MAX_JUMP=8). dev_list stays paper-only (restore_safe.bat set live to sprint only).
+- WHY SPRINT/CORE NEVER FIRED: the paid trade feed only watches dev-list/repeat-grad coins, so every other coin had no buy/sell data and could never reach 2 confirmations. NEW: free DexScreener 5-min buy/sell + volume confirmations (`pressure_free`, `velocity_free`) via `worker_early_watch.py` free_confirmer (env EARLY_FREE_CONFIRM = paper (default) / live / off). Entries that use them are PAPER ONLY until proven. Tests added in `tests/test_early_entry.py`.
+- TO DO: restart, then watch `free_polls`/`free_entries`/`insane` in the early-watch heartbeat; after 30+ free-confirmed entries compare outcomes vs the no-confirmation baseline (early_log) before setting EARLY_FREE_CONFIRM=live.
+- Known test noise: `test_stream_client_reconnects_and_resubscribes` and `test_live_gating_and_kill_switch` fail only because .env sets an API key and LIVE_MAX_STAKE_USD=8.
+
 ## 1A. LIVE NIGHT TEST (13-14 Oct) - REVIEW THIS FIRST IN THE MORNING
 - LIVE MODE IS ON in a tiny capped form: PumpPortal wallet ~$21 SOL. EXECUTION_ENABLED=true, EARLY_LIVE_LANES=sprint,dev_list, LIVE_MAX_STAKE_USD=5, LIVE_MAX_OPEN=3, LIVE_DAILY_LOSS_USD=20. EXECUTION_SOLANA_PRIVATE_KEY stays commented out.
 - TEMP NIGHT TUNE in .env: EARLY_MIN_BUYERS=6, EARLY_MIN_BUYER_RATE=0.04, EARLY_MIN_BUYS=8, EARLY_MIN_BUY_SELL=2.0. Also EARLY_MAX_ENTRIES_PER_DAY=300, PUMPPORTAL_MAX_WATCHED=40, PUMPPORTAL_MAX_MSG_PER_DAY=20000.

@@ -116,12 +116,21 @@ def act(decision: dict, send=None, now=None) -> dict:
     if _RECORDER:
         _RECORDER.on_decision(decision, now)
     live_done = []
+    # decisions that lean on the free DexScreener confirmations stay PAPER until Ali sets EARLY_FREE_CONFIRM=live
+    free_paper_only = bool(decision.get("uses_free")) and os.environ.get("EARLY_FREE_CONFIRM", "paper").strip().lower() != "live"
     for lane in decision.get("lanes") or [decision["lane"]]:
         conf = decision.get("confirmations") or []
         strong = [c for c in conf if c not in ("dev_list", "repeat_grad")]     # dev_list lane: 0/69 graduated (Oct 13)
         tier = "conviction" if len(strong) >= 4 else "standard" if len(strong) >= 2 else "probe"
         ok, why = books.can_open(lane, strong=len(strong) >= 4)
         stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
+        if ok and not stake and not free_paper_only:          # NIGHT TUNE 14 Oct: paper book stake can round to 0; a live lane still gets its capped live stake
+            try:
+                from executor import pumpportal_exec as _px
+                if _px.lane_live(lane):
+                    stake = float(os.environ.get('LIVE_MAX_STAKE_USD', '0') or 0)
+            except Exception:  # noqa: BLE001
+                pass
         if not stake:
             refused.append(f"{lane}: {why}")
             continue
@@ -130,7 +139,9 @@ def act(decision: dict, send=None, now=None) -> dict:
         try:
             from executor import pumpportal_exec
             l_ok, l_why, l_stake = pumpportal_exec.allowed(lane, stake)
-            if l_ok and l_stake > 0:
+            if free_paper_only:
+                pass                      # free-data confirmation not proven yet: paper only
+            elif l_ok and l_stake > 0:
                 res = pumpportal_exec.buy(mint, l_stake, usd_price)
                 if res.get("ok"):
                     is_live, stake = True, l_stake
@@ -244,7 +255,9 @@ async def main_async():
                         f"reconnects={snap['reconnects']}" + (f" err={snap['error']}" if snap["error"] else "")
                         + (" TRADE-FEED-OFF(need PUMPPORTAL_API_KEY)" if stream.trades_blocked else "")
                         + (f" trade_msgs={stream.trade_msgs} est_spend={stream.spend_est_sol}SOL" if stream.trade_url else "")
-                        + (" BUDGET-REACHED" if stream.budget_exhausted else ""))
+                        + (" BUDGET-REACHED" if stream.budget_exhausted else "")
+                        + f" free_polls={counters.get('free_polls', 0)} free_entries={counters.get('free_entries', 0)}"
+                        + f" insane={tracker.stats.get('insane_price', 0)}")
                 state.record_runner_heartbeat("early-watch", "local-pc", note)
                 print(f"[early-watch] {note}", flush=True)
             except Exception:  # noqa: BLE001
@@ -281,6 +294,44 @@ async def main_async():
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
 
+    async def free_confirmer():
+        """Free confirmations (14 Oct): the paid trade feed only watches dev coins, so every other coin had zero buy data
+        and sprint/core could never fire. Every few seconds, ask DexScreener (free, batched) for the 5-minute buy/sell
+        counts and volume of young tracked coins and feed them to the tracker. Entries made this way are PAPER only."""
+        from layers.layer14_revival import fetch_dexscreener_batch
+        if os.environ.get("EARLY_FREE_CONFIRM", "paper").strip().lower() == "off":
+            return
+        poll = float(os.environ.get("EARLY_FREE_POLL_S", "12"))
+        amin = float(os.environ.get("EARLY_FREE_MIN_AGE_S", "30"))
+        amax = float(os.environ.get("EARLY_FREE_MAX_AGE_S", "600"))
+        cap = int(float(os.environ.get("EARLY_FREE_MAX_PER_CYCLE", "150")))
+        while True:
+            await asyncio.sleep(poll)
+            try:
+                now = time.time()
+                cands = sorted((r for r in tracker.recs.values() if not r.decided and amin <= now - r.created <= amax),
+                               key=lambda r: r.created, reverse=True)[:cap]
+                if not cands:
+                    continue
+                pairs = await loop.run_in_executor(None, lambda: fetch_dexscreener_batch("solana", [r.mint for r in cands]))
+                px = sol_usd()
+                counters["free_polls"] = counters.get("free_polls", 0) + 1
+                for r in cands:
+                    pair = pairs.get(r.mint)
+                    if not pair:
+                        continue
+                    m5 = (pair.get("txns") or {}).get("m5") or {}
+                    vol = float(((pair.get("volume") or {}).get("m5")) or 0)
+                    mc_usd = float(pair.get("marketCap") or pair.get("fdv") or 0)
+                    dec = tracker.on_free(r.mint, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol,
+                                          (mc_usd / px) if (mc_usd and px) else None)
+                    if dec:
+                        counters["entries"] += 1
+                        counters["free_entries"] = counters.get("free_entries", 0) + 1
+                        loop.run_in_executor(None, act, dec)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
     health = {"alerted": 0.0}
 
     async def watchdog():
@@ -297,7 +348,8 @@ async def main_async():
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
 
-    tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog())]
+    tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
+             asyncio.create_task(free_confirmer())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()

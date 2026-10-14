@@ -210,3 +210,54 @@ def test_serial_launcher_is_not_tracked():
     t.launches_fn = lambda c: 45 if c == "spam" else 1
     assert t.on_create(create("S1", creator="spam"), now=T0) is False
     assert t.on_create(create("S2", creator="newdev"), now=T0) is True
+
+
+def test_price_sanity_rejects_impossible_jump_and_cap():
+    # XTO case: created at ~28 SOL, a trade prints 240,253 SOL 1.4 s later -> must NOT enter, even for a dev-list creator
+    t = EarlyTracker(dev_list={"dev1"})
+    t.on_create(create("X1", mc=28.0), now=T0)
+    for i in range(5):
+        dec = t.on_trade(buy("X1", f"w{i}", 1.0, 240253.0), now=T0 + 1.4 + i)
+    assert dec is None and t.stats.get("insane_price") == 1 and t.recs["X1"].decided
+
+
+def test_price_sanity_allows_normal_dev_list_entry():
+    t = EarlyTracker(dev_list={"dev1"})
+    t.on_create(create("N1", mc=30.0), now=T0)
+    dec = None
+    for i in range(5):
+        dec = t.on_trade(buy("N1", f"w{i}", 1.0, 45.0), now=T0 + 2 + i) or dec
+    assert dec and dec["lane"] == "dev_list"
+
+
+def test_free_data_confirms_sprint_without_trade_feed():
+    t = EarlyTracker()
+    t.on_create(create("F1", mc=30.0), now=T0)
+    assert t.on_free("F1", buys=8, sells=2, vol_usd=900, mcap_sol=35.0, now=T0 + 45) is None      # too little: no entry
+    dec = t.on_free("F1", buys=30, sells=8, vol_usd=4000, mcap_sol=40.0, now=T0 + 60)
+    assert dec and dec["uses_free"] and "pressure_free" in dec["confirmations"] and "velocity_free" in dec["confirmations"]
+    assert "sprint" in dec["lanes"] and ("core1" in dec["lanes"] or "core2" in dec["lanes"])
+
+
+def test_free_data_sell_pressure_and_insane_price_block():
+    t = EarlyTracker()
+    t.on_create(create("F2", mc=30.0), now=T0)
+    assert t.on_free("F2", buys=15, sells=14, vol_usd=9000, mcap_sol=40.0, now=T0 + 60) is None   # sellers keep up: blocked
+    assert t.recs["F2"].decided
+    t.on_create(create("F3", mc=30.0), now=T0)
+    assert t.on_free("F3", buys=60, sells=5, vol_usd=9000, mcap_sol=9000.0, now=T0 + 60) is None   # absurd mcap: sanity block
+    assert t.stats.get("insane_price", 0) >= 1
+
+
+def test_free_confirmed_entries_stay_paper_even_on_a_live_lane(monkeypatch):
+    monkeypatch.setenv("EXECUTION_ENABLED", "true")
+    monkeypatch.setenv("EARLY_LIVE_LANES", "sprint,core1,core2")
+    monkeypatch.setenv("PUMPPORTAL_API_KEY", "x")
+    monkeypatch.delenv("EARLY_FREE_CONFIRM", raising=False)
+    from executor import pumpportal_exec
+    monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: (_ for _ in ()).throw(AssertionError("live buy must not fire")))
+    dec = {"lane": "core1", "lanes": ["core1", "sprint"], "mint": "MintF", "symbol": "FFF", "name": "F", "creator": "c",
+           "age_s": 60.0, "mcap_sol": 40.0, "entry_mcap_sol": 40.0, "buyers": 0, "buys": 0, "sells": 0,
+           "confirmations": ["pressure_free", "velocity_free"], "smart": [], "uses_free": True, "potential": "10x-50x"}
+    out = w.act(dec, send=lambda m: None, now=T0)
+    assert "opened" in out and not any("live" in x for x in out.get("refused", []))

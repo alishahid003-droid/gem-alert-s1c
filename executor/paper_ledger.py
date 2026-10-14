@@ -223,11 +223,11 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
 
 
 EARLY_RULES = {
-    "sprint": ({2: 0.25, 4: 0.20, 10: 0.15}, 0.35, 0.40),  # NIGHT TUNE 14 Oct: 40% runner
+    "sprint": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
     # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
     "core2": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
     "core1": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
-    "dev_list": ({2: 0.25, 4: 0.20, 10: 0.15}, 0.55, 0.60),  # NIGHT TUNE 14 Oct: 40% runner
+    "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
     "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.70),
     "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.70),
 }
