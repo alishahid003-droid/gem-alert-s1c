@@ -63,7 +63,8 @@ class Recorder:
         """Trade-feed summary of a tracked coin when it leaves the tracker."""
         self._write({"t": "final", "ts": round(now or time.time(), 1), "mint": rec.mint, "buyers": len(rec.buyers),
                      "buys": rec.buys, "sells": rec.sells, "fast": len(rec.fast), "peak_sol": rec.peak_sol,
-                     "last_sol": rec.mcap_sol, "creator_sold": rec.creator_sold}, now)
+                     "last_sol": rec.mcap_sol, "creator_sold": rec.creator_sold,
+                     "early_buyers": list(rec.buyers)[:12], "max_buy": round(getattr(rec, "max_buy", 0.0), 2)}, now)
 
     def due(self, now: Optional[float] = None, limit: int = 150) -> List[str]:
         now = now if now is not None else time.time()

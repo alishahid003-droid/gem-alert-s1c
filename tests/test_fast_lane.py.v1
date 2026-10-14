@@ -1,0 +1,90 @@
+"""FAST module (14 Oct 2026): one coin -> one lane, own gate, own exits, no live without the switch."""
+import pytest
+
+import state
+import worker_early_watch as w
+from executor import paper_ledger
+from layers import fast_lane
+
+T0 = 1_800_000_000.0
+
+
+@pytest.fixture(autouse=True)
+def _iso(monkeypatch, tmp_path):
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "s.json"), raising=False)
+    w._cache.clear()
+    monkeypatch.setenv("SOL_USD", "150")
+
+
+def _dec(mint, age, mcap, conf=("pressure_free", "velocity_free")):
+    return {"lane": "core2", "lanes": ["core2", "sprint", "core1"], "mint": mint, "symbol": mint[:3], "name": mint, "creator": "c",
+            "age_s": age, "mcap_sol": mcap, "entry_mcap_sol": mcap, "buyers": 0, "buys": 0, "sells": 0,
+            "confirmations": list(conf), "smart": [], "uses_free": True, "potential": "10x-50x"}
+
+
+def test_assignment_windows_one_lane_only():
+    assert fast_lane.assign({"age_s": 60, "entry_mcap_sol": 30}) == "fast_sprint"
+    assert fast_lane.assign({"age_s": 120, "entry_mcap_sol": 55}) == "fast_sprint"
+    assert fast_lane.assign({"age_s": 300, "entry_mcap_sol": 30}) == "fast_core"       # older -> core
+    assert fast_lane.assign({"age_s": 60, "entry_mcap_sol": 90}) == "fast_core"        # young but bigger -> core
+    assert fast_lane.assign({"age_s": 60, "entry_mcap_sol": 200}) is None
+    assert fast_lane.assign({"age_s": 1500, "entry_mcap_sol": 30}) is None
+
+
+def test_live_lane_mapping_only_sprint_can_be_live():
+    assert fast_lane.live_lane("fast_sprint") == "sprint"
+    assert fast_lane.live_lane("fast_core") != "sprint"
+
+
+def test_free_signal_opens_exactly_one_position_in_fast_module(monkeypatch):
+    monkeypatch.setenv("EXECUTION_ENABLED", "true")
+    monkeypatch.setenv("EARLY_LIVE_LANES", "sprint,core1,core2")
+    monkeypatch.setenv("PUMPPORTAL_API_KEY", "x")
+    monkeypatch.delenv("EARLY_FREE_CONFIRM", raising=False)
+    from executor import pumpportal_exec
+    monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: (_ for _ in ()).throw(AssertionError("live buy must not fire")))
+    out = w.act(_dec("MintFastA", 60.0, 40.0), send=lambda m: None, now=T0)
+    assert out["opened"] == ["fast_sprint"]
+    pos = [p for p in paper_ledger._open().values() if p["token"] == "MintFastA"]
+    assert len(pos) == 1 and pos[0]["module"] == "fast" and pos[0]["exit_profile"] == "fast_sprint"
+    assert pos[0]["usd"] == 5.0
+
+
+def test_fast_paper_capacity_refuses_without_burning_book_slots(monkeypatch):
+    monkeypatch.setenv("FAST_PAPER_MAX_OPEN", "1")
+    a = w.act(_dec("MintFastB", 60.0, 40.0), send=lambda m: None, now=T0)
+    b = w.act(_dec("MintFastC", 60.0, 41.0), send=lambda m: None, now=T0 + 1)
+    assert a["opened"] == ["fast_sprint"] and b["opened"] == [] and b["refused"]
+
+
+def test_decision_outside_windows_is_skipped():
+    assert w.act(_dec("MintFastD", 60.0, 300.0), send=lambda m: None, now=T0) == {"skipped": "outside fast windows"}
+
+
+def test_fast_off_switch_restores_old_multi_book_behaviour(monkeypatch):
+    monkeypatch.setenv("FAST_LANE", "off")
+    out = w.act(_dec("MintFastE", 60.0, 40.0), send=lambda m: None, now=T0)
+    assert "fast_sprint" not in (out.get("opened") or [])
+
+
+def test_fast_exit_profile_trails_from_1_4x_and_banks_early():
+    paper_ledger.open_paper("solana", "MintExit", "early_fast_sprint", "early_fast_sprint", 5.0, 1000.0, strategy="early",
+                            exit_profile="fast_sprint", module="fast", now=T0)
+    pos = paper_ledger._open()["early_fast_sprint:solana:MintExit"]
+    pos["peak_mcap"] = 1000.0
+    paper_ledger._manage_early(pos, 1500.0, T0 + 60)           # 1.5x: first slice (1.4x) sold, no stop
+    assert "1.4" in pos["rungs_fired"] and pos["remaining"] < 1.0
+    pos["peak_mcap"] = 1500.0
+    closed = paper_ledger._manage_early(pos, 1500.0 * 0.5, T0 + 120)   # drops to 0.75x of entry = 50% of peak -> trail exit
+    assert closed and pos["exit_type"] == "trailing_stop"
+
+
+def test_famous_name_is_an_extra_confirmation_and_can_be_switched_off(monkeypatch):
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker(dev_list=set(), creator_fn=lambda c: False, smart_fn=lambda: set(), hot_terms_fn=lambda: set(),
+                     trusted_fn=lambda c: False, blacklist_fn=lambda c: False) if False else None
+    from layers.layer17_early_entry import _famous_rx
+    assert _famous_rx().search("Trump Coin") and _famous_rx().search("ChatGPT")
+    assert not _famous_rx().search("Slopcore")
+    monkeypatch.setenv("EARLY_FAMOUS_NAMES", "off")
+    assert not _famous_rx().search("Trump Coin")

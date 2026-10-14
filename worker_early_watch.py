@@ -74,7 +74,9 @@ def smart_wallets() -> set:
     def fetch():
         from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
         return get_smart_money_roster()
-    return _cached("smart", 30, fetch) or set()
+    def fetch2():
+        return set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or [])
+    return _cached("smart", 30, fetch2) or set()
 
 
 def hot_terms() -> set:
@@ -102,9 +104,14 @@ def claim_trend_term(term: str, mint: str) -> bool:
     return True
 
 
+def good_devs_set() -> set:
+    return _cached("gooddevs", 60, lambda: set(state.get_value("good_devs_v1") or [])) or set()
+
+
 def make_tracker() -> EarlyTracker:
     t = _make_tracker()
     t.claim_fn = claim_trend_term
+    t.good_dev_fn = lambda c: c in good_devs_set()
     return t
 
 
@@ -311,7 +318,8 @@ async def main_async():
             if dec:
                 counters["entries"] += 1
                 loop.run_in_executor(None, act, dec)
-            if stream.trade_url and not (who in tracker.dev_list or creators.repeat_grad(who or "")):
+            if stream.trade_url and not (who in tracker.dev_list or creators.repeat_grad(who or "") or who in good_devs_set()
+                                         or any(m in tracker.confirmations(tracker.recs[e["mint"]], time.time()) for m in ("famous_name", "narrative", "narrative_first", "good_dev"))):
                 return None          # metered trade feed: watch only the lanes with a proven signal (repeat graduate / dev list)
             return [e["mint"]]
         if kind == "migrate" or (e.get("pool") and kind not in ("buy", "sell", "create")):
@@ -440,6 +448,18 @@ async def main_async():
                 traceback.print_exc()
             await asyncio.sleep(int(os.environ.get("TREND_REFRESH_S", "120")))
 
+    async def dev_wallet_refresher():
+        """Every 20 min: rebuild the good-dev and smart-wallet lists from our own logs (dev_rank.py)."""
+        import dev_rank
+        while True:
+            try:
+                nd, nw = await loop.run_in_executor(None, dev_rank.refresh, state)
+                counters["good_devs"], counters["smart_wallets"] = nd, nw
+                print(f"[dev_rank] good devs {nd}, smart wallets {nw}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(int(os.environ.get("DEV_RANK_REFRESH_S", "1200")))
+
     async def live_guard():
         while True:
             await asyncio.sleep(8)
@@ -468,7 +488,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()

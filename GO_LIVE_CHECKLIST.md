@@ -162,3 +162,11 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Paper streams (fast P&L since start): Sprint -$273.85 (283 closed, 55 wins), Core 2 -$308.60 (238 closed, 36 wins), Compound -$590.07 (455 closed, 78 wins), Core 3 2 open / 0 closed.
 - Live: no live buys since 15:33 PKT. KILL_SWITCH still in place. Wallet last known $17.5.
 - Fixed: run-row timestamp bug in early_recorder.on_run (needs a restart to take effect); report drops >500x price glitches (A7bdiYdS "Zexy Cat" 3853x).
+
+## 1J. 15 Oct — dev scoreboard, whale buy, wallet roster (live still OFF)
+- Screenshot dev list tested on our logs: 512 launches, 3.9% won vs 5.9% average -> weight 0 (dev_list).
+- NEW dev_rank.py: good_dev = creator with >=3 judged launches and >=30% wins in OUR logs (56 devs now, refreshed every 20 min). Time-split test: ~30% win on later coins (tiny sample 24-48: watch it).
+- NEW whale_buy (one wallet >=3 SOL in a coin <90 s old) and smart wallets built from early buyers of winners. Both need the per-coin trade feed, so tracking now also covers famous/narrative/good_dev coins; buyers logged in `final` rows (early_buyers, max_buy). Cold start: roster fills only as data arrives.
+- Moonshot path (fast_moon) now also accepts good_dev / whale_buy, not only famous names.
+- Honeypots: pump.fun bonding-curve coins are always sellable by the program; real risk is dev dump (already blocked at >30%).
+- Tests: 22 in test_fast_lane, rest of suite passes. Famous-name creation entry: x0.81 at 25% cost -> no edge yet.

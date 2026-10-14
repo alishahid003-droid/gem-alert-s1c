@@ -250,3 +250,38 @@ def test_reddit_rss_parser():
     import trend_feeds as tf
     x = '<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Moo Deng did it again</title></entry></feed>'
     assert tf.parse_reddit_rss(x) == ["Moo Deng"]
+
+
+# ---- 15 Oct: self-built dev scoreboard, whale buy, wallet roster -------------------------------------------------
+def test_dev_rank_picks_creators_who_keep_winning(tmp_path):
+    import json, time, dev_rank
+    t0 = time.time() - 10000
+    lines = []
+    for i in range(4):   # good dev: 4 launches, 2 graduate
+        m = f"G{i}pump"
+        lines.append({"t": "create", "ts": t0 + i, "mint": m, "creator": "GOOD", "mcap_sol": 30})
+        lines.append({"t": "outcome", "ts": t0 + 900, "mint": m, "cp_min": 15, "mcap_usd": 30 * 107.55 * (4 if i < 2 else 0.2)})
+    for i in range(4):   # bad dev: 4 launches, none win
+        m = f"B{i}pump"
+        lines.append({"t": "create", "ts": t0 + i, "mint": m, "creator": "BAD", "mcap_sol": 30})
+        lines.append({"t": "outcome", "ts": t0 + 900, "mint": m, "cp_min": 15, "mcap_usd": 100})
+    lines.append({"t": "final", "ts": t0 + 5, "mint": "G0pump", "early_buyers": ["W1", "W2"]})
+    (tmp_path / "a.jsonl").write_text("\n".join(json.dumps(x) for x in lines))
+    devs, wallets = dev_rank.scan(str(tmp_path / "*.jsonl"))
+    assert dev_rank.good_devs(devs) == {"GOOD"}
+    assert wallets["W1"] == [1, 1]
+    assert dev_rank.smart_wallets(wallets, min_seen=1, min_win=.5) == {"W1", "W2"}
+
+
+def test_good_dev_and_whale_confirm_and_score_high():
+    import time
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker()
+    t.good_dev_fn = lambda c: c == "DEVX"
+    t.on_create({"mint": "M1pump", "traderPublicKey": "DEVX", "initialBuy": 1e7, "marketCapSol": 30, "symbol": "Q", "name": "Q", "solAmount": 1})
+    t.on_trade({"mint": "M1pump", "traderPublicKey": "BIG", "txType": "buy", "solAmount": 4.0, "marketCapSol": 32})
+    c = t.confirmations(t.recs["M1pump"], time.time())
+    assert "good_dev" in c and "whale_buy" in c
+    from layers import fast_lane
+    assert fast_lane.score({"confirmations": c}) >= 5
+    assert fast_lane.score({"confirmations": ["dev_list"]}) == 0     # screenshot dev list carries no weight any more

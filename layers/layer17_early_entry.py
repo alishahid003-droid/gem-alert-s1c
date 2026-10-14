@@ -70,7 +70,7 @@ def _famous_rx():
 class Rec:
     __slots__ = ("mint", "symbol", "name", "creator", "created", "dev_tokens", "init_sol", "mcap_sol0", "mcap_sol",
                  "buyers", "buys", "sells", "buy_sol", "sell_sol", "creator_sold", "smart", "decided", "trades",
-                 "fast", "last_ts", "peak_sol", "free_buys", "free_sells", "free_vol", "free_ts")
+                 "fast", "last_ts", "peak_sol", "free_buys", "free_sells", "free_vol", "free_ts", "max_buy", "max_buyer")
 
     def __init__(self, mint, symbol, name, creator, created, dev_tokens, init_sol, mcap_sol):
         self.mint, self.symbol, self.name, self.creator, self.created = mint, symbol, name, creator, created
@@ -87,6 +87,8 @@ class Rec:
         self.free_buys = self.free_sells = 0     # free DexScreener txn counts (14 Oct): the metered trade feed only watches dev coins
         self.free_vol = 0.0
         self.free_ts = 0.0
+        self.max_buy = 0.0                    # biggest single non-creator buy (SOL) and who made it: the 'insider / big fresh wallet' signal
+        self.max_buyer = ""
 
 
 def _num(x) -> float:
@@ -109,6 +111,7 @@ class EarlyTracker:
         self.trusted_fn = trusted_fn or (lambda w: False)
         self.blacklist_fn = blacklist_fn or (lambda w: False)
         self.hot_terms_fn = hot_terms_fn or (lambda: set())
+        self.good_dev_fn = lambda c: False   # dev_rank.py scoreboard built from our own logs
         self.claim_fn = None               # claim_fn(term, mint) -> True if this is the FIRST coin to match a trending phrase
         self._phr_cache = (None, ())
         self.stats = {"created": 0, "tracked": 0, "skipped": 0, "decisions": 0}
@@ -156,6 +159,8 @@ class EarlyTracker:
             r.buy_sol += sol
             if who and who != r.creator:
                 r.buyers[who] = r.buyers.get(who, 0.0) + sol
+                if sol > r.max_buy:
+                    r.max_buy, r.max_buyer = sol, who
                 if now - r.created <= _f("EARLY_FAST_WINDOW_S", 3.0):
                     r.fast.add(who)
         elif kind == "sell":
@@ -184,6 +189,10 @@ class EarlyTracker:
         out = []
         if r.creator in self.dev_list or self.trusted_fn(r.creator):
             out.append("dev_list")
+        if self.good_dev_fn(r.creator):
+            out.append("good_dev")          # creator won >=30% of >=3 judged launches in our own logs
+        if r.max_buy >= _f("EARLY_WHALE_SOL", 3.0) and now - r.created <= _f("EARLY_WHALE_MAX_AGE_S", 90):
+            out.append("whale_buy")         # one wallet put >=3 SOL into a young coin
         if self.creator_fn(r.creator):
             out.append("repeat_grad")       # creator already graduated a token (measured ~7x lift in a 2026 study)
         smart = self.smart_fn()
