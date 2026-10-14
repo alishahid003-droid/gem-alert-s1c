@@ -100,3 +100,74 @@ def test_famous_name_covers_celebs_sports_influencers_and_can_be_switched_off(mo
     assert not _famous_rx().search("Slopcore")
     monkeypatch.setenv("EARLY_FAMOUS_NAMES", "off")
     assert not _famous_rx().search("Trump Coin")
+
+
+def _live_env(monkeypatch):
+    monkeypatch.setenv("EXECUTION_ENABLED", "true")
+    monkeypatch.setenv("EARLY_LIVE_LANES", "sprint")
+    monkeypatch.setenv("EARLY_FREE_CONFIRM", "live")
+    monkeypatch.setenv("PUMPPORTAL_API_KEY", "x")
+    monkeypatch.setenv("LIVE_MAX_STAKE_USD", "5")
+    monkeypatch.setenv("LIVE_MAX_OPEN", "3")
+    monkeypatch.setenv("LIVE_DAILY_LOSS_USD", "50")
+    from executor import pumpportal_exec
+    monkeypatch.setattr(pumpportal_exec, "KILL_FILE", "/nonexistent/KILL_SWITCH_for_tests")   # Ali's real KILL_SWITCH file must not affect tests
+
+
+def test_live_buy_is_remembered_and_a_lost_ledger_write_is_restored(monkeypatch):
+    _live_env(monkeypatch)
+    from executor import pumpportal_exec
+    monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: {"ok": True, "resp": {"signature": "sig"}})
+    out = w.act(_dec("MintLiveA", 60.0, 40.0), send=lambda m: None, now=T0)
+    assert "fast_sprint" in out["opened"]
+    pid = "early_fast_sprint:solana:MintLiveA"
+    assert paper_ledger._open()[pid]["live"] is True and pid in state.get_value(w.LIVE_KEY)
+    book = paper_ledger._open()
+    book.pop(pid)                                   # simulate the lost write (another thread/process overwrote the book)
+    state.set_value(paper_ledger.OPEN_KEY, book)
+    assert pid not in paper_ledger._open()
+    assert w.reinsert_lost_live() == 1 and pid in paper_ledger._open()
+    assert w.reinsert_lost_live() == 0              # idempotent
+
+
+def test_closed_live_position_is_not_resurrected(monkeypatch):
+    _live_env(monkeypatch)
+    from executor import pumpportal_exec
+    monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: {"ok": True, "resp": {"signature": "sig"}})
+    monkeypatch.setattr(pumpportal_exec, "sell", lambda *a, **k: {"ok": True})
+    w.act(_dec("MintLiveB", 60.0, 40.0), send=lambda m: None, now=T0)
+    pid = "early_fast_sprint:solana:MintLiveB"
+    pos = paper_ledger._open()[pid]
+    paper_ledger._manage_early(pos, pos["entry_mcap"] * 0.3, T0 + 30)       # hard stop -> closed
+    # emulate the manager closing it: leave the open book, land in the closed list
+    book = paper_ledger._open(); book.pop(pid, None)
+    paper_ledger.state.set_value(paper_ledger.OPEN_KEY, book)
+    paper_ledger.state.set_value(paper_ledger.CLOSED_KEY, paper_ledger._closed_raw() + [dict(pos, closed_ts=T0 + 30)])
+    assert pid not in paper_ledger._open()
+    assert w.reinsert_lost_live() == 0 and pid not in paper_ledger._open()
+
+
+def test_live_buy_without_a_position_is_sold_back(monkeypatch):
+    _live_env(monkeypatch)
+    from executor import pumpportal_exec
+    sold = []
+    monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: {"ok": True, "resp": {"signature": "sig"}})
+    monkeypatch.setattr(pumpportal_exec, "sell", lambda mint, pct: sold.append((mint, pct)) or {"ok": True})
+    monkeypatch.setattr(paper_ledger, "open_paper", lambda *a, **k: None)
+    out = w.act(_dec("MintLiveC", 60.0, 40.0), send=lambda m: None, now=T0)
+    assert ("MintLiveC", 100) in sold and any("LIVE BUY WITHOUT POSITION" in x for x in out["refused"])
+
+
+def test_manager_write_does_not_drop_a_position_opened_mid_cycle(monkeypatch):
+    _live_env(monkeypatch)
+    from executor import pumpportal_exec
+    monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: {"ok": True, "resp": {"signature": "sig"}})
+    w.act(_dec("MintOld", 60.0, 40.0), send=lambda m: None, now=T0)
+
+    def slow_batch(chain, tokens):
+        # a new signal opens while the manager is busy pricing
+        w.act(_dec("MintNew", 61.0, 40.0), send=lambda m: None, now=T0 + 1)
+        return {}
+    paper_ledger.manage(snapshot_fn=lambda c, t: None, batch_fn=slow_batch, now=T0 + 5)
+    ids = list(paper_ledger._open())
+    assert any("MintNew" in i for i in ids) and any("MintOld" in i for i in ids)

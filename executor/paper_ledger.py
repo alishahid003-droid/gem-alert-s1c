@@ -103,7 +103,28 @@ def _closed() -> list:
     return [_heal(r) for r in _closed_raw() if (r.get("opened_ts") or 0) >= STATS_SINCE_TS]
 
 
-def open_paper(chain: str, token: str, source: str, signal: str, usd: float,
+import threading as _threading
+
+_OPEN_LOCK = _threading.RLock()     # 14 Oct: concurrent act() threads lost positions (read-modify-write on the whole open book)
+
+
+def open_paper(*a, **k):
+    with _OPEN_LOCK:
+        return _open_paper_unlocked(*a, **k)
+
+
+def ensure_open(pos: dict) -> bool:
+    """Re-inserts a position that vanished from the open book (lost write). True when it had to be restored."""
+    with _OPEN_LOCK:
+        book = _open()
+        if pos["id"] in book:
+            return False
+        book[pos["id"]] = pos
+        state.set_value(OPEN_KEY, book)
+        return True
+
+
+def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: float,
                entry_mcap: Optional[float], band: Optional[str] = None,
                liquidity_usd: Optional[float] = None, tags: Optional[dict] = None,
                now: Optional[float] = None, strategy: str = "stage",
@@ -301,6 +322,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
     per-token snapshot_fn is kept for tests and as a fallback."""
     now = now if now is not None else time.time()
     book = _open()
+    _orig_ids = set(book)
     if not book:
         return {"open": 0, "closed_now": 0}
     batched = _batch_snapshots({k: v for k, v in book.items() if not source_prefix or
@@ -415,9 +437,14 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             closed_now.append(_close(pos, "fully_sold", "every slice sold", now))
             del book[pid]
 
-    state.set_value(OPEN_KEY, book)
-    if closed_now:
-        state.set_value(CLOSED_KEY, (_closed_raw() + closed_now)[-MAX_CLOSED_KEPT:])
+    with _OPEN_LOCK:
+        # Positions opened while we were pricing the book must survive this write.
+        for _pid, _p in _open().items():
+            if _pid not in _orig_ids and _pid not in book:
+                book[_pid] = _p
+        state.set_value(OPEN_KEY, book)
+        if closed_now:
+            state.set_value(CLOSED_KEY, (_closed_raw() + closed_now)[-MAX_CLOSED_KEPT:])
     return {"open": len(book), "closed_now": len(closed_now)}
 
 

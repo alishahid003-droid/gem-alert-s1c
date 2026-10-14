@@ -95,6 +95,42 @@ def make_tracker() -> EarlyTracker:
 # every sniper entry uses the early exit engine (paper_ledger._manage_early); the profile is the lane name
 _PROFILE = {k: ("early", k) for k in ("core1", "core2", "sprint", "compound", "dev_list", "leaderboard", "fast_sprint", "fast_core", "fast_moon")}
 _RECORDER = None
+LIVE_KEY = "live_open_v1"
+
+
+def remember_live(pos: dict):
+    """Durable copy of every LIVE position (real money) so a lost ledger write can never leave a real coin unmanaged."""
+    from executor import paper_ledger
+    with paper_ledger._OPEN_LOCK:
+        rec = state.get_value(LIVE_KEY)
+        rec = rec if isinstance(rec, dict) else {}
+        rec[pos["id"]] = pos
+        state.set_value(LIVE_KEY, rec)
+
+
+def reinsert_lost_live() -> int:
+    """Guard (every ~10 s): any remembered live position that is neither open nor closed in the ledger is put back so its
+    stop-loss / take-profit keeps working. Returns how many were restored."""
+    from executor import paper_ledger
+    n = 0
+    with paper_ledger._OPEN_LOCK:
+        rec = state.get_value(LIVE_KEY)
+        if not isinstance(rec, dict) or not rec:
+            return 0
+        closed_ids = {p.get("id") for p in paper_ledger._closed_raw()[-400:]}
+        openb = paper_ledger._open()
+        changed = False
+        for pid, pos in list(rec.items()):
+            if pid in closed_ids:
+                rec.pop(pid)
+                changed = True
+            elif pid not in openb:
+                openb[pid] = pos
+                paper_ledger.state.set_value(paper_ledger.OPEN_KEY, openb)
+                n += 1
+        if changed:
+            state.set_value(LIVE_KEY, rec)
+    return n
 
 
 def act(decision: dict, send=None, now=None) -> dict:
@@ -170,6 +206,14 @@ def act(decision: dict, send=None, now=None) -> dict:
             live=is_live,
             tags={"origin": "early", "age_s": decision["age_s"], "confirmations": decision["confirmations"],
                   "mcap_sol": decision["entry_mcap_sol"], **({"fast": "1"} if fast else {})}, module=(_rmap[lane]["book"] if fast else lane))
+        if pos and is_live:
+            remember_live(pos)
+        if is_live and not pos:                       # real coins bought but no managed position: never leave them unmanaged
+            refused.append(f"{lane}: LIVE BUY WITHOUT POSITION -> selling back")
+            try:
+                pumpportal_exec.sell(mint, 100)
+            except Exception:  # noqa: BLE001
+                pass
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
     d["n"] += 1
     state.set_value("early_day", d)
@@ -347,6 +391,17 @@ async def main_async():
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
 
+    async def live_guard():
+        while True:
+            await asyncio.sleep(8)
+            try:
+                n = await loop.run_in_executor(None, reinsert_lost_live)
+                if n:
+                    counters["live_reinserted"] = counters.get("live_reinserted", 0) + n
+                    print(f"[early-watch] RESTORED {n} lost live position(s)", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
     health = {"alerted": 0.0}
 
     async def watchdog():
@@ -364,7 +419,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()

@@ -129,3 +129,10 @@ LATER (live path, one step at a time, only after proven paper edge):
 - 13 Oct 13:00 Conviction tiers 15/40/60, biglaunch + Robinhood probe lanes.
 - 13 Oct 12:30 New exits (stop 0.35, trail 0.40, ladder 20/15/10, dead-coin 90 min) from winners replay.
 - 13 Oct 05:00-12:00 Winners replay + discovery, copycat resolution, Base added; entry logging; API budget ledger + gate; fake +$505 bug fix; bust reseed; legacy traders retired; momentum bucket; Core 1/2/3 naming.
+
+## 1E. Live-money bug found and fixed (14 Oct, 15:35 PKT)
+- What happened: 6 real buys by 15:30. 3 stopped out (about -$2.7 to -$2.9 each). 2 coins (iCoin, dotfomo) were bought for real but their ledger entry was overwritten by the position manager (it wrote the whole open book back after pricing), so nothing was watching them. Ali sold both by hand with `python sell_orphans.py`; wallet is now about $17.5.
+- Fix: (1) manager write now merges positions opened mid-cycle, under a lock; (2) every live buy is remembered and `live_guard` restores any lost live position within 8 s; (3) if a live buy has no position, it is sold straight back. 13 tests in test_fast_lane.py, 945 total pass.
+- KILL_SWITCH file in the project folder blocks new live buys. Delete it only after restart with this fix.
+- Restart: Admin CMD `taskkill /F /IM python.exe`, then `start_local_mode.bat`, then normal CMD `python e2e_test.py --loop`.
+- Real fills are in logs/live_exec.log (they have a tx signature). The dashboard line "Paper: fast_sprint, compound" is the paper record only and does not say if the live buy happened.
