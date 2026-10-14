@@ -319,7 +319,7 @@ async def main_async():
                 counters["entries"] += 1
                 loop.run_in_executor(None, act, dec)
             if stream.trade_url and not (who in tracker.dev_list or creators.repeat_grad(who or "") or who in good_devs_set()
-                                         or any(m in tracker.confirmations(tracker.recs[e["mint"]], time.time()) for m in ("famous_name", "narrative", "narrative_first", "good_dev"))):
+                                         or any(m in tracker.confirmations(tracker.recs[e["mint"]], time.time()) for m in ("famous_name", "narrative_first", "good_dev"))):
                 return None          # metered trade feed: watch only the lanes with a proven signal (repeat graduate / dev list)
             return [e["mint"]]
         if kind == "migrate" or (e.get("pool") and kind not in ("buy", "sell", "create")):
