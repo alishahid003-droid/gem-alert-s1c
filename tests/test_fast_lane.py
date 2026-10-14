@@ -244,3 +244,9 @@ def test_social_trend_parsers():
     assert tf.parse_tiktok('{"data":{"list":[{"hashtag_name":"labubu"}]}}') == ["labubu"]
     assert tf.parse_tiktok("garbage") == [] and tf.parse_bluesky("") == []
     assert "moo deng" in tf.terms_from_titles(["Moo Deng"]) and "moodeng" in tf.terms_from_titles(["Moo Deng"])
+
+
+def test_reddit_rss_parser():
+    import trend_feeds as tf
+    x = '<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Moo Deng did it again</title></entry></feed>'
+    assert tf.parse_reddit_rss(x) == ["Moo Deng"]

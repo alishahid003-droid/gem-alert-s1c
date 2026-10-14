@@ -58,6 +58,17 @@ def parse_reddit(json_text):
     return out
 
 
+def parse_reddit_rss(xml_text):
+    out = []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return out
+    for t in root.iter("{http://www.w3.org/2005/Atom}title"):
+        out += re.findall(r"\b([A-Z][a-z]{2,}(?: [A-Z][a-z]{2,}){1,2})\b", t.text or "")
+    return out
+
+
 def parse_wiki_top(json_text):
     import json
     try:
@@ -146,8 +157,11 @@ def fetch_all(now=None):
     for sub in ("all", "popular"):
         try:
             r += parse_reddit(_get(f"https://www.reddit.com/r/{sub}/hot.json?limit=100"))
-        except Exception as e:  # noqa: BLE001
-            notes.append(f"reddit {sub}: {type(e).__name__}")
+        except Exception:  # noqa: BLE001
+            try:                                                  # RSS is often allowed when the JSON endpoint is not
+                r += parse_reddit_rss(_get(f"https://www.reddit.com/r/{sub}/.rss?limit=100"))
+            except Exception as e2:  # noqa: BLE001
+                notes.append(f"reddit {sub}: {type(e2).__name__}")
     srcs["reddit"] = r
     def _many(name, urls, parse, headers=None):
         got = []
@@ -169,6 +183,9 @@ def fetch_all(now=None):
     except Exception as e:  # noqa: BLE001
         srcs["wiki"] = []
         notes.append(f"wiki: {type(e).__name__}")
+    for k, v in srcs.items():
+        if not v and not any(n.startswith(k) for n in notes):
+            notes.append(f"{k}: returned nothing")
     return srcs, notes
 
 
