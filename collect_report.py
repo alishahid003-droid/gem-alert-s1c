@@ -35,6 +35,8 @@ for m, sn in first.items():
     if sn['v'] >= 2500: conf.append('velocity_free')
     c = cr.get(m, {})
     if rx.search((c.get('name') or '') + ' ' + (c.get('sym') or '')): conf.append('famous_name')
+    if max([v for v in path if v] or [0]) > 500:
+        continue
     d = {'confirmations': conf, 'fb': sn['b'], 'fs': sn['s'], 'mcap_sol': e / SOL}
     data.append((score(d), path, d, m))
 out = []
@@ -58,7 +60,7 @@ try:
 except OSError:
     pass
 for r_ in rows:
-    if r_.get('t') == 'run': epochs.append(r_['ts'])
+    if r_.get('t') == 'run' and r_.get('ts'): epochs.append(r_['ts'])
 epochs = sorted(set(round(e) for e in epochs))
 def epoch_of(ts):
     k = -1
@@ -78,7 +80,11 @@ for k in sorted(ep):
     n_, a_, b_, cc_, d2_ = stat(c)
     r_ = [sim(x[1], lad0, stop0, trail0, ta0) if any(x[1]) else 0.0 for x in c]
     hi = [x for x in c if x[0] >= 5]
-    hs = f'{len(hi):4d}  {stat(hi)[2]:5.0f}%' if len(hi) >= 3 else '   -     -'
+    if len(hi) >= 3:
+        rh = sorted(sim(x[1], lad0, stop0, trail0, ta0) if any(x[1]) else 0.0 for x in hi)
+        hs = f'{len(hi):4d}  {stat(hi)[2]:5.0f}%  mean x{sum(rh)/len(rh):4.2f} ex-best x{sum(rh[:-1])/max(len(rh)-1,1):4.2f}'
+    else:
+        hs = '   -     -'
     P(f'  {st:20s}            {n_:5d}   {b_:5.0f}%      x{sum(r_)/n_:4.2f}              | {hs}')
 P('If "reach2x" and "mean x" swing a lot between versions, the pooled table below is a blend and should not be trusted alone.')
 P('\nscore   n    reach1.4x  reach2x  reach5x   dead/unpriced')
@@ -97,6 +103,30 @@ for name, f in (('all coins', lambda s: True), ('score>=3', lambda s: s >= 3), (
     P(f'{name:14s} {n:5d}   {b:5.0f}%  {cc:5.0f}%  | mean x{sum(r)/n:4.2f}   ex-best-2 x{sum(r[:-2])/max(n-2,1):4.2f}   win%{100*sum(v>1 for v in r)/n:3.0f}')
 P('\nHow to read: "mean x1.00" = break-even. Needs mean above 1.0 AND ex-best-2 above ~1.0 before live. Dead/unpriced coins count as total loss.')
 P('Check at least 300 coins in the score>=5 cohort before trusting it.')
+top = sorted(data, key=lambda x: -max([v for v in x[1] if v] or [0]))[:3]
+P('\nLargest single movers in the sample (they can dominate an average):')
+for s_, p_, d_, m_ in top:
+    P(f'   {m_[:8]} peak x{max([v for v in p_ if v] or [0]):.0f}  score {s_}  name {(cr.get(m_, {}).get("name") or "")[:16]}')
+# trend-matched coins: decisions that carried narrative / narrative_first
+tm = collections.defaultdict(list)
+for r_ in rows:
+    if r_.get('t') == 'decision' and set(r_.get('confirmations') or []) & {'narrative', 'narrative_first'}:
+        tm[r_['mint']].append(r_)
+P(f'\nTREND-MATCHED coins (decisions with narrative/narrative_first): {len(tm)} coins')
+hits = []
+for m_, ds_ in tm.items():
+    e_ = ds_[0]['mcap_sol'] * SOL
+    v_ = [oc.get(m_, {}).get(k) for k in (5, 15, 60)]
+    hits.append(max([x / e_ for x in v_ if x] or [0]))
+if hits:
+    paths_ = []
+    for m_, ds_ in tm.items():
+        e_ = ds_[0]['mcap_sol'] * SOL
+        pp_ = [(oc.get(m_, {}).get(k) / e_ if oc.get(m_, {}).get(k) else None) for k in (5, 15, 60)]
+        if max([v for v in pp_ if v] or [0]) <= 500: paths_.append(pp_)
+    rr_ = sorted(sim(pp_, lad0, stop0, trail0, ta0) if any(pp_) else 0.0 for pp_ in paths_)
+    P(f'   exit-ladder result on these {len(rr_)}: mean x{sum(rr_)/len(rr_):.2f}   without best 2: x{sum(rr_[:-2])/max(len(rr_)-2,1):.2f}   win% {100*sum(v>1 for v in rr_)/len(rr_):.0f}')
+    P(f'   reached 1.4x: {sum(h >= 1.4 for h in hits)}   reached 2x: {sum(h >= 2 for h in hits)}   reached 5x: {sum(h >= 5 for h in hits)}   no price/dead: {sum(h == 0 for h in hits)}   of {len(hits)}')
 txt = '\n'.join(out)
 print(txt)
 open('COLLECT_REPORT.txt', 'w').write(txt + '\n')

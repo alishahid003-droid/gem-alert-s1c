@@ -155,3 +155,10 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Every worker start now writes a `{"t":"run","code":hash,"env":hash,"live":bool}` row to early_log, and `collect_report.py` also finds every past restart in logs/local_early-watch.log (25 so far) and prints a BY VERSION table so mixed-version data is never read as one blob.
 - Fixed a report flaw: coins younger than 65 min (outcome checks not in yet) are no longer counted as dead.
 - First clean read (1,230 coins, 4 versions): about 3% reach 2x in every version; new-ladder mean about x0.74-0.82 in each; score>=5 (36 coins) mean x0.88. Same story across versions = the result is stable, not a blend artefact. Still no edge.
+
+## 1I. 5-hour check (14 Oct, 22:25 PKT)
+- 3,676 coins with outcomes (27 version epochs). Pooled: 3% reach 2x, mean x0.78 on the new sprint ladder. Score>=5 (104 coins): mean x0.82, ex-best x0.79 -> score has no proven edge.
+- Trend-matched coins (narrative/narrative_first, 77 coins): 8 reach 2x (10%), ladder mean x0.95, without best 2 x0.86, win 42%. Best cohort so far but still below 1.0 and small. Keep collecting; need 300+ such coins with mean >1.0 ex-best before live.
+- Paper streams (fast P&L since start): Sprint -$273.85 (283 closed, 55 wins), Core 2 -$308.60 (238 closed, 36 wins), Compound -$590.07 (455 closed, 78 wins), Core 3 2 open / 0 closed.
+- Live: no live buys since 15:33 PKT. KILL_SWITCH still in place. Wallet last known $17.5.
+- Fixed: run-row timestamp bug in early_recorder.on_run (needs a restart to take effect); report drops >500x price glitches (A7bdiYdS "Zexy Cat" 3853x).

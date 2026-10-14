@@ -52,7 +52,7 @@ class Recorder:
 
     def on_run(self, info: dict, now: Optional[float] = None):
         """Version stamp written at every worker start: later analysis splits the data by code/settings version."""
-        self._write({"t": "run", **info}, now)
+        self._write({"t": "run", "ts": now or __import__("time").time(), **info}, now)
 
     def on_snap(self, mint: str, age_s: float, buys: int, sells: int, vol: float, mc_usd: float, now: Optional[float] = None):
         """Free DexScreener 5-min snapshot of a young coin (14 Oct): lets us learn which early profiles become winners."""
