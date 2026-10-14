@@ -63,9 +63,40 @@ def assign(decision: dict) -> Optional[str]:
     return r[0]["profile"] if r else None
 
 
-def live_lane(profile: str) -> str:
-    """Name used by pumpportal_exec.allowed / EARLY_LIVE_LANES: only fast_sprint can ever go live (as 'sprint')."""
-    return "sprint" if profile == "fast_sprint" else "never_live"
+def score(d) -> int:
+    """Entry score (14 Oct). Many weak checks add up; no single check decides. Real money needs FAST_LIVE_MIN_SCORE (default 5).
+    Weights are a first guess from 86 logged signals: re-fit them after ~24 h of logged scores."""
+    d = d or {}
+    c = set(d.get("confirmations") or [])
+    s = 0
+    for k, w in (("famous_name", 3), ("smart_wallet", 3), ("narrative", 2), ("dev_list", 2), ("repeat_grad", 2)):
+        if k in c:
+            s += w
+    s += 1 if "pressure_free" in c else 0
+    s += 1 if "velocity_free" in c else 0
+    fb, fs = d.get("fb") or 0, d.get("fs") or 0
+    if fb or fs:
+        r = fs / max(fb, 1)
+        s += 2 if r < .3 else (1 if r < .45 else (-2 if r > .6 else 0))
+        s += 1 if 40 <= fb <= 80 else (-1 if fb > 80 else 0)
+    m = d.get("mcap_sol") or d.get("entry_mcap_sol") or 0
+    s += 1 if 30 <= m < 45 else (-2 if m >= 45 else 0)
+    return s
+
+
+def live_ok(decision) -> bool:
+    """Real money needs a high enough SCORE (several checks agreeing), never one check. FAST_LIVE_MIN_SCORE=-99 turns it off."""
+    return score(decision) >= int(float(os.environ.get("FAST_LIVE_MIN_SCORE", "5")))
+
+
+def live_lane(profile: str, decision=None) -> str:
+    """Name used by pumpportal_exec.allowed / EARLY_LIVE_LANES: only fast_sprint can ever go live (as 'sprint'),
+    and only when its entry score clears the bar."""
+    if profile != "fast_sprint":
+        return "never_live"
+    if decision is not None and not live_ok(decision):
+        return "never_live"
+    return "sprint"
 
 
 def open_fast() -> list:

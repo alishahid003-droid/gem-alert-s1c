@@ -51,7 +51,11 @@ _FAMOUS_DEFAULT = (
     "djokovic|verstappen|hamilton|nba|nfl|ufc|fifa|wwe|"
     # influencers / creators / celebrities
     "mrbeast|kaicenat|ishowspeed|speed|loganpaul|jakepaul|andrewtate|tate|pewdiepie|adinross|xqc|kardashian|kylie|drake|kanye|"
-    "taylorswift|swift|beyonce|rihanna|eminem|snoop|diddy|rogan|hawktuah|dogecoin")
+    "taylorswift|swift|beyonce|rihanna|eminem|snoop|diddy|rogan|hawktuah|dogecoin|"
+    # viral memes / movies / games / animals / anime / music acts (anything the internet is already talking about)
+    "pepe|doge|shiba|wojak|bonk|pnut|moo.?deng|labubu|barron|melania|batman|joker|spiderman|marvel|avengers|deadpool|barbie|"
+    "oppenheimer|wicked|pokemon|pikachu|minecraft|roblox|gta|squidgame|zelda|mario|sonic|naruto|goku|kpop|bts|blackpink|"
+    "olympic|worldcup|beast|bigfoot|alien|ufo")
 _FAMOUS_CACHE = {}
 
 

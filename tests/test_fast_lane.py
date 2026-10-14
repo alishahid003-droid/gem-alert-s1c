@@ -16,7 +16,7 @@ def _iso(monkeypatch, tmp_path):
     monkeypatch.setenv("SOL_USD", "150")
 
 
-def _dec(mint, age, mcap, conf=("pressure_free", "velocity_free")):
+def _dec(mint, age, mcap, conf=("pressure_free", "velocity_free", "famous_name", "smart_wallet")):
     return {"lane": "core2", "lanes": ["core2", "sprint", "core1"], "mint": mint, "symbol": mint[:3], "name": mint, "creator": "c",
             "age_s": age, "mcap_sol": mcap, "entry_mcap_sol": mcap, "buyers": 0, "buys": 0, "sells": 0,
             "confirmations": list(conf), "smart": [], "uses_free": True, "potential": "10x-50x"}
@@ -171,3 +171,36 @@ def test_manager_write_does_not_drop_a_position_opened_mid_cycle(monkeypatch):
     paper_ledger.manage(snapshot_fn=lambda c, t: None, batch_fn=slow_batch, now=T0 + 5)
     ids = list(paper_ledger._open())
     assert any("MintNew" in i for i in ids) and any("MintOld" in i for i in ids)
+
+
+def test_live_cap_ignores_ghost_live_rows_opened_before_go_live(monkeypatch):
+    from executor import pumpportal_exec
+    import time as _t
+    N = _t.time()
+    monkeypatch.setenv("LIVE_SINCE_TS", str(N))
+    monkeypatch.setattr(paper_ledger, "_open", lambda: {})
+    rows = [{"live": True, "opened_ts": N - 100, "closed_ts": N + 5, "pnl_usd": -9.0},
+            {"live": True, "opened_ts": N + 1, "closed_ts": N + 5, "pnl_usd": -2.0}]
+    monkeypatch.setattr(paper_ledger, "_closed", lambda: rows)
+    monkeypatch.setattr(pumpportal_exec.time, "gmtime", __import__("time").gmtime)
+    o, c = pumpportal_exec._live_rows()
+    assert len(c) == 1 and c[0]["pnl_usd"] == -2.0
+
+
+def test_live_needs_a_high_score_not_one_check():
+    base = {"confirmations": ["pressure_free", "velocity_free"], "fb": 31, "fs": 12, "mcap_sol": 45.5}
+    assert fast_lane.live_lane("fast_sprint", base) == "never_live"            # one of today's real losers
+    good = {"confirmations": ["pressure_free", "velocity_free", "famous_name"], "fb": 50, "fs": 12, "mcap_sol": 38}
+    assert fast_lane.live_lane("fast_sprint", good) == "sprint"
+    no_name = {"confirmations": ["pressure_free", "velocity_free", "smart_wallet"], "fb": 45, "fs": 12, "mcap_sol": 36}
+    assert fast_lane.live_lane("fast_sprint", no_name) == "sprint"            # not famous, still allowed by other checks
+    assert fast_lane.live_lane("fast_core", good) == "never_live"
+    late = dict(good, fb=95, fs=70, mcap_sol=52)
+    assert fast_lane.live_lane("fast_sprint", late) == "never_live"           # famous but chasing a late crowd
+
+
+def test_viral_meme_and_movie_names_count_as_famous():
+    from layers import layer17_early_entry as e
+    for nm in ("Elon Beast", "Moo Deng", "Pikachu Coin", "Deadpool", "Messi Cat", "Labubu"):
+        assert e._famous_rx().search(nm), nm
+    assert not e._famous_rx().search("Zorblax Token")

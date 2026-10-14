@@ -136,3 +136,10 @@ LATER (live path, one step at a time, only after proven paper edge):
 - KILL_SWITCH file in the project folder blocks new live buys. Delete it only after restart with this fix.
 - Restart: Admin CMD `taskkill /F /IM python.exe`, then `start_local_mode.bat`, then normal CMD `python e2e_test.py --loop`.
 - Real fills are in logs/live_exec.log (they have a tx signature). The dashboard line "Paper: fast_sprint, compound" is the paper record only and does not say if the live buy happened.
+
+## 1F. Live OFF, data collection, score gate (14 Oct, 17:00 PKT)
+- Live is OFF: the file `KILL_SWITCH` is in the project folder, and `start_local_mode.bat` no longer deletes it. Live turns on only when Ali and Claude decide after the report. To turn on: delete KILL_SWITCH (and restart so the settings below are read).
+- Why: the 4 real sprint live trades on the 2 cheap free signals all stopped out (wallet $25 -> $17.5). Ghost "live" row from the fake-fill bug was also counted in the loss cap; fixed with LIVE_SINCE_TS in .env; sprint-only live loss limit is now LIVE_DAILY_LOSS_USD=17.
+- New: entry SCORE (layers/fast_lane.py score()), live needs FAST_LIVE_MIN_SCORE (default 5). On 86 logged signals it looked good (score>=5: 75% reach 1.4x) but that was in-sample, 12 coins.
+- Collective report: `python collect_report.py` (writes COLLECT_REPORT.txt). First run on 971 coins: score does NOT separate winners (score>=5: 3% reach 2x, mean x0.89 after costs; all coins mean x0.79). No proven edge yet. Re-run after 24 h (several thousand coins) before any live decision.
+- Paper streams keep running and collecting.

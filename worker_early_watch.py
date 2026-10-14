@@ -186,7 +186,7 @@ def act(decision: dict, send=None, now=None) -> dict:
         is_live = False
         try:
             from executor import pumpportal_exec
-            live_name = fast_lane.live_lane(lane) if fast else lane
+            live_name = fast_lane.live_lane(lane, decision) if fast else lane
             l_ok, l_why, l_stake = pumpportal_exec.allowed(live_name, stake)
             if free_paper_only:
                 pass                      # free-data confirmation not proven yet: paper only

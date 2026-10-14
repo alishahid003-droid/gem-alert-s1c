@@ -43,7 +43,12 @@ def _live_rows():
     from executor import paper_ledger
     open_ = [p for p in paper_ledger._open().values() if p.get("live")]
     day = time.strftime("%Y-%m-%d", time.gmtime())
+    # Only real money counts: rows opened before LIVE_SINCE_TS (ghost 'live' rows from the
+    # fake-fill bug, or live tests) are ignored by the loss cap and the open-count.
+    since = _env_f("LIVE_SINCE_TS", 0.0)
+    open_ = [p for p in open_ if float(p.get("opened_ts") or 0) >= since]
     closed = [r for r in paper_ledger._closed() if r.get("live")
+              and float(r.get("opened_ts") or 0) >= since
               and time.strftime("%Y-%m-%d", time.gmtime(r.get("closed_ts") or 0)) == day]
     return open_, closed
 
