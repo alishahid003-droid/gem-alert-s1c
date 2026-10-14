@@ -48,7 +48,12 @@ class Recorder:
 
     def on_decision(self, d: dict, now: Optional[float] = None):
         self._write({"t": "decision", "ts": round(now or time.time(), 1), **{k: d.get(k) for k in (
-            "mint", "lane", "lanes", "age_s", "mcap_sol", "buyers", "buys", "sells", "confirmations")}}, now)
+            "mint", "lane", "lanes", "age_s", "mcap_sol", "buyers", "buys", "sells", "confirmations", "fb", "fs", "fv")}}, now)
+
+    def on_snap(self, mint: str, age_s: float, buys: int, sells: int, vol: float, mc_usd: float, now: Optional[float] = None):
+        """Free DexScreener 5-min snapshot of a young coin (14 Oct): lets us learn which early profiles become winners."""
+        self._write({"t": "snap", "ts": round(now or time.time(), 1), "mint": mint, "age": round(age_s, 1),
+                     "b": buys, "s": sells, "v": round(vol), "mc": round(mc_usd)}, now)
 
     def on_final(self, rec, now: Optional[float] = None):
         """Trade-feed summary of a tracked coin when it leaves the tracker."""

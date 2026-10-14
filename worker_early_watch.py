@@ -93,7 +93,7 @@ def make_tracker() -> EarlyTracker:
 
 
 # every sniper entry uses the early exit engine (paper_ledger._manage_early); the profile is the lane name
-_PROFILE = {k: ("early", k) for k in ("core1", "core2", "sprint", "compound", "dev_list", "leaderboard")}
+_PROFILE = {k: ("early", k) for k in ("core1", "core2", "sprint", "compound", "dev_list", "leaderboard", "fast_sprint", "fast_core", "fast_moon")}
 _RECORDER = None
 
 
@@ -102,12 +102,20 @@ def act(decision: dict, send=None, now=None) -> dict:
     from executor import books, paper_ledger
     now = now if now is not None else time.time()
     mint = decision["mint"]
+    fast = bool(decision.get("uses_free")) and os.environ.get("FAST_LANE", "on").strip().lower() != "off"
+    if fast:                                      # one coin -> exactly one lane (layers/fast_lane.py)
+        from layers import fast_lane
+        _routes = fast_lane.route(decision)
+        if not _routes:
+            return {"skipped": "outside fast windows"}
+        _rmap = {r["profile"]: r for r in _routes}
+        decision = dict(decision, lanes=[r["profile"] for r in _routes], lane=_routes[0]["profile"])
     if state.cache_get(f"early_seen:{mint}", 24 * 3600):
         return {"skipped": "already acted"}
     day = time.strftime("%Y-%m-%d", time.gmtime(now))
     d = state.get_value("early_day")
     d = d if isinstance(d, dict) and d.get("day") == day else {"day": day, "n": 0}
-    if d["n"] >= int(float(os.environ.get("EARLY_MAX_ENTRIES_PER_DAY", "60"))):
+    if d["n"] >= int(float(os.environ.get("FAST_MAX_PER_DAY", "1500") if fast else os.environ.get("EARLY_MAX_ENTRIES_PER_DAY", "60"))):
         return {"skipped": "daily cap"}
     state.cache_set(f"early_seen:{mint}", True)
     usd_price = sol_usd()
@@ -122,8 +130,12 @@ def act(decision: dict, send=None, now=None) -> dict:
         conf = decision.get("confirmations") or []
         strong = [c for c in conf if c not in ("dev_list", "repeat_grad")]     # dev_list lane: 0/69 graduated (Oct 13)
         tier = "conviction" if len(strong) >= 4 else "standard" if len(strong) >= 2 else "probe"
-        ok, why = books.can_open(lane, strong=len(strong) >= 4)
-        stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
+        if fast:
+            ok, why = fast_lane.paper_gate()
+            stake = _rmap[lane]["stake"] if ok else 0.0
+        else:
+            ok, why = books.can_open(lane, strong=len(strong) >= 4)
+            stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
         if ok and not stake and not free_paper_only:          # NIGHT TUNE 14 Oct: paper book stake can round to 0; a live lane still gets its capped live stake
             try:
                 from executor import pumpportal_exec as _px
@@ -138,7 +150,8 @@ def act(decision: dict, send=None, now=None) -> dict:
         is_live = False
         try:
             from executor import pumpportal_exec
-            l_ok, l_why, l_stake = pumpportal_exec.allowed(lane, stake)
+            live_name = fast_lane.live_lane(lane) if fast else lane
+            l_ok, l_why, l_stake = pumpportal_exec.allowed(live_name, stake)
             if free_paper_only:
                 pass                      # free-data confirmation not proven yet: paper only
             elif l_ok and l_stake > 0:
@@ -148,7 +161,7 @@ def act(decision: dict, send=None, now=None) -> dict:
                     live_done.append(lane)
                 else:
                     refused.append(f"{lane}: live buy failed ({str(res.get('resp'))[:80]})")
-            elif pumpportal_exec.lane_live(lane):
+            elif pumpportal_exec.lane_live(live_name):
                 refused.append(f"{lane}: live blocked ({l_why})")
         except Exception as e:  # noqa: BLE001
             refused.append(f"{lane}: live error {type(e).__name__}")
@@ -156,7 +169,7 @@ def act(decision: dict, send=None, now=None) -> dict:
             "solana", mint, f"early_{lane}", f"early_{lane}", stake, mcap_usd, strategy=strategy, exit_profile=profile,
             live=is_live,
             tags={"origin": "early", "age_s": decision["age_s"], "confirmations": decision["confirmations"],
-                  "mcap_sol": decision["entry_mcap_sol"]}, module=lane)
+                  "mcap_sol": decision["entry_mcap_sol"], **({"fast": "1"} if fast else {})}, module=(_rmap[lane]["book"] if fast else lane))
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
     d["n"] += 1
     state.set_value("early_day", d)
@@ -302,7 +315,7 @@ async def main_async():
         if os.environ.get("EARLY_FREE_CONFIRM", "paper").strip().lower() == "off":
             return
         poll = float(os.environ.get("EARLY_FREE_POLL_S", "12"))
-        amin = float(os.environ.get("EARLY_FREE_MIN_AGE_S", "30"))
+        amin = float(os.environ.get("EARLY_FREE_MIN_AGE_S", "15"))
         amax = float(os.environ.get("EARLY_FREE_MAX_AGE_S", "600"))
         cap = int(float(os.environ.get("EARLY_FREE_MAX_PER_CYCLE", "150")))
         while True:
@@ -323,6 +336,8 @@ async def main_async():
                     m5 = (pair.get("txns") or {}).get("m5") or {}
                     vol = float(((pair.get("volume") or {}).get("m5")) or 0)
                     mc_usd = float(pair.get("marketCap") or pair.get("fdv") or 0)
+                    if _RECORDER and now - r.created <= float(os.environ.get("EARLY_SNAP_MAX_AGE_S", "300")):
+                        _RECORDER.on_snap(r.mint, now - r.created, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol, mc_usd, now)
                     dec = tracker.on_free(r.mint, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol,
                                           (mc_usd / px) if (mc_usd and px) else None)
                     if dec:

@@ -12,6 +12,22 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 - Helius key is in .env (SOLANA_RPC_URL, verified format). PumpPortal key NOT yet added: metered-feed guard built first (see section 3). Needs one restart (kills the e2e loop - restart it after).
 - e2e_test.py has no unit tests yet (checked by hand with a mocked HTTP call).
 
+## 1C. FOUR MONEY STREAMS + FAST ROUTER (14 Oct, 15:00 PKT) - THE STRUCTURE
+Ali's aim: the system works toward four money targets automatically, each with its own balance, entry window and exits.
+| Stream (book id) | Aim | Entry | Exits (profile) | Live? |
+|---|---|---|---|---|
+| BILLS = Sprint 96h (sprint) | $16,000 ($6k now + $10k in 72h); book target $100 -> $10,000 in 96h | coin <=120 s old, <=55 SOL, free confirmations | fast_sprint: sell 30% at 1.4x, 20% at 2.5x, 15% at 6x, 10% at 15x, 25% runner, stop 0.55, trail 0.55 from 1.4x | the ONLY stream allowed live (EARLY_FREE_CONFIRM=live + caps) |
+| Core 2 (core1) | $125,000-150,000 in 30 days | coin 2-20 min old, <=130 SOL, momentum | fast_core: 1.5x/3x/8x slices, stop 0.45, trail 0.50, 50% runner | paper |
+| Core 3 (core2) | $1M-1.5M in 180 days | <=60 s, <=35 SOL, famous name + 3 confirmations | fast_moon: 10% at 5x, 10% at 20x, 80% runner | paper |
+| Compound (compound) | in/out small runners, 2x-3x, repeat | any coin with >=2 confirmations, <=130 SOL | compound: 60% at 2x, 40% at 3x, stop 0.70 | paper |
+- ROUTING (layers/fast_lane.py): one coin gets AT MOST ONE moonshot book (moon > sprint > core) plus one Compound position. No more identical copies in 3 books. Positions are booked under the book's id, so each stream's balance/target progress counts them. `python streams.py` prints all four.
+- WHY: the old books refused 257 of 263 signals (3 slots each, cash full). Fast paper takes every routed signal ($5/$4/$2/$4 stakes, 60 open max) so the evidence is complete. Live is separate and wallet-sized.
+- NEW SIGNAL famous_name: coin name/symbol matches celebrity / sports / influencer / politician / big-brand list (EARLY_FAMOUS_NAMES, `off` to disable). 2-day data: 9.2% reached 10x vs 2.6% for others (607 vs 20,262 coins; out-of-sample list). Counts as ONE confirmation, never enters alone.
+- LOGGING: every young coin writes a free snapshot (buys/sells/volume/mcap) to early_log (t=snap) so the entry filter can be learned from ~300 real winners within ~24 h.
+- Replay (2 days, 147 free-signal entries): new exits +~2 points vs old; unfiltered buying all coins = ~-7% after dead coins; free-signal filter ~+8-10% but ~break-even without the 2 best coins. Not proof of profit.
+- Paper -> live rule: a stream goes live only after 30+ closed paper trades, positive after costs, and still positive without the best coin.
+- Honest: $16,000 needs ~640x on a ~$25 wallet; no stream shows that edge yet.
+
 ## 1B. 14 OCT (daytime) - WHAT BROKE OVERNIGHT AND WHAT WAS FIXED
 - Live buy "worked" only in the ledger: executor counted HTTP 200 with an error body as filled. Wallet showed no buy. FIXED: `executor/pumpportal_exec.py` now needs a tx `signature`, logs every reply to `logs/live_exec.log`, pool = "auto" (was "pump", fails on graduated coins). Backup: `.SAFE_BACKUP_20261014`.
 - MANUAL TEST PASSED (09:13 PKT, `live_test.py`): buy 0.00438 SOL of RUSO then sell all, both Finalized/Success on Solscan, cost ~$0.27 total. Order path proven; automatic buy/stop-loss sell NOT yet proven live.
@@ -20,7 +36,7 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
 - XTO bogus price ($36M at 1.4 s old, dev_list had no mcap cap) -> NEW price sanity check in `layers/layer17_early_entry.py` (EARLY_SANITY_MAX_MCAP_SOL=300, EARLY_SANITY_MAX_JUMP=8). dev_list stays paper-only (restore_safe.bat set live to sprint only).
 - WHY SPRINT/CORE NEVER FIRED: the paid trade feed only watches dev-list/repeat-grad coins, so every other coin had no buy/sell data and could never reach 2 confirmations. NEW: free DexScreener 5-min buy/sell + volume confirmations (`pressure_free`, `velocity_free`) via `worker_early_watch.py` free_confirmer (env EARLY_FREE_CONFIRM = paper (default) / live / off). Entries that use them are PAPER ONLY until proven. Tests added in `tests/test_early_entry.py`.
 - TO DO: restart, then watch `free_polls`/`free_entries`/`insane` in the early-watch heartbeat; after 30+ free-confirmed entries compare outcomes vs the no-confirmation baseline (early_log) before setting EARLY_FREE_CONFIRM=live.
-- Known test noise: `test_stream_client_reconnects_and_resubscribes` and `test_live_gating_and_kill_switch` fail only because .env sets an API key and LIVE_MAX_STAKE_USD=8.
+- Tests (14 Oct 15:20 PKT): all 87 test files pass (~942 tests). Three tests used to fail only because Ali's real .env (API key, LIVE_MAX_STAKE_USD=8, EXECUTION_ENABLED=true) leaks into pytest; each now pins its own env with monkeypatch.
 
 ## 1A. LIVE NIGHT TEST (13-14 Oct) - REVIEW THIS FIRST IN THE MORNING
 - LIVE MODE IS ON in a tiny capped form: PumpPortal wallet ~$21 SOL. EXECUTION_ENABLED=true, EARLY_LIVE_LANES=sprint,dev_list, LIVE_MAX_STAKE_USD=5, LIVE_MAX_OPEN=3, LIVE_DAILY_LOSS_USD=20. EXECUTION_SOLANA_PRIVATE_KEY stays commented out.

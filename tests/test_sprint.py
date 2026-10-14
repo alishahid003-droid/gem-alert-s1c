@@ -123,6 +123,7 @@ def test_milestones_wait_for_flat_pool():
 def test_modules_board_rows(monkeypatch):
     import dashboard
     monkeypatch.setenv("SPRINT_MODE", "true")
+    monkeypatch.setenv("EXECUTION_ENABLED", "false")      # Ali's real .env has live mode on; this test assumes it is off
     rows = dashboard._modules_board(cs.status())
     names = [r["module"] for r in rows]
     assert any("Sprint pool" in n for n in names) and any("Momentum lane" in n for n in names)

@@ -228,9 +228,16 @@ EARLY_RULES = {
     "core2": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
     "core1": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
     "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
+    # FAST module (14 Oct 2026): earlier first slice, trail starts at 1.4x (see EARLY_TRAIL_AFTER), big runner
+    "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.55),
+    "fast_core": ({1.5: 0.20, 3: 0.20, 8: 0.10}, 0.45, 0.50),
+    "fast_moon": ({5: 0.10, 20: 0.10}, 0.50, 0.50),                 # lottery: 80% rides, trail starts at 3x
     "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.70),
     "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.70),
 }
+
+
+EARLY_TRAIL_AFTER = {"fast_sprint": 1.4, "fast_core": 1.5, "fast_moon": 3.0}      # peak multiple from which the trailing stop replaces the hard stop (default 2.0)
 
 
 def _manage_early(pos: dict, mcap: float, now: float) -> bool:
@@ -238,7 +245,8 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
     hard stop, trailing stop on the runner after 2x, dead-coin time stop.
     Returns True when the position closed."""
     ladder, stop, trail = EARLY_RULES.get(pos.get("exit_profile") or "", EARLY_RULES["core1"])
-    stop = float(os.environ.get("EARLY_STOP_MULT", stop))
+    stop = float(os.environ.get("EARLY_STOP_MULT", stop)) if not str(pos.get("exit_profile") or "").startswith("fast_") else stop
+    ta = EARLY_TRAIL_AFTER.get(pos.get("exit_profile") or "", 2.0)
     mult = mcap / pos["entry_mcap"]
     peak = pos["peak_mcap"] / pos["entry_mcap"]
     age_min = (now - pos["opened_ts"]) / 60.0
@@ -250,9 +258,9 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
         _close(pos, "fully_sold", "every slice sold", now)
         return True
     why = None
-    if peak < 2.0 and mult <= stop:
+    if peak < ta and mult <= stop:
         why = ("stop_loss", f"hard stop at {mult:.2f}x")
-    elif peak >= 2.0 and mult <= peak * trail:
+    elif peak >= ta and mult <= peak * trail:
         why = ("trailing_stop", f"{mult:.1f}x is {int((1 - trail) * 100)}% below the {peak:.1f}x peak")
     elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "90")) and peak < 1.5 and mult < 1.2:
         why = ("time_stop", f"no move after {age_min:.0f} min")

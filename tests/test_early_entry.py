@@ -132,7 +132,8 @@ def test_act_daily_cap(monkeypatch):
     assert w.act(mk("m2"), send=lambda m: None, now=T0) == {"skipped": "daily cap"}
 
 
-def test_stream_client_reconnects_and_resubscribes():
+def test_stream_client_reconnects_and_resubscribes(monkeypatch):
+    monkeypatch.delenv("PUMPPORTAL_API_KEY", raising=False)     # Ali's real .env key would add a second (trade) socket to this test
     msgs = [json.dumps(create("Z1")), json.dumps(buy("Z1", "a")), "not json", json.dumps(buy("Z1", "b"))]
     sent_payloads, got = [], []
 

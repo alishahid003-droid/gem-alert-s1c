@@ -1,0 +1,79 @@
+"""FAST router (14 Oct 2026): every free-data early signal is routed into the FOUR money streams.
+
+Streams (each is a book with its own balance, target and exits, see executor/books.py):
+  sprint   "bills" stream  $100 -> $10,000 in 96h   profile fast_sprint : bank early, 40% runner, tight window
+  core1    "Core 2"        -> $125k-150k in 30 days profile fast_core   : coins 2-20 min old that keep gaining buyers
+  core2    "Core 3"        -> $1M-1.5M in 180 days  profile fast_moon   : tiny lottery shots, 80% runner
+  compound "in/out" stream  small runners 2x-3x, in and out profile compound (existing quick exits)
+
+Rule: a coin gets AT MOST ONE moonshot book (moon > sprint > core) plus, if it qualifies, ONE compound position.
+Paper opens every routed signal (evidence; capacity FAST_PAPER_MAX_OPEN). LIVE is a separate, stricter gate in
+executor/pumpportal_exec.allowed and only fires when EARLY_FREE_CONFIRM=live; only fast_sprint can be live.
+Pure functions + one ledger lookup; no network.
+"""
+import os
+from typing import List, Optional, Tuple
+
+
+def _f(name: str, default: float) -> float:
+    try:
+        v = os.environ.get(name, "").strip()
+        return float(v) if v else default
+    except ValueError:
+        return default
+
+
+# profile -> (book id = ledger module, env name for stake, default stake USD)
+STREAMS = {
+    "fast_moon": ("core2", "FAST_MOON_STAKE_USD", 2.0),
+    "fast_sprint": ("sprint", "FAST_SPRINT_STAKE_USD", 5.0),
+    "fast_core": ("core1", "FAST_CORE_STAKE_USD", 4.0),
+    "compound": ("compound", "FAST_COMPOUND_STAKE_USD", 4.0),
+}
+
+
+def route(decision: dict) -> List[dict]:
+    """[{profile, book, stake}] for one decision; [] when it fits nowhere."""
+    age = float(decision.get("age_s") or 0.0)
+    mc = float(decision.get("entry_mcap_sol") or decision.get("mcap_sol") or 0.0)
+    conf = list(decision.get("confirmations") or [])
+    n = len(conf)
+    famous = "famous_name" in conf
+    profiles = []
+    if age <= _f("FAST_MOON_MAX_AGE_S", 60) and mc <= _f("FAST_MOON_MAX_MCAP_SOL", 35) and famous and n >= 3:
+        profiles.append("fast_moon")                                # rare, strongest evidence: lottery shot for the 180-day book
+    elif age <= _f("FAST_SPRINT_MAX_AGE_S", 120) and mc <= _f("FAST_SPRINT_MAX_MCAP_SOL", 55):
+        profiles.append("fast_sprint")
+    elif age <= _f("FAST_CORE_MAX_AGE_S", 1200) and mc <= _f("FAST_CORE_MAX_MCAP_SOL", 130):
+        profiles.append("fast_core")
+    if profiles and n >= 2 and mc <= _f("FAST_COMPOUND_MAX_MCAP_SOL", 130):
+        profiles.append("compound")                                 # in/out stream rides the same coin with quick exits
+    out = []
+    for p in profiles:
+        book, env, dflt = STREAMS[p]
+        stake = _f(env, dflt)
+        if stake > 0:
+            out.append({"profile": p, "book": book, "stake": stake})
+    return out
+
+
+def assign(decision: dict) -> Optional[str]:
+    """Primary profile (first route) or None."""
+    r = route(decision)
+    return r[0]["profile"] if r else None
+
+
+def live_lane(profile: str) -> str:
+    """Name used by pumpportal_exec.allowed / EARLY_LIVE_LANES: only fast_sprint can ever go live (as 'sprint')."""
+    return "sprint" if profile == "fast_sprint" else "never_live"
+
+
+def open_fast() -> list:
+    from executor import paper_ledger
+    return [p for p in paper_ledger._open().values() if str((p.get("tags") or {}).get("fast")) == "1"]
+
+
+def paper_gate() -> Tuple[bool, str]:
+    n = len(open_fast())
+    cap = int(_f("FAST_PAPER_MAX_OPEN", 60))
+    return (n < cap), (f"fast paper capacity {n}/{cap}" if n >= cap else "ok")

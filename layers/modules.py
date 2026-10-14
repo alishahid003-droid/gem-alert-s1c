@@ -37,6 +37,9 @@ MODULES: List[Dict] = [
     {"id": "dev_list", "kind": "book", "emoji": "🧑‍💻", "short": "DEV LAUNCH", "name": "Dev Copy-Trading — Our Quality-Dev List",
      "blurb": "A developer from our elite/good list just launched a token.",
      "layers": ["layer1", "early_dev_list"], "sources": ["dev_list", "early_dev_list"], "signals": ["deployer_trusted"]},
+    {"id": "fast", "kind": "finder", "emoji": "🏎️", "short": "FAST", "name": "Fast lane (paper evidence, 1 coin = 1 book)",
+     "blurb": "Free-data early entries routed to exactly one lane (fast_sprint <=120s, fast_core <=20min) with their own exits.",
+     "layers": ["early_fast_sprint", "early_fast_core"], "sources": ["early_fast_sprint", "early_fast_core"], "signals": []},
     # ---- finders / views (no balance; they feed the books above) ----
     {"id": "dev_intel", "kind": "view", "emoji": "🔎", "short": "DEV INTEL", "name": "Dev Analysis — Any Dev, Not Just the List",
      "blurb": "Dev holding %, wallet age and track record for every coin we alert on or buy — including devs not on our list.",

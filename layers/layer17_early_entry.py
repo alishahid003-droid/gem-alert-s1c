@@ -40,6 +40,29 @@ def _f(name: str, default: float) -> float:
         return default
 
 
+
+_FAMOUS_DEFAULT = (
+    # politics / tech leaders / AI + big brands
+    "trump|elon|musk|vance|biden|obama|putin|zelensky|zuckerberg|bezos|altman|durov|vitalik|satoshi|tesla|spacex|starlink|apple|"
+    "microsoft|amazon|google|nvidia|openai|chatgpt|grok|gemini|anthropic|claude|deepseek|samsung|netflix|disney|nike|adidas|"
+    "mcdonald|starbucks|cocacola|pepsi|ferrari|lamborghini|bitcoin|"
+    # sports people and leagues
+    "ronaldo|messi|neymar|mbappe|haaland|lebron|curry|kobe|jordan|tyson|mayweather|mcgregor|khabib|kohli|dhoni|babar|federer|nadal|"
+    "djokovic|verstappen|hamilton|nba|nfl|ufc|fifa|wwe|"
+    # influencers / creators / celebrities
+    "mrbeast|kaicenat|ishowspeed|speed|loganpaul|jakepaul|andrewtate|tate|pewdiepie|adinross|xqc|kardashian|kylie|drake|kanye|"
+    "taylorswift|swift|beyonce|rihanna|eminem|snoop|diddy|rogan|hawktuah|dogecoin")
+_FAMOUS_CACHE = {}
+
+
+def _famous_rx():
+    import os as _os
+    import re as _re
+    pat = (_os.environ.get("EARLY_FAMOUS_NAMES") or _FAMOUS_DEFAULT).strip()
+    if pat not in _FAMOUS_CACHE:
+        _FAMOUS_CACHE[pat] = _re.compile(pat, _re.I) if pat and pat != "off" else _re.compile(r"(?!x)x")
+    return _FAMOUS_CACHE[pat]
+
 class Rec:
     __slots__ = ("mint", "symbol", "name", "creator", "created", "dev_tokens", "init_sol", "mcap_sol0", "mcap_sol",
                  "buyers", "buys", "sells", "buy_sol", "sell_sol", "creator_sold", "smart", "decided", "trades",
@@ -174,6 +197,8 @@ class EarlyTracker:
                 out.append("pressure_free")
             if r.free_vol >= _f("EARLY_FREE_MIN_VOL_USD", 2500):
                 out.append("velocity_free")
+        if _famous_rx().search((r.symbol or "") + " " + (r.name or "")):
+            out.append("famous_name")        # 14 Oct: brand/celebrity-themed coins reached 10x at 9.2% vs 2.6% (607 vs 20,262 coins, 2 days)
         terms = self.hot_terms_fn()
         if terms:
             words = {w for w in (r.symbol + " " + r.name).lower().replace("-", " ").split() if len(w) >= 3}
@@ -253,7 +278,7 @@ class EarlyTracker:
         return {"lane": lane, "lanes": lanes, "mint": r.mint, "symbol": r.symbol, "name": r.name, "creator": r.creator,
                 "age_s": round(age, 1), "mcap_sol": round(r.mcap_sol, 2), "entry_mcap_sol": round(r.mcap_sol, 2),
                 "buyers": len(r.buyers), "buys": r.buys, "sells": r.sells, "confirmations": conf,
-                "smart": sorted(r.smart)[:3], "uses_free": any(c.endswith("_free") for c in conf), "potential": "100x+" if "core2" in lanes else "10x-50x" if "core1" in lanes
+                "smart": sorted(r.smart)[:3], "fb": r.free_buys, "fs": r.free_sells, "fv": round(r.free_vol), "uses_free": any(c.endswith("_free") for c in conf), "potential": "100x+" if "core2" in lanes else "10x-50x" if "core1" in lanes
                 else "2x-10x" if "compound" in lanes else "copy"}
 
     # ------------------------------------------------------------------ upkeep
