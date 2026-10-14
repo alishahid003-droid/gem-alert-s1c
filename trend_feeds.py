@@ -1,8 +1,9 @@
 """Free trend feeds -> hot terms for the early watcher (14 Oct 2026). No keys, no cost.
 
-Sources (all public): Google Trends daily-trending RSS (several countries), Reddit r/all + r/popular hot titles,
-Wikipedia most-viewed articles (yesterday). Every cycle the merged terms are written to the state key
-`radar_hot_terms` (same key the old Radar used) and the full list with source/first-seen to `trend_terms_v1`.
+Sources (all public): Google Trends daily-trending RSS (16 countries), Reddit r/all + r/popular hot titles,
+Wikipedia most-viewed articles (yesterday), Bluesky + Mastodon trending, X (Twitter) trends via the trends24 mirror,
+TikTok Creative Center hashtags (best effort: TikTok may refuse). Instagram/Facebook have no public trend feed. Every cycle the merged terms (with source and first-seen) are written to the state key `trend_terms_v1`;
+the early watcher reads it next to the old Radar's `radar_hot_terms`.
 
 A coin whose name/ticker matches a trending term gets the `narrative` confirmation; the FIRST coin ever to match a
 trending term gets `narrative_first` as well (see layer17). Tuning is done from logged data, not guessed."""
@@ -72,6 +73,45 @@ def parse_wiki_top(json_text):
     return out
 
 
+def _hashtag(t):
+    t = re.sub(r"^#", "", (t or "").strip())
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)          # #MooDeng -> Moo Deng
+
+
+def parse_bluesky(json_text):
+    import json
+    try:
+        d = json.loads(json_text)
+    except Exception:  # noqa: BLE001
+        return []
+    return [_hashtag(t.get("topic") or t.get("displayName") or "") for t in (d.get("topics") or []) if isinstance(t, dict)]
+
+
+def parse_mastodon_tags(json_text):
+    import json
+    try:
+        d = json.loads(json_text)
+    except Exception:  # noqa: BLE001
+        return []
+    return [_hashtag(t.get("name") or "") for t in d if isinstance(t, dict)]
+
+
+def parse_trends24(html):
+    """X (Twitter) trends via the public trends24 mirror."""
+    import html as _h
+    names = re.findall(r'class="trend-link"[^>]*>([^<]{2,60})<', html or "")
+    return [_hashtag(_h.unescape(n)) for n in names[:60]]
+
+
+def parse_tiktok(json_text):
+    import json
+    try:
+        items = json.loads(json_text)["data"]["list"]
+    except Exception:  # noqa: BLE001
+        return []
+    return [_hashtag(i.get("hashtag_name") or "") for i in items if isinstance(i, dict)]
+
+
 def terms_from_titles(titles):
     """-> {term: kind}. Full phrase (spaced), squashed phrase, and distinctive single words (>=4 chars, not stop words)."""
     out = {}
@@ -109,6 +149,19 @@ def fetch_all(now=None):
         except Exception as e:  # noqa: BLE001
             notes.append(f"reddit {sub}: {type(e).__name__}")
     srcs["reddit"] = r
+    def _many(name, urls, parse, headers=None):
+        got = []
+        for u in urls:
+            try:
+                got += parse(_get(u))
+            except Exception as e:  # noqa: BLE001
+                notes.append(f"{name}: {type(e).__name__}")
+        srcs[name] = got
+    _many("bluesky", ["https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics?limit=25"], parse_bluesky)
+    _many("mastodon", [f"https://{h}/api/v1/trends/tags?limit=20" for h in ("mastodon.social", "mstdn.social")], parse_mastodon_tags)
+    _many("x", [f"https://trends24.in/{c}/" for c in ("united-states", "united-kingdom", "india", "pakistan", "nigeria", "brazil")], parse_trends24)
+    _many("tiktok", [f"https://ads.tiktok.com/creative_radar_api/v1/popular_trend/hashtag/list?page=1&limit=50&period=7&country_code={c}&sort_by=popular"
+                     for c in ("US", "GB", "PK")], parse_tiktok)
     try:
         y = time.gmtime(now - 86400)
         srcs["wiki"] = parse_wiki_top(_get(
@@ -139,7 +192,4 @@ def refresh(state, now=None, fetch=fetch_all):
     for t in [t for t, rec in book.items() if now - float(rec.get("last") or 0) > 48 * 3600]:
         del book[t]                                              # forget terms not trending for 2 days
     state.set_value("trend_terms_v1", book)
-    if seen_now or book:
-        hot = sorted(book)[:1500]
-        state.set_value("radar_hot_terms", {"ts": now, "terms": hot})
     return len(book), notes

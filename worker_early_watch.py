@@ -80,9 +80,14 @@ def smart_wallets() -> set:
 def hot_terms() -> set:
     def fetch():
         rec = state.get_value("radar_hot_terms")
+        out = set()
         if isinstance(rec, dict) and time.time() - float(rec.get("ts") or 0) < 6 * 3600:
-            return {str(t).lower() for t in (rec.get("terms") or [])}
-        return set()
+            out |= {str(t).lower() for t in (rec.get("terms") or [])}
+        book = state.get_value("trend_terms_v1")          # written by trend_feeds.py (separate key: the old Radar can't overwrite it)
+        if isinstance(book, dict):
+            cut = time.time() - 6 * 3600
+            out |= {str(t).lower() for t, v in book.items() if isinstance(v, dict) and float(v.get("last") or 0) >= cut}
+        return out
     return _cached("hot", 60, fetch) or set()
 
 

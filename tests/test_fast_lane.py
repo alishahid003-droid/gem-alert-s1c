@@ -233,4 +233,14 @@ def test_trend_refresh_writes_state_without_network(monkeypatch):
         get_value = staticmethod(lambda k: store.get(k))
         set_value = staticmethod(lambda k, v: store.__setitem__(k, v))
     n, notes = tf.refresh(S, now=1000.0, fetch=lambda now: ({"google": ["Moo Deng"], "reddit": [], "wiki": ["Taylor Swift"]}, ["x"]))
-    assert n >= 4 and "moo deng" in store["radar_hot_terms"]["terms"] and store["trend_terms_v1"]["moo deng"]["src"] == ["google"]
+    assert n >= 4 and store["trend_terms_v1"]["moo deng"]["src"] == ["google"]
+
+
+def test_social_trend_parsers():
+    import trend_feeds as tf
+    assert tf.parse_bluesky('{"topics":[{"topic":"MooDeng"},{"topic":"Elon Musk"}]}') == ["Moo Deng", "Elon Musk"]
+    assert tf.parse_mastodon_tags('[{"name":"JohnPhil"},{"name":"cats"}]') == ["John Phil", "cats"]
+    assert tf.parse_trends24('<a class="trend-link" href="x">#TaylorSwift</a><a class="trend-link" href="y">Messi</a>') == ["Taylor Swift", "Messi"]
+    assert tf.parse_tiktok('{"data":{"list":[{"hashtag_name":"labubu"}]}}') == ["labubu"]
+    assert tf.parse_tiktok("garbage") == [] and tf.parse_bluesky("") == []
+    assert "moo deng" in tf.terms_from_titles(["Moo Deng"]) and "moodeng" in tf.terms_from_titles(["Moo Deng"])
