@@ -103,6 +103,13 @@ def cache_put(chain: str, result: dict) -> None:
         if not (result or {}).get("ok"):
             return
         from layers.roster import CONVERGENCE_ROSTER
+        allt = (result.get("buy_trades") or []) + (result.get("sell_trades") or [])
+        names = {}
+        for t in allt:
+            names[t.get("kol_name")] = names.get(t.get("kol_name"), 0) + 1
+        state.set_value(f"kol_feed_diag_v1:{chain}", {"ts": time.time(), "total": len(allt),
+                                                      "in_roster": sum(1 for t in allt if t.get("kol_name") in CONVERGENCE_ROSTER),
+                                                      "top_names": sorted(names.items(), key=lambda kv: -kv[1])[:15]})
         keep = lambda ts: [t for t in (ts or []) if t.get("kol_name") in CONVERGENCE_ROSTER][:200]
         state.set_value(f"kol_feed_cache_v1:{chain}", {"ts": time.time(), "buy_trades": keep(result.get("buy_trades")),
                                                        "sell_trades": keep(result.get("sell_trades"))})
