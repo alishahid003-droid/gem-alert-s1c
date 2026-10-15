@@ -546,3 +546,19 @@ def test_rpc_pool_uses_own_helius_first_and_masks_key(monkeypatch):
     r = rpc_pool.rpc_call("solana", "getSlot", [])
     assert seen[0].startswith("https://mainnet.helius-rpc.com") and r["ok"]
     assert "SECRET123" not in str(r)
+
+
+def test_kol_feed_cache_shared_and_used_when_paced(monkeypatch):
+    import time, copy_signals
+    from layers import kol_feed, roster
+    st = _FakeState()
+    monkeypatch.setattr(kol_feed, "state", st)
+    name = sorted(roster.TIER_1)[0]
+    kol_feed.cache_put("solana", {"ok": True, "buy_trades": [{"kol_name": name, "action": "buy", "token_mint": "MINTZpump", "wallet_address": "W" * 40},
+                                                             {"kol_name": "Nobody", "action": "buy", "token_mint": "X"}], "sell_trades": []})
+    c = kol_feed.cached_feed("solana")
+    assert c["ok"] and len(c["buy_trades"]) == 1                       # non-roster trades dropped
+    monkeypatch.setattr(kol_feed, "fetch_kol_feed_both", lambda *a, **k: {"ok": False, "reason": "paced", "buy_trades": [], "sell_trades": []})
+    n, notes = copy_signals.refresh(st)
+    assert n == 1 and any("cached" in x for x in notes)
+    assert st.d.get("kol_wallets_v1", {}).get(name) == "W" * 40         # wallet harvested for the on-chain watcher

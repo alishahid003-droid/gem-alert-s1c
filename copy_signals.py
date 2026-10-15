@@ -80,10 +80,16 @@ def refresh(state, now: Optional[float] = None, kol_fetch: Optional[Callable] = 
     book = {m: e for m, e in old.items() if now - float(e.get("ts") or 0) < KEEP_S}
     try:
         from layers import roster
+        use_default = kol_fetch is None
         if kol_fetch is None:
             from layers import kol_feed
             kol_fetch = lambda: kol_feed.fetch_kol_feed_both("solana", 100)
         res = kol_fetch() or {}
+        if not res.get("ok") and use_default:
+            cached = kol_feed.cached_feed("solana")          # scheduler's last successful poll (shared budget)
+            if cached.get("ok"):
+                notes.append(f"kol: using cached feed ({res.get('reason', '')[:30]})")
+                res = cached
         if res.get("ok"):
             from_kol_trades(res.get("buy_trades") or [], roster.CONVERGENCE_ROSTER, roster.tier_of, now, book)
             try:

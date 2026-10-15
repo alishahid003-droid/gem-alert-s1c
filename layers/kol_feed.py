@@ -26,6 +26,7 @@ that touches MadeOnSol.
 """
 from config import CONFIG
 from utils.http import get_json, describe_fetch_failure
+import time
 import state
 
 
@@ -88,8 +89,33 @@ def fetch_kol_feed_both(chain: str = "solana", limit: int = 100) -> dict:
         result = _fetch_kol_feed_both_unpaced(chain, limit, already_confirmed)
         if result.get("calls_made"):
             state.record_madeonsol_routine_calls(result["calls_made"])
+        cache_put(chain, result)
         return result
-    return _fetch_kol_feed_both_unpaced(chain, limit, already_confirmed)
+    result = _fetch_kol_feed_both_unpaced(chain, limit, already_confirmed)
+    cache_put(chain, result)
+    return result
+
+
+def cache_put(chain: str, result: dict) -> None:
+    """Oct 15 2026: the slow scheduler and the real-time worker both want this feed but share one ~190 calls/day budget,
+    so the worker was paced out all day. Keep the latest successful roster trades in state so BOTH can use them."""
+    try:
+        if not (result or {}).get("ok"):
+            return
+        from layers.roster import CONVERGENCE_ROSTER
+        keep = lambda ts: [t for t in (ts or []) if t.get("kol_name") in CONVERGENCE_ROSTER][:200]
+        state.set_value(f"kol_feed_cache_v1:{chain}", {"ts": time.time(), "buy_trades": keep(result.get("buy_trades")),
+                                                       "sell_trades": keep(result.get("sell_trades"))})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def cached_feed(chain: str, max_age: float = 7200.0) -> dict:
+    c = state.get_value(f"kol_feed_cache_v1:{chain}") or {}
+    if c and time.time() - float(c.get("ts") or 0) <= max_age:
+        return {"ok": True, "buy_trades": c.get("buy_trades") or [], "sell_trades": c.get("sell_trades") or [],
+                "mode": "cached", "calls_made": 0}
+    return {"ok": False, "reason": "no fresh cached KOL feed", "buy_trades": [], "sell_trades": [], "mode": "none", "calls_made": 0}
 
 
 def _fetch_kol_feed_both_unpaced(chain: str, limit: int, already_confirmed: bool) -> dict:
