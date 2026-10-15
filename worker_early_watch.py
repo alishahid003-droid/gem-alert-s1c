@@ -120,6 +120,7 @@ def make_tracker() -> EarlyTracker:
     t = _make_tracker()
     t.claim_fn = claim_trend_term
     t.good_dev_fn = lambda c: c in good_devs_set()
+    t.hot_words_fn = lambda: _cached("hotwords", 120, lambda: tuple(state.get_value("hot_words_v1") or ())) or ()
     t.copy_fn = lambda m: _copy_book().get(m)
     return t
 
@@ -487,12 +488,12 @@ async def main_async():
                 devs, _ = await loop.run_in_executor(None, dev_rank.scan)
                 extra = [w["address"] for w in json.load(open("pumpfun_top_devs_oct2026.json", encoding="utf-8")).get("wallets", [])] \
                     if os.path.exists("pumpfun_top_devs_oct2026.json") else []
-                for d in dev_history.queue(state, devs, extra):
+                for d in dev_history.queue(state, devs, extra, n=3):
                     rec = await loop.run_in_executor(None, lambda d=d: dev_history.backfill_one(state, d, rpc=rpc))
                     print(f"[dev_history] {d[:6]}.. -> {rec if rec else 'no data (helius/rpc failed)'}", flush=True)
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
-            await asyncio.sleep(int(os.environ.get("DEV_HIST_S", "90")))
+            await asyncio.sleep(int(os.environ.get("DEV_HIST_S", "60")))
 
     async def copy_refresher():
         """Every 45 s: pull KOL / Fomo copy-trading buys into copy_buys_v1 and re-check the coins they touched."""

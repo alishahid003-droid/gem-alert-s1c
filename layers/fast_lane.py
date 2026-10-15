@@ -69,7 +69,7 @@ def score(d) -> int:
     d = d or {}
     c = set(d.get("confirmations") or [])
     s = 0
-    for k, w in (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("kol_buy", 3), ("kol_converge", 3), ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("dev_list", 0), ("repeat_grad", 2)):
+    for k, w in (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("kol_buy", 3), ("kol_converge", 3), ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("hot_meta", 2), ("dev_list", 0), ("repeat_grad", 2)):
         if k in c:
             s += w
     s += 1 if "pressure_free" in c else 0

@@ -562,3 +562,20 @@ def test_kol_feed_cache_shared_and_used_when_paced(monkeypatch):
     n, notes = copy_signals.refresh(st)
     assert n == 1 and any("cached" in x for x in notes)
     assert st.d.get("kol_wallets_v1", {}).get(name) == "W" * 40         # wallet harvested for the on-chain watcher
+
+
+def test_hot_words_from_logs_and_score(tmp_path):
+    import json, time, dev_rank
+    from layers import fast_lane
+    now = time.time()
+    rows = []
+    def coin(m, name, age_h, peak_x):
+        rows.append({"t": "create", "ts": now - age_h * 3600, "mint": m, "creator": "c", "mcap_sol": 30.0, "name": name, "sym": name[:5]})
+        rows.append({"t": "outcome", "mint": m, "cp_min": 60, "mcap_usd": 30.0 * dev_rank.SOL_USD * peak_x})
+    coin("a", "Veil Wojak", 3, 20)          # runner 3 h ago
+    coin("b", "Randomcoin", 3, 0.5)         # flop
+    coin("c", "Fresh Runner", 0.2, 30)      # too young: peak not fully known
+    (tmp_path / "x.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    hw = dev_rank.hot_words(str(tmp_path / "*.jsonl"), now)
+    assert "veil" in hw and "wojak" in hw and "randomcoin" not in hw and "fresh" not in hw
+    assert fast_lane.score({"confirmations": ["hot_meta"]}) == 2

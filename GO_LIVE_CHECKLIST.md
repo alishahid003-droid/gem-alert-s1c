@@ -213,3 +213,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Finding: KOL copy feed stayed at 0 because the slow scheduler and the real-time worker share the ~190 calls/day MadeOnSol budget and the worker was paced out all day (kol_wallets_v1 never harvested, so wallet watch only followed the 13 pump.fun roster wallets).
 - Fix: `layers/kol_feed.cache_put/cached_feed` store the scheduler's last good roster trades in state; `copy_signals.refresh` falls back to that cache (<=2 h old) when paced. No extra MadeOnSol calls. Needs push + restart.
 - 4h data (restart 11:42 PKT): dev_history 243 devs, 3,617 launches, 23 wins (18 devs with any win); good devs 67; EVM smart wallets: bsc 3, robinhood 11, base 3 (5 pool hits); 18 DEV LAUNCH alerts; wallet_watch 0 copy buys (13 roster wallets, partial DNS failures on the PC: ~1,278 getaddrinfo errors).
+
+## 1Q. hot_meta signal; winner-creator backfill; KOL diagnostics (15 Oct 2026, ~20:00 PKT)
+- New confirmation `hot_meta` (+2): the coin's name shares a word with a coin launched 1-6 h earlier that already ran >=5x (dev_rank.hot_words, state hot_words_v1, refreshed every 20 min). Offline test on 36,460 coins: reaches 10x 6.54% vs 1.96% otherwise (>=3x 9.6% vs 4.6%); `meta_test.py` reproduces it. Weight is a first guess; paper evidence over the next 24 h decides.
+- Dev history queue now includes creators of ANY winning coin in our logs (2,173 devs), 3 devs / 60 s; so we learn which winners' devs have other winners.
+- KOL feed diagnostics (kol_feed_diag_v1: total trades, in-roster trades, top names) to find out why the cached feed holds 0 roster trades.

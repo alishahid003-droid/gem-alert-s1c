@@ -65,6 +65,44 @@ def scan(log_glob="early_log/*.jsonl", now=None) -> Tuple[Dict[str, list], Dict[
     return dict(devs), dict(wallets)
 
 
+def hot_words(log_glob="early_log/*.jsonl", now=None, hot=5.0, max_freq=30):
+    """Name words of coins launched 1-6 h ago that already ran >= `hot`x (peak known). Oct 15 test (36,460 coins): a new coin
+    sharing such a word reaches 10x 6.5% of the time vs 2.0% otherwise ('veil', 'wojak' style meta)."""
+    import re
+    now = now or time.time()
+    creates, oc = {}, collections.defaultdict(dict)
+    for f in sorted(glob.glob(log_glob)):
+        try:
+            fh = open(f, errors="ignore")
+        except OSError:
+            continue
+        with fh:
+            for l in fh:
+                head = l[:24]
+                try:
+                    if '"create"' in head:
+                        r = json.loads(l)
+                        if now - 6 * 3600 <= r["ts"] <= now - 3900:
+                            creates[r["mint"]] = r
+                    elif '"outcome"' in head:
+                        r = json.loads(l)
+                        if r.get("mcap_usd"):
+                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"]
+                except Exception:  # noqa: BLE001
+                    continue
+    freq, hotc = collections.Counter(), collections.Counter()
+    for m, c in creates.items():
+        words = {w for w in re.findall(r"[a-z0-9]+", ((c.get("name") or "") + " " + (c.get("sym") or "")).lower()) if len(w) >= 4}
+        pk = max(oc[m].values()) / (c["mcap_sol"] * SOL_USD) if oc.get(m) and c.get("mcap_sol") else 0
+        if pk > 500:
+            continue
+        for w in words:
+            freq[w] += 1
+            if pk >= hot:
+                hotc[w] += 1
+    return sorted(w for w in hotc if freq[w] <= max_freq)
+
+
 def good_devs(devs, min_launches=None, min_win=None) -> Set[str]:
     ml = int(min_launches if min_launches is not None else _env("GOOD_DEV_MIN_LAUNCHES", 3))
     mw = min_win if min_win is not None else _env("GOOD_DEV_MIN_WIN", 0.30)
@@ -85,6 +123,10 @@ def refresh(state, log_glob="early_log/*.jsonl") -> Tuple[int, int]:
     except Exception:  # noqa: BLE001
         pass
     gd, sw = good_devs(devs), smart_wallets(wallets)
+    try:
+        state.set_value("hot_words_v1", hot_words())
+    except Exception:  # noqa: BLE001
+        pass
     state.set_value(KEY_DEVS, sorted(gd))
     state.set_value("dev_stats_v1", {k: list(devs[k]) for k in gd})   # [launches, wins] for the dev-launch alert
     state.set_value(KEY_WALLETS, sorted(sw))

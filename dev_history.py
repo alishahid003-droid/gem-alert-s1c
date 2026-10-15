@@ -152,9 +152,9 @@ def queue(state, devs_seen: Dict[str, list], extra: List[str], now: float = None
     """Devs to backfill next: ones launching repeatedly in our logs + extra (screenshot list), oldest/unchecked first."""
     now = now or time.time()
     book = state.get_value(KEY) or {}
-    cand = [d for d, (l, w) in devs_seen.items() if l >= 2] + list(extra)
+    cand = [d for d, (l, w) in devs_seen.items() if l >= 2 or w >= 1] + list(extra)    # repeat launchers + creators of any winner
     cand = [d for d in dict.fromkeys(cand) if now - (book.get(d) or {}).get("ts", 0) > RECHECK_S]
-    cand.sort(key=lambda d: (book.get(d) or {}).get("ts", 0))
+    cand.sort(key=lambda d: ((book.get(d) or {}).get("ts", 0), -(devs_seen.get(d) or [0, 0])[1]))   # unchecked first, creators of winners first
     return cand[:n]
 
 

@@ -112,6 +112,7 @@ class EarlyTracker:
         self.blacklist_fn = blacklist_fn or (lambda w: False)
         self.hot_terms_fn = hot_terms_fn or (lambda: set())
         self.copy_fn = lambda m: None        # copy_signals.info(): followed-trader / KOL / Fomo-new-wallet buys for this mint
+        self.hot_words_fn = lambda: ()      # name words of recent runners (dev_rank.hot_words)
         self.good_dev_fn = lambda c: False   # dev_rank.py scoreboard built from our own logs
         self.claim_fn = None               # claim_fn(term, mint) -> True if this is the FIRST coin to match a trending phrase
         self._phr_cache = (None, ())
@@ -221,6 +222,12 @@ class EarlyTracker:
                 out.append("pressure_free")
             if r.free_vol >= _f("EARLY_FREE_MIN_VOL_USD", 2500):
                 out.append("velocity_free")
+        _nm = ((r.symbol or "") + " " + (r.name or "")).lower()
+        try:
+            if any(w in _nm for w in self.hot_words_fn()):
+                out.append("hot_meta")       # 15 Oct: name shares a word with a recent >=5x runner: 10x rate 6.5% vs 2.0%
+        except Exception:  # noqa: BLE001
+            pass
         if _famous_rx().search((r.symbol or "") + " " + (r.name or "")):
             out.append("famous_name")        # 14 Oct: brand/celebrity-themed coins reached 10x at 9.2% vs 2.6% (607 vs 20,262 coins, 2 days)
         terms = self.hot_terms_fn()
