@@ -71,6 +71,7 @@ single hardcoded endpoint directly, so the RPC-reliability problem is
 solved for every chain at the same time as the buy paths themselves, not
 bolted on afterward chain by chain.
 """
+import os
 import time
 from typing import Optional
 
@@ -120,6 +121,14 @@ def _looks_rate_limited(status_code: Optional[int], err: dict) -> bool:
     return "rate" in message or "limit" in message or "429" in message
 
 
+def _mask(url: str) -> str:
+    """Never let an API key reach logs or callers."""
+    for k in ("api-key=", "api_key="):
+        if k in url:
+            return url.split(k, 1)[0] + k + "***"
+    return url
+
+
 def rpc_call(chain: str, method: str, params: list, timeout: int = 15) -> dict:
     """Tries every non-cooling-down endpoint in RPC_ENDPOINT_POOLS[chain],
     in order, until one returns a usable JSON-RPC response.
@@ -144,7 +153,13 @@ def rpc_call(chain: str, method: str, params: list, timeout: int = 15) -> dict:
     list's per-entry "error" field shows which ones were network failures
     vs. ordinary bad responses.
     """
-    pool = RPC_ENDPOINT_POOLS.get(chain, [])
+    pool = list(RPC_ENDPOINT_POOLS.get(chain, []))
+    if chain == "solana":
+        # Oct 15 2026: the pool only had 3 free public RPCs, which rate-limit getTransaction polling (wallet watch
+        # failed on all of them). Ali's own paid-tier Helius URL from .env (SOLANA_RPC_URL) now goes FIRST.
+        own = (os.environ.get("SOLANA_RPC_URL") or "").strip()
+        if own.startswith("http") and "helius" in own and own not in pool:
+            pool.insert(0, own)
     if not pool:
         return {"ok": False, "reason": f"no RPC endpoints configured for chain '{chain}'", "tried": []}
 
@@ -173,9 +188,9 @@ def rpc_call(chain: str, method: str, params: list, timeout: int = 15) -> dict:
             # cooldown treatment as any other failure, and the loop moves
             # on to the next confirmed-healthy endpoint.
             _mark_failed(chain, url)
-            tried.append({"url": url, "status_code": None, "error": f"ApiUnreachable: {e}"})
+            tried.append({"url": _mask(url), "status_code": None, "error": f"ApiUnreachable: {str(e).replace(url, _mask(url))[:120]}"})
             continue
-        tried.append({"url": url, "status_code": resp.get("status_code")})
+        tried.append({"url": _mask(url), "status_code": resp.get("status_code")})
         if not resp.get("ok"):
             _mark_failed(chain, url)
             continue
@@ -191,6 +206,6 @@ def rpc_call(chain: str, method: str, params: list, timeout: int = 15) -> dict:
             # a real RPC error (bad method, bad params) -- every endpoint in
             # the pool would return the same thing, so don't burn through
             # the rest of the pool for nothing
-            return {"ok": False, "reason": f"rpc error from {url}: {err}", "tried": tried}
-        return {"ok": True, "result": body.get("result"), "endpoint_used": url}
+            return {"ok": False, "reason": f"rpc error from {_mask(url)}: {err}", "tried": tried}
+        return {"ok": True, "result": body.get("result"), "endpoint_used": _mask(url)}
     return {"ok": False, "reason": f"all pool endpoints for '{chain}' failed or rate-limited", "tried": tried}

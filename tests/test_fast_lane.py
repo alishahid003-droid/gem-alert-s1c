@@ -533,3 +533,16 @@ def test_dev_history_rpc_fallback_detects_create():
             return {"ok": True, "result": [{"signature": "s1"}, {"signature": "s2", "err": {"x": 1}}]}
         return {"ok": True, "result": tx}
     assert dh.creates_from_rpc("DEV", rpc) == ["MINTX"]
+
+
+def test_rpc_pool_uses_own_helius_first_and_masks_key(monkeypatch):
+    from executor import rpc_pool
+    monkeypatch.setenv("SOLANA_RPC_URL", "https://mainnet.helius-rpc.com/?api-key=SECRET123")
+    seen = []
+    def fake_post(url, json=None, timeout=0):
+        seen.append(url)
+        return {"ok": True, "status_code": 200, "json": {"result": 1}}
+    monkeypatch.setattr(rpc_pool, "post_json", fake_post)
+    r = rpc_pool.rpc_call("solana", "getSlot", [])
+    assert seen[0].startswith("https://mainnet.helius-rpc.com") and r["ok"]
+    assert "SECRET123" not in str(r)
