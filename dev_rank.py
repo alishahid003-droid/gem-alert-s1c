@@ -135,6 +135,38 @@ def fetch_trending_words() -> list:
         return []
 
 
+def winner_mints(log_glob="early_log/*.jsonl", now=None, min_peak=10.0, limit=400) -> list:
+    """Mints of pump.fun coins (>=65 min old) that reached >= min_peak x their launch price, newest first."""
+    now = now or time.time()
+    creates, oc = {}, collections.defaultdict(dict)
+    for f in sorted(glob.glob(log_glob)):
+        try:
+            fh = open(f, errors="ignore")
+        except OSError:
+            continue
+        with fh:
+            for l in fh:
+                head = l[:24]
+                try:
+                    if '"create"' in head:
+                        r = json.loads(l)
+                        creates[r["mint"]] = r
+                    elif '"outcome"' in head:
+                        r = json.loads(l)
+                        if r.get("mcap_usd"):
+                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"]
+                except Exception:  # noqa: BLE001
+                    continue
+    rows = []
+    for m, c in creates.items():
+        if now - c["ts"] < 3900 or not c.get("mcap_sol") or not oc.get(m):
+            continue
+        pk = max(oc[m].values()) / (c["mcap_sol"] * SOL_USD)
+        if min_peak <= pk <= 500:
+            rows.append((c["ts"], m))
+    return [m for _, m in sorted(rows, reverse=True)][:limit]
+
+
 def good_devs(devs, min_launches=None, min_win=None) -> Set[str]:
     ml = int(min_launches if min_launches is not None else _env("GOOD_DEV_MIN_LAUNCHES", 3))
     mw = min_win if min_win is not None else _env("GOOD_DEV_MIN_WIN", 0.30)

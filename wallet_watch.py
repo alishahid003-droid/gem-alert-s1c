@@ -78,7 +78,7 @@ def watch_set(state) -> dict:
     """{label: wallet}: followed KOL wallets + our own pump.fun smart-money roster (layer2b) + wallets that
     our logs show winning early (dev_rank smart_wallets_v1). All of them are watched on-chain the same way."""
     out = dict(state.get_value(KEY_WALLETS) or {})
-    for key, pre in (("pumpfun_smart_money_roster", "pf"), ("smart_wallets_v1", "sw"), ("st_leaderboard_v1", "st")):
+    for key, pre in (("pumpfun_smart_money_roster", "pf"), ("smart_wallets_v1", "sw"), ("st_leaderboard_v1", "st"), ("st_early_wallets_v1", "se")):
         try:
             for w in state.get_value(key) or []:
                 if isinstance(w, str) and len(w) > 30:

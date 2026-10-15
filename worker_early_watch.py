@@ -88,7 +88,7 @@ def smart_wallets() -> set:
         from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
         return get_smart_money_roster()
     def fetch2():
-        return set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or [])
+        return set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or []) | set(state.get_value("st_early_wallets_v1") or [])
     return _cached("smart", 30, fetch2) or set()
 
 
@@ -499,6 +499,20 @@ async def main_async():
                 traceback.print_exc()
             await asyncio.sleep(3600)
 
+    async def st_first_buyers_task():
+        """Every 15 min: 3 first-buyer lookups for our newest winners (Solana Tracker free credits, day cap 45)."""
+        import solana_tracker, st_enrich, dev_rank
+        await asyncio.sleep(180)
+        while True:
+            try:
+                if solana_tracker.api_key():
+                    mints = await loop.run_in_executor(None, dev_rank.winner_mints)
+                    msg = await loop.run_in_executor(None, lambda: st_enrich.run(state, mints, max_calls=3))
+                    print(f"[st_first_buyers] {msg}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(900)
+
     async def dev_history_backfiller():
         """Every 90 s: backfill the launch history of 2 repeat/listed devs (Helius parsed history, free DexScreener verdicts)."""
         import dev_history, dev_rank
@@ -580,7 +594,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher()), asyncio.create_task(dev_history_backfiller()), asyncio.create_task(leaderboard_refresher())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher()), asyncio.create_task(dev_history_backfiller()), asyncio.create_task(leaderboard_refresher()), asyncio.create_task(st_first_buyers_task())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()
