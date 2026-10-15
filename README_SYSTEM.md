@@ -25,6 +25,7 @@
 | Copy trading | whale_buy | +2 | single buy >= 3 SOL within 90 s |
 | Fomo | fomo_new_wallet | +3 | new high-balance wallet buying (Fomo credits are 0 → idle) |
 | Dud filter | serial launcher (>=3 prior launches, not a proven dev) | -2 | dropping them removes 49% of coins but only 12% of winners (36,481 coins) |
+| Copy trading | Solana Tracker first-buyers of our 10x winners (early + profitable on >=3 winners, `st_enrich.py`, ~45 calls/day) | via wallet watch + smart_wallet | same free key; budget-capped |
 | Copy trading | Solana Tracker top-trader leaderboard | via wallet watch | free key needed (SOLANATRACKER_API_KEY in .env); ~2 calls/day |
 | Market behaviour | pressure_free | +1 | buying pressure on free data |
 | Market behaviour | velocity_free | +1 | price/volume velocity on free data |
