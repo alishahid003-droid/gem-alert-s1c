@@ -505,3 +505,31 @@ def test_evm_cycle_with_fake_fetch():
     r = ev.cycle(st, {"base": "base"}, cands, fetch, trending, now=time.time())
     assert r["watched"] == 1 and ev.hit_n(st, "base", "fresh1") == 1
     assert "tp1" in calls and r["learned"] >= 1
+
+
+def test_dev_history_parse_judge_and_merge():
+    import dev_history as dh
+    page = {"data": [{"ixs": [{"instructionName": "create", "decoded": {"accounts": [{"name": "mint", "pubkey": "M1"}, {"name": "user", "pubkey": "D"}]}},
+                              {"instructionName": "buy", "decoded": {}},
+                              {"instructionName": "create_v2", "decoded": {"accounts": {"mint": "M2"}}}]}], "paginationToken": None}
+    assert dh.find_creates(page) == ["M1", "M2"]
+    pairs = [{"baseToken": {"address": "M1"}, "dexId": "pumpswap", "marketCap": 20000},
+             {"baseToken": {"address": "M2"}, "dexId": "pumpfun", "marketCap": 5000}]
+    v = dh.judge(pairs, ["M1", "M2", "M3"])
+    assert v["M1"]["win"] and not v["M2"]["win"] and not v["M3"]["win"]
+    st = _FakeState()
+    rec = dh.backfill_one(st, "DEV", mints_fn=lambda d: ["M1", "M2", "M3"], pairs_fn=lambda m: pairs)
+    assert rec["launches"] == 3 and rec["wins"] == 1
+    assert dh.queue(st, {"DEV": [5, 1], "X": [2, 0], "Y": [1, 0]}, ["Z"], n=5) == ["X", "Z"]    # DEV just checked; Y has 1 launch
+    assert dh.merged_devs({"DEV": [1, 0]}, st.d[dh.KEY])["DEV"] == [3, 1]
+
+
+def test_dev_history_rpc_fallback_detects_create():
+    import dev_history as dh
+    tx = {"meta": {"logMessages": ["Program log: Instruction: Create"]},
+          "transaction": {"message": {"instructions": [{"programId": dh.PUMP_PROGRAM, "accounts": ["MINTX", "o"]}]}}}
+    def rpc(m, p):
+        if m == "getSignaturesForAddress":
+            return {"ok": True, "result": [{"signature": "s1"}, {"signature": "s2", "err": {"x": 1}}]}
+        return {"ok": True, "result": tx}
+    assert dh.creates_from_rpc("DEV", rpc) == ["MINTX"]

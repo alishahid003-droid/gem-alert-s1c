@@ -197,3 +197,9 @@ LATER (live path, one step at a time, only after proven paper edge):
 - `wallet_watch.py` now also watches our own pump.fun smart-money roster (layer2b, 13 wallets) and `smart_wallets_v1` on-chain, besides the KOL wallets harvested from the feed. This is the pump.fun / StonkFun "leaderboard" source (self-built; no free public leaderboard API exists).
 - `evm_wallets.py` (Base/BSC/Robinhood): learns wallets that were early buyers in >=3 distinct trending (winning) pools, from free GeckoTerminal trades; flags fresh pools a smart wallet is buying -> `smart_wallet` confirmation in multichain_sniper. Paper only (no live adapter on those chains). NOT tested against the live API from the build VM; first real check = log/state after restart. Survivor-biased, needs days of running to fill.
 - Tests: tests/test_fast_lane.py 38 pass; multichain + early tests 30 pass.
+
+## 1N. Dev history backfill; screenshot dev list OFF (15 Oct 2026, ~12:00 PKT)
+- `dev_history.py` + worker task `dev_history_backfiller` (2 devs / 90 s): lists a dev's pump.fun creates via Helius parsed history (fallback plain RPC), judges each coin on free DexScreener data (win = graduated or mcap >= $60k now), stores `dev_history_v1`; `dev_rank.refresh` merges it into the good-dev list. Queue = devs with >=2 launches in our logs + the screenshot wallets (their real history is now measured, not claimed).
+- Screenshot dev list is OFF as an entry/alert source (EARLY_DEV_LIST_ON=1 turns it back on). Reason: 0/69 graduated, 3.9% vs 5.9% base.
+- UNVERIFIED live: Helius parsed-history response shape was parsed tolerantly; check `[dev_history]` lines in logs/local_early-watch.log after restart.
+- GMGN: key is free but needs Ali to create it (Ed25519 key pair + IP whitelist at gmgn.ai/ai); its public docs do not list deployer history. Not wired.

@@ -79,6 +79,11 @@ def smart_wallets(wallets, min_seen=None, min_win=None) -> Set[str]:
 
 def refresh(state, log_glob="early_log/*.jsonl") -> Tuple[int, int]:
     devs, wallets = scan(log_glob)
+    try:
+        import dev_history
+        devs = dev_history.merged_devs(devs, state.get_value(dev_history.KEY) or {})
+    except Exception:  # noqa: BLE001
+        pass
     gd, sw = good_devs(devs), smart_wallets(wallets)
     state.set_value(KEY_DEVS, sorted(gd))
     state.set_value("dev_stats_v1", {k: list(devs[k]) for k in gd})   # [launches, wins] for the dev-launch alert

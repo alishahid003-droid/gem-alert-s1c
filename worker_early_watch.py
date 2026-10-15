@@ -58,7 +58,11 @@ def sol_usd() -> float:
 
 
 def load_dev_list() -> set:
+    """Screenshot dev list: 0/69 graduated, 3.9% vs 5.9% base win rate -> OFF by default (EARLY_DEV_LIST_ON=1 re-enables).
+    dev_history.py still backfills these wallets' real history, so a genuinely good one re-enters via the good-dev list."""
     out = set()
+    if os.environ.get("EARLY_DEV_LIST_ON") != "1":
+        return out
     path = os.environ.get("EARLY_DEV_LIST_FILE", "pumpfun_top_devs_oct2026.json")
     try:
         with open(path, encoding="utf-8") as f:
@@ -472,6 +476,24 @@ async def main_async():
                 traceback.print_exc()
             await asyncio.sleep(int(os.environ.get("DEV_RANK_REFRESH_S", "1200")))
 
+    async def dev_history_backfiller():
+        """Every 90 s: backfill the launch history of 2 repeat/listed devs (Helius parsed history, free DexScreener verdicts)."""
+        import dev_history, dev_rank
+        from executor.rpc_pool import rpc_call
+        rpc = lambda m, p: rpc_call("solana", m, p, timeout=10)
+        await asyncio.sleep(120)
+        while True:
+            try:
+                devs, _ = await loop.run_in_executor(None, dev_rank.scan)
+                extra = [w["address"] for w in json.load(open("pumpfun_top_devs_oct2026.json", encoding="utf-8")).get("wallets", [])] \
+                    if os.path.exists("pumpfun_top_devs_oct2026.json") else []
+                for d in dev_history.queue(state, devs, extra):
+                    rec = await loop.run_in_executor(None, lambda d=d: dev_history.backfill_one(state, d, rpc=rpc))
+                    print(f"[dev_history] {d[:6]}.. -> {rec if rec else 'no data (helius/rpc failed)'}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(int(os.environ.get("DEV_HIST_S", "90")))
+
     async def copy_refresher():
         """Every 45 s: pull KOL / Fomo copy-trading buys into copy_buys_v1 and re-check the coins they touched."""
         import copy_signals
@@ -535,7 +557,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher()), asyncio.create_task(dev_history_backfiller())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()
