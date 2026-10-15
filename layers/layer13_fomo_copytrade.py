@@ -266,6 +266,12 @@ def _fomo_get(path: str, params: Optional[dict] = None, timeout: Optional[float]
                               f"{time.strftime('%H:%M UTC', time.gmtime(gov.get('last_me_ts', now) + _ME_CHECK_SECONDS))}"}
     day = time.strftime("%Y-%m-%d", time.gmtime(now))
     spent = gov.get("spent_today", 0) if gov.get("day") == day else 0
+    hr = time.strftime("%Y-%m-%d %H", time.gmtime(now))
+    spent_hr = gov.get("spent_hour", 0) if gov.get("hour") == hr else 0
+    hr_cap = max(DEFAULT_CALL_COST, int(_daily_budget() / 24 * 1.5))       # 15 Oct: spread the day, never burn it in an hour
+    if spent_hr + DEFAULT_CALL_COST > hr_cap:
+        return {"ok": False, "status_code": None,
+                "reason": f"fomoapi.io hourly credit pace reached ({spent_hr}/{hr_cap})"}
     if spent + DEFAULT_CALL_COST > _daily_budget():
         return {"ok": False, "status_code": None,
                 "reason": f"fomoapi.io daily credit budget reached ({spent}/{_daily_budget()})"}
@@ -277,7 +283,8 @@ def _fomo_get(path: str, params: Optional[dict] = None, timeout: Optional[float]
     except (TypeError, ValueError):
         cost = DEFAULT_CALL_COST
     remaining = hdrs.get("x-credits-remaining")
-    update = {"day": day, "spent_today": spent + (cost if result.get("ok") else 0), "last_call_ts": now}
+    update = {"day": day, "spent_today": spent + (cost if result.get("ok") else 0), "last_call_ts": now,
+              "hour": hr, "spent_hour": spent_hr + (cost if result.get("ok") else 0)}
     if remaining is not None:
         try:
             update["remaining"] = int(remaining)

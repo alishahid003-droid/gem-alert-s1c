@@ -86,10 +86,22 @@ def refresh(state, now: Optional[float] = None, kol_fetch: Optional[Callable] = 
         res = kol_fetch() or {}
         if res.get("ok"):
             from_kol_trades(res.get("buy_trades") or [], roster.CONVERGENCE_ROSTER, roster.tier_of, now, book)
+            try:
+                import wallet_watch
+                wallet_watch.harvest_wallets((res.get("buy_trades") or []) + (res.get("sell_trades") or []), roster.CONVERGENCE_ROSTER, state)
+            except Exception:  # noqa: BLE001
+                pass
         elif res.get("reason"):
             notes.append("kol: " + str(res.get("reason"))[:60])
     except Exception as e:  # noqa: BLE001
         notes.append(f"kol error {type(e).__name__}")
+    try:
+        for m, e in (state.get_value("copy_buys_rpc_v1") or {}).items():       # direct on-chain wallet watch (wallet_watch.py)
+            if now - float(e.get("ts") or 0) < WINDOW_S:
+                for nm in e.get("names") or []:
+                    _add(book, m, nm, float(e.get("ts") or now), int(e.get("best_tier") or 2), "rpc")
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"rpc merge error {type(e).__name__}")
     try:
         from_fomo_signals(state.get_value("fomo_signals") or [], now, book)
     except Exception as e:  # noqa: BLE001

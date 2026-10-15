@@ -369,3 +369,65 @@ def test_converge_and_new_wallet_score_high_and_unlock_moon():
 def test_worker_tracker_has_the_copy_hook():
     tr = w.make_tracker()
     assert tr.copy_fn("nothing-here") is None
+
+
+# ---- 15 Oct: direct wallet watch, wallet harvesting, Fomo hourly pacing -------------------------------------------
+def _tx(wallet, mint, pre_amt, post_amt, sol_pre=5_000_000_000, sol_post=4_000_000_000, err=None):
+    return {"meta": {"err": err, "preBalances": [sol_pre], "postBalances": [sol_post],
+                     "preTokenBalances": [{"owner": wallet, "mint": mint, "uiTokenAmount": {"uiAmount": pre_amt}}] if pre_amt else [],
+                     "postTokenBalances": [{"owner": wallet, "mint": mint, "uiTokenAmount": {"uiAmount": post_amt}}]},
+            "transaction": {"message": {"accountKeys": [{"pubkey": wallet}]}}}
+
+
+def test_wallet_watch_detects_a_buy_and_ignores_sells_and_stables():
+    import wallet_watch as ww
+    W = "WALLET1"
+    assert ww.detect_buys(_tx(W, "MINTpump", 0, 1000), W) == ["MINTpump"]
+    assert ww.detect_buys(_tx(W, "MINTpump", 1000, 400, sol_pre=4_000_000_000, sol_post=5_000_000_000), W) == []   # a sell (SOL up)
+    assert ww.detect_buys(_tx(W, ww.IGNORE_MINTS.copy().pop(), 0, 50), W) == []                                     # stablecoin
+    assert ww.detect_buys(_tx(W, "MINTpump", 0, 1000, err={"x": 1}), W) == []                                       # failed tx
+
+
+def test_wallet_watch_cycle_sets_cursor_first_then_flags_new_buys_and_respects_budget(monkeypatch):
+    import time, wallet_watch as ww
+    st = _FakeState({"kol_wallets_v1": {"Unipcs": "WALLET1"}})
+    calls = []
+    sigs = [[{"signature": "s0"}], [{"signature": "s2", "blockTime": time.time()}, {"signature": "s1", "blockTime": time.time()}]]
+    def rpc(method, params):
+        calls.append(method)
+        if method == "getSignaturesForAddress":
+            return {"ok": True, "result": sigs.pop(0)}
+        return {"ok": True, "result": _tx("WALLET1", "BOUGHTpump", 0, 10)}
+    tier = lambda n: "Tier 1"
+    n1, _ = ww.poll_cycle(st, rpc, tier_of=tier)
+    assert n1 == 0 and st.d["wallet_watch_last_sig_v1"]["WALLET1"] == "s0"                                          # first look: cursor only
+    n2, _ = ww.poll_cycle(st, rpc, tier_of=tier)
+    assert n2 >= 1 and st.d["copy_buys_rpc_v1"]["BOUGHTpump"]["names"] == ["Unipcs"] and st.d["copy_buys_rpc_v1"]["BOUGHTpump"]["best_tier"] == 4
+    monkeypatch.setenv("WALLET_WATCH_MAX_CALLS_DAY", "1")
+    st.d[f"wallet_watch_calls:{time.strftime('%Y-%m-%d', time.gmtime())}"] = 5
+    sigs[:] = [[{"signature": "s9"}]]
+    n3, notes = ww.poll_cycle(st, rpc, tier_of=tier)
+    assert n3 == 0 and any("budget" in x for x in notes)
+
+
+def test_kol_wallets_are_harvested_and_rpc_buys_merge_into_copy_book():
+    import time, wallet_watch as ww, copy_signals
+    from layers import roster
+    st = _FakeState()
+    name = sorted(roster.TIER_1)[0]
+    n = ww.harvest_wallets([{"kol_name": name, "wallet_address": "W9"}, {"kol_name": "Nobody", "wallet_address": "W8"}], roster.CONVERGENCE_ROSTER, st)
+    assert n == 1 and st.d["kol_wallets_v1"] == {name: "W9"}
+    now = time.time()
+    st.d["copy_buys_rpc_v1"] = {"Rpump": {"names": [name], "n": 1, "best_tier": 4, "ts": now - 10}}
+    cnt, _ = copy_signals.refresh(st, now, kol_fetch=lambda: {"ok": False, "reason": "paced"})
+    assert st.d["copy_buys_v1"]["Rpump"]["n"] == 1 and "rpc" in st.d["copy_buys_v1"]["Rpump"]["src"]
+
+
+def test_fomo_hourly_pace_blocks_a_burst(monkeypatch):
+    from layers import layer13_fomo_copytrade as l13
+    import time
+    gov = {"remaining": 100000, "backoff_until": 0, "day": time.strftime("%Y-%m-%d", time.gmtime()), "spent_today": 0,
+           "hour": time.strftime("%Y-%m-%d %H", time.gmtime()), "spent_hour": 10_000}
+    monkeypatch.setattr(l13.state, "get_fomo_credit_state", lambda: dict(gov))
+    r = l13._fomo_get("/v2/alerts")
+    assert not r["ok"] and "hourly" in r["reason"]

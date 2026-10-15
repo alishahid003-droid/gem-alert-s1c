@@ -487,6 +487,19 @@ async def main_async():
                 traceback.print_exc()
             await asyncio.sleep(int(os.environ.get("COPY_REFRESH_S", "45")))
 
+    async def wallet_watcher():
+        """Every 60 s: poll a slice of followed-trader wallets straight from the Solana RPC (no MadeOnSol / Fomo credits)."""
+        import wallet_watch
+        while True:
+            try:
+                n, notes = await loop.run_in_executor(None, wallet_watch.poll_cycle, state)
+                counters["wallet_buys"] = counters.get("wallet_buys", 0) + n
+                if n or (notes and notes[0] != "no wallets harvested yet"):
+                    print(f"[wallet_watch] {n} new buys; {', '.join(notes[:2])}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(int(os.environ.get("WALLET_WATCH_S", "60")))
+
     async def live_guard():
         while True:
             await asyncio.sleep(8)
@@ -515,7 +528,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()
