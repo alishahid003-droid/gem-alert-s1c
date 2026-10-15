@@ -63,11 +63,10 @@ def refresh(state, now: float = None, get=None, pages: int = 2, every_s: float =
         tr = parse(body)
         diag = {"keys": sorted(body.keys())[:8] if isinstance(body, dict) else str(type(body)), "n_traders": len(tr),
                 "first": (body.get("traders") or [{}])[0].keys().__repr__()[:300] if isinstance(body, dict) and body.get("traders") else None,
-                "msg": str(body.get("message") or body.get("error") or "")[:120] if isinstance(body, dict) else ""}
+                "sample": (tr[0] if tr else None), "msg": str(body.get("message") or body.get("error") or "")[:120] if isinstance(body, dict) else ""}
         state.set_value("st_diag_v1", diag)
         for t in tr:
-            if t["realized"] is None or t["realized"] > 0:          # lenient: field path may differ; the API already filters for quality
-                wallets.append(t["wallet"])
+            wallets.append(t["wallet"])          # the API already sorts by realized PnL and filters for consistent traders
         cursor = (body.get("pagination") or {}).get("nextCursor")
         if not cursor:
             break

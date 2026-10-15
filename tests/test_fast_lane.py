@@ -609,7 +609,7 @@ def test_solana_tracker_leaderboard_refresh_and_watch_set():
             def json(self): return {"traders": [{"wallet": "W" * 40, "ending": {"pnl": {"realized": 500}}, "counts": {"trades": 50}},
                                                 {"wallet": "L" * 40, "ending": {"pnl": {"realized": -5}}}], "pagination": {"nextCursor": None}}
         msg = stk.refresh(st, now=1e6, get=lambda u, p, h: R())
-        assert "1 wallets" in msg and st.d[stk.KEY_WALLETS] == ["W" * 40]
+        assert "2 wallets" in msg and st.d[stk.KEY_WALLETS] == ["W" * 40, "L" * 40]
         assert stk.refresh(st, now=1e6 + 500, get=lambda u, p, h: R()) == "fresh"
         assert "W" * 40 in wallet_watch.watch_set(st).values()
     finally:
