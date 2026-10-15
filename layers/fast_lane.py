@@ -63,25 +63,48 @@ def assign(decision: dict) -> Optional[str]:
     return r[0]["profile"] if r else None
 
 
-def score(d) -> int:
-    """Entry score (14 Oct). Many weak checks add up; no single check decides. Real money needs FAST_LIVE_MIN_SCORE (default 5).
-    Weights are a first guess from 86 logged signals: re-fit them after ~24 h of logged scores."""
+_WEIGHTS = (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("kol_buy", 3), ("kol_converge", 3),
+            ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("hot_meta", 2), ("dev_list", 0), ("repeat_grad", 2))
+
+
+def score_parts(d) -> List[Tuple[str, int]]:
+    """Entry score broken into its parts: [(check, points)]. Many weak checks add up; no single check decides."""
     d = d or {}
     c = set(d.get("confirmations") or [])
-    s = 0
-    for k, w in (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("kol_buy", 3), ("kol_converge", 3), ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("hot_meta", 2), ("dev_list", 0), ("repeat_grad", 2)):
-        if k in c:
-            s += w
-    s += 1 if "pressure_free" in c else 0
-    s += 1 if "velocity_free" in c else 0
+    parts: List[Tuple[str, int]] = [(k, w) for k, w in _WEIGHTS if k in c and w]
+    if "pressure_free" in c:
+        parts.append(("pressure_free", 1))
+    if "velocity_free" in c:
+        parts.append(("velocity_free", 1))
+    nl = d.get("launches") or 0
+    if nl >= int(_f("SERIAL_LAUNCHER_MIN", 3)) and "good_dev" not in c and "repeat_grad" not in c:
+        parts.append((f"serial launcher ({nl} launches)", -2))   # 15 Oct: dropping >=3-launch creators removes 49% of coins, 12% of winners
     fb, fs = d.get("fb") or 0, d.get("fs") or 0
     if fb or fs:
         r = fs / max(fb, 1)
-        s += 2 if r < .3 else (1 if r < .45 else (-2 if r > .6 else 0))
-        s += 1 if 40 <= fb <= 80 else (-1 if fb > 80 else 0)
+        v = 2 if r < .3 else (1 if r < .45 else (-2 if r > .6 else 0))
+        if v:
+            parts.append((f"sell/buy ratio {r:.2f}", v))
+        v = 1 if 40 <= fb <= 80 else (-1 if fb > 80 else 0)
+        if v:
+            parts.append((f"{fb} buys", v))
     m = d.get("mcap_sol") or d.get("entry_mcap_sol") or 0
-    s += 1 if 30 <= m < 45 else (-2 if m >= 45 else 0)
-    return s
+    v = 1 if 30 <= m < 45 else (-2 if m >= 45 else 0)
+    if v:
+        parts.append((f"mcap {m:.0f} SOL", v))
+    return parts
+
+
+def score(d) -> int:
+    """Entry score (14 Oct). Real money needs FAST_LIVE_MIN_SCORE (default 5).
+    Weights are a first guess from 86 logged signals: re-fit them after ~24 h of logged scores."""
+    return sum(p for _, p in score_parts(d))
+
+
+def score_text(d) -> str:
+    """'5 = good_dev +3, pressure_free +1, velocity_free +1' for alerts / dashboard."""
+    parts = score_parts(d)
+    return f"{sum(p for _, p in parts)} = " + (", ".join(f"{k} {p:+d}" for k, p in parts) or "no checks passed")
 
 
 def live_ok(decision) -> bool:

@@ -103,6 +103,38 @@ def hot_words(log_glob="early_log/*.jsonl", now=None, hot=5.0, max_freq=30):
     return sorted(w for w in hotc if freq[w] <= max_freq)
 
 
+_STOP = {"solana", "token", "coin", "pump", "wrapped", "usdc", "usdt", "pool", "the", "this", "that", "with", "from"}
+
+
+def trending_words(body, min_h1=50.0, min_h24=200.0) -> list:
+    """Name words of Solana pools GeckoTerminal ranks as trending AND already up strongly (second source of 'what is running now',
+    covers graduated runners we did not log). Parses the JSON:API body of /networks/solana/trending_pools."""
+    import re
+    out = set()
+    for pool in (body or {}).get("data", []) or []:
+        a = pool.get("attributes") or {}
+        pc = a.get("price_change_percentage") or {}
+        try:
+            up = float(pc.get("h1") or 0) >= min_h1 or float(pc.get("h24") or 0) >= min_h24
+        except (TypeError, ValueError):
+            up = False
+        if not up:
+            continue
+        nm = str(a.get("name") or "").split("/")[0].lower()
+        out |= {w for w in re.findall(r"[a-z0-9]+", nm) if len(w) >= 4 and w not in _STOP}
+    return sorted(out)
+
+
+def fetch_trending_words() -> list:
+    try:
+        from utils.http import get_json
+        from config import CONFIG
+        r = get_json(f"{CONFIG.geckoterminal_base_url}/networks/solana/trending_pools")
+        return trending_words(r.get("json")) if isinstance(r, dict) and r.get("ok") else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def good_devs(devs, min_launches=None, min_win=None) -> Set[str]:
     ml = int(min_launches if min_launches is not None else _env("GOOD_DEV_MIN_LAUNCHES", 3))
     mw = min_win if min_win is not None else _env("GOOD_DEV_MIN_WIN", 0.30)
@@ -124,7 +156,7 @@ def refresh(state, log_glob="early_log/*.jsonl") -> Tuple[int, int]:
         pass
     gd, sw = good_devs(devs), smart_wallets(wallets)
     try:
-        state.set_value("hot_words_v1", hot_words())
+        state.set_value("hot_words_v1", sorted(set(hot_words()) | set(fetch_trending_words())))
     except Exception:  # noqa: BLE001
         pass
     state.set_value(KEY_DEVS, sorted(gd))

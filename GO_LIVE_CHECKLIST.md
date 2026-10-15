@@ -218,3 +218,9 @@ LATER (live path, one step at a time, only after proven paper edge):
 - New confirmation `hot_meta` (+2): the coin's name shares a word with a coin launched 1-6 h earlier that already ran >=5x (dev_rank.hot_words, state hot_words_v1, refreshed every 20 min). Offline test on 36,460 coins: reaches 10x 6.54% vs 1.96% otherwise (>=3x 9.6% vs 4.6%); `meta_test.py` reproduces it. Weight is a first guess; paper evidence over the next 24 h decides.
 - Dev history queue now includes creators of ANY winning coin in our logs (2,173 devs), 3 devs / 60 s; so we learn which winners' devs have other winners.
 - KOL feed diagnostics (kol_feed_diag_v1: total trades, in-roster trades, top names) to find out why the cached feed holds 0 roster trades.
+
+## 1R. Score breakdown in alerts, dud filter, top-trader leaderboard, trending hot words (15 Oct 2026, ~21:00 PKT)
+- Alerts (Telegram + dashboard Alerts tab) now show `Score: N = check +points, ...` and whether live-eligible (fast_lane.score_parts / score_text).
+- Dud filter study (`dud_filter_test.py`, 36,481 coins): creators with >=3 launches = 49% of coins, only 12% of winners -> `serial launcher` score -2 (not for good_dev/repeat_grad). Coins with <5 buys at the first snapshot: 15% of coins, 0.5% of winners (not yet used as a veto; candidate once snapshots cover all coins). Caveat: only tracked coins have snapshots.
+- `solana_tracker.py`: daily top-trader leaderboard (Solana Tracker PnL v2, consistent traders, excludes arbitrage/one-off winners). NEEDS Ali to create a FREE key at solanatracker.io and add `SOLANATRACKER_API_KEY=...` to .env (free plan 2.5K req/month; we use ~2/day). Wallets are watched on-chain via wallet_watch (label st:xxxx). Free-plan coverage of this endpoint is not confirmed in their docs.
+- Hot words also come from GeckoTerminal trending Solana pools that are already up (>=50% 1h or >=200% 24h).

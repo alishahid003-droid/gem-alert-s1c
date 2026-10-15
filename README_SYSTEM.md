@@ -24,6 +24,8 @@
 | Copy trading | smart_wallet | +3 | our own pump.fun smart-money roster / wallets that won early in our logs |
 | Copy trading | whale_buy | +2 | single buy >= 3 SOL within 90 s |
 | Fomo | fomo_new_wallet | +3 | new high-balance wallet buying (Fomo credits are 0 → idle) |
+| Dud filter | serial launcher (>=3 prior launches, not a proven dev) | -2 | dropping them removes 49% of coins but only 12% of winners (36,481 coins) |
+| Copy trading | Solana Tracker top-trader leaderboard | via wallet watch | free key needed (SOLANATRACKER_API_KEY in .env); ~2 calls/day |
 | Market behaviour | pressure_free | +1 | buying pressure on free data |
 | Market behaviour | velocity_free | +1 | price/volume velocity on free data |
 | Market behaviour | sell/buy ratio | +2 (<0.30), +1 (<0.45), −2 (>0.60) | sells vs buys so far |
@@ -40,6 +42,8 @@ Score = sum of the points above. Examples:
 - **Two weak signals:** narrative 2 + pressure_free 1 = **3**.
 - **Copy buy + dev + whale:** 3 + 3 + 2 = **8** (rare).
 So **5 = roughly two independent kinds of evidence agreeing** (a signal AND the market behaving), never one check alone. The weights are a first guess and will be re-fitted on logged data.
+
+**Alerts and the dashboard Alerts tab now show the breakdown**, e.g. `Score: 5 = good_dev +3, pressure_free +1, velocity_free +1 -> paper only (needs 5 for live)`.
 
 ## 4. What the score does (routing and execution)
 Router (age since launch, market cap in SOL):

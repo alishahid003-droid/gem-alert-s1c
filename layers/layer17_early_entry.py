@@ -326,7 +326,7 @@ class EarlyTracker:
         return {"lane": lane, "lanes": lanes, "mint": r.mint, "symbol": r.symbol, "name": r.name, "creator": r.creator,
                 "age_s": round(age, 1), "mcap_sol": round(r.mcap_sol, 2), "entry_mcap_sol": round(r.mcap_sol, 2),
                 "buyers": len(r.buyers), "buys": r.buys, "sells": r.sells, "confirmations": conf,
-                "smart": sorted(r.smart)[:3], "fb": r.free_buys, "fs": r.free_sells, "fv": round(r.free_vol), "uses_free": any(c.endswith("_free") for c in conf), "potential": "100x+" if "core2" in lanes else "10x-50x" if "core1" in lanes
+                "smart": sorted(r.smart)[:3], "launches": self.launches_fn(r.creator), "fb": r.free_buys, "fs": r.free_sells, "fv": round(r.free_vol), "uses_free": any(c.endswith("_free") for c in conf), "potential": "100x+" if "core2" in lanes else "10x-50x" if "core1" in lanes
                 else "2x-10x" if "compound" in lanes else "copy"}
 
     # ------------------------------------------------------------------ upkeep

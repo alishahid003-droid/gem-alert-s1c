@@ -232,7 +232,7 @@ def test_trend_refresh_writes_state_without_network(monkeypatch):
     class S:
         get_value = staticmethod(lambda k: store.get(k))
         set_value = staticmethod(lambda k, v: store.__setitem__(k, v))
-    n, notes = tf.refresh(S, now=1000.0, fetch=lambda now: ({"google": ["Moo Deng"], "reddit": [], "wiki": ["Taylor Swift"]}, ["x"]))
+    n, notes = tf.refresh(S, now=1e6, fetch=lambda now: ({"google": ["Moo Deng"], "reddit": [], "wiki": ["Taylor Swift"]}, ["x"]))
     assert n >= 4 and store["trend_terms_v1"]["moo deng"]["src"] == ["google"]
 
 
@@ -579,3 +579,46 @@ def test_hot_words_from_logs_and_score(tmp_path):
     hw = dev_rank.hot_words(str(tmp_path / "*.jsonl"), now)
     assert "veil" in hw and "wojak" in hw and "randomcoin" not in hw and "fresh" not in hw
     assert fast_lane.score({"confirmations": ["hot_meta"]}) == 2
+
+
+def test_score_breakdown_text_matches_score():
+    from layers import fast_lane
+    d = {"confirmations": ["good_dev", "pressure_free", "velocity_free", "hot_meta"], "fb": 50, "fs": 10, "entry_mcap_sol": 32}
+    assert fast_lane.score(d) == sum(p for _, p in fast_lane.score_parts(d)) == 3 + 1 + 1 + 2 + 2 + 1 + 1
+    t = fast_lane.score_text(d)
+    assert t.startswith("11 = ") and "good_dev +3" in t and "hot_meta +2" in t and "sell/buy ratio 0.20 +2" in t
+
+
+def test_serial_launcher_penalty_unless_proven_dev():
+    from layers import fast_lane
+    base = {"confirmations": ["famous_name"], "launches": 8}
+    assert fast_lane.score(base) == 3 - 2
+    assert fast_lane.score({"confirmations": ["famous_name", "good_dev"], "launches": 8}) == 6
+    assert fast_lane.score({"confirmations": ["famous_name"], "launches": 1}) == 3
+
+
+def test_solana_tracker_leaderboard_refresh_and_watch_set():
+    import solana_tracker as stk, wallet_watch, os
+    st = _FakeState()
+    os.environ.pop("SOLANATRACKER_API_KEY", None)
+    assert "no SOLANATRACKER_API_KEY" in stk.refresh(st, now=1e6)
+    os.environ["SOLANATRACKER_API_KEY"] = "x"
+    try:
+        class R:
+            status_code = 200
+            def json(self): return {"traders": [{"wallet": "W" * 40, "ending": {"pnl": {"realized": 500}}, "counts": {"trades": 50}},
+                                                {"wallet": "L" * 40, "ending": {"pnl": {"realized": -5}}}], "pagination": {"nextCursor": None}}
+        msg = stk.refresh(st, now=1e6, get=lambda u, p, h: R())
+        assert "1 profitable" in msg and st.d[stk.KEY_WALLETS] == ["W" * 40]
+        assert stk.refresh(st, now=1e6 + 500, get=lambda u, p, h: R()) == "fresh"
+        assert "W" * 40 in wallet_watch.watch_set(st).values()
+    finally:
+        os.environ.pop("SOLANATRACKER_API_KEY", None)
+
+
+def test_trending_words_only_from_pools_that_are_up():
+    import dev_rank
+    body = {"data": [{"attributes": {"name": "SQUIRREL / SOL", "price_change_percentage": {"h1": "120", "h24": "5"}}},
+                     {"attributes": {"name": "SLEEPYCOIN / SOL", "price_change_percentage": {"h1": "-5", "h24": "10"}}},
+                     {"attributes": {"name": "Moon Cat / SOL", "price_change_percentage": {"h1": "10", "h24": "900"}}}]}
+    assert dev_rank.trending_words(body) == ["moon", "squirrel"]

@@ -57,6 +57,15 @@ def sol_usd() -> float:
         return 150.0
 
 
+def _score_text(decision) -> str:
+    try:
+        from layers import fast_lane
+        t = fast_lane.score_text(decision)
+        return t + (" -> live-eligible if Sprint" if fast_lane.live_ok(decision) else " -> paper only (needs 5 for live)")
+    except Exception:  # noqa: BLE001
+        return "n/a"
+
+
 def load_dev_list() -> set:
     """Screenshot dev list: 0/69 graduated, 3.9% vs 5.9% base win rate -> OFF by default (EARLY_DEV_LIST_ON=1 re-enables).
     dev_history.py still backfills these wallets' real history, so a genuinely good one re-enters via the good-dev list."""
@@ -79,7 +88,7 @@ def smart_wallets() -> set:
         from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
         return get_smart_money_roster()
     def fetch2():
-        return set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or [])
+        return set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or [])
     return _cached("smart", 30, fetch2) or set()
 
 
@@ -262,6 +271,7 @@ def act(decision: dict, send=None, now=None) -> dict:
             f"age {decision['age_s']:.0f}s · mcap {decision['entry_mcap_sol']:.1f} SOL (~${mcap_usd:,.0f}) · "
             f"{decision['buyers']} buyers · {decision['buys']} buys/{decision['sells']} sells\n"
             f"Confirmations: {', '.join(decision['confirmations']) or 'none'}\n"
+            f"Score: {_score_text(decision)}\n"
             f"Paper entries: {', '.join(opened) or 'none'}" + (f" | LIVE buys: {', '.join(live_done)}" if live_done else "")
             + (f" (refused: {'; '.join(refused)})" if refused else ""))
     try:
@@ -278,7 +288,7 @@ def act(decision: dict, send=None, now=None) -> dict:
     try:
         state.log_full_alert("early_" + primary, "solana", decision["symbol"] or mint[:8], mint,
                              f"Early entry ({decision['age_s']:.0f}s old, {decision['entry_mcap_sol']:.0f} SOL)",
-                             {"Chain": "solana", "Module": primary, "Confirmations": ", ".join(decision["confirmations"]),
+                             {"Chain": "solana", "Module": primary, "Confirmations": ", ".join(decision["confirmations"]), "Score": _score_text(decision),
                               "Paper": ", ".join(opened) or "none", "Dev holding": ""})
     except Exception:  # noqa: BLE001
         pass
@@ -477,6 +487,18 @@ async def main_async():
                 traceback.print_exc()
             await asyncio.sleep(int(os.environ.get("DEV_RANK_REFRESH_S", "1200")))
 
+    async def leaderboard_refresher():
+        """Hourly check; calls Solana Tracker's free PnL leaderboard at most once a day (needs SOLANATRACKER_API_KEY in .env)."""
+        import solana_tracker
+        while True:
+            try:
+                msg = await loop.run_in_executor(None, solana_tracker.refresh, state)
+                if msg != "fresh":
+                    print(f"[leaderboard] {msg}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(3600)
+
     async def dev_history_backfiller():
         """Every 90 s: backfill the launch history of 2 repeat/listed devs (Helius parsed history, free DexScreener verdicts)."""
         import dev_history, dev_rank
@@ -558,7 +580,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher()), asyncio.create_task(dev_history_backfiller())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher()), asyncio.create_task(wallet_watcher()), asyncio.create_task(dev_history_backfiller()), asyncio.create_task(leaderboard_refresher())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()
