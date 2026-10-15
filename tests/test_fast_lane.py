@@ -431,3 +431,77 @@ def test_fomo_hourly_pace_blocks_a_burst(monkeypatch):
     monkeypatch.setattr(l13.state, "get_fomo_credit_state", lambda: dict(gov))
     r = l13._fomo_get("/v2/alerts")
     assert not r["ok"] and "hourly" in r["reason"]
+
+
+def test_dev_launch_alert_once_per_coin_and_cooldown():
+    import time, dev_alerts
+    st = _FakeState({"dev_stats_v1": {"DEV1": [5, 2]}})
+    st.log_full_alert = lambda *a, **k: st.d.setdefault("feed", []).append(a)
+    sent = []
+    send = lambda h, t: sent.append((h, t))
+    now = time.time()
+    assert dev_alerts.maybe_alert(st, "DEV1", "MINT1", "PEPE", send=send, now=now)
+    assert "won 2 of 5" in sent[0][0]
+    assert not dev_alerts.maybe_alert(st, "DEV1", "MINT1", "PEPE", send=send, now=now + 1)    # same coin
+    assert not dev_alerts.maybe_alert(st, "DEV1", "MINT2", "PEPE2", send=send, now=now + 60)  # cooldown
+    assert dev_alerts.maybe_alert(st, "DEV1", "MINT3", "PEPE3", send=send, now=now + 700)
+    assert len(sent) == 2 and len(st.d["feed"]) == 2
+
+
+def test_wallet_watch_set_includes_pumpfun_roster_and_smart_wallets():
+    import wallet_watch
+    W = "A" * 40
+    st = _FakeState({"kol_wallets_v1": {"Cupsey": "K" * 40}, "pumpfun_smart_money_roster": [W], "smart_wallets_v1": ["B" * 40]})
+    ws = wallet_watch.watch_set(st)
+    assert len(ws) == 3 and W in ws.values()
+
+
+def _gt_trades(rows):
+    return {"data": [{"attributes": {"kind": k, "tx_from_address": w, "block_timestamp": f"2026-10-15T10:00:{i:02d}Z", "volume_in_usd": "50"}}
+                     for i, (k, w) in enumerate(rows)]}
+
+
+def test_evm_wallet_scoreboard_learns_and_flags():
+    import evm_wallets as ev
+    st = _FakeState()
+    for pool in ("p1", "p2", "p3"):
+        rows = [("buy", "0xAAA"), ("buy", "0xBBB")] + [("buy", f"0xR{i}{pool}") for i in range(30)]
+        ev.learn_pool(st, "base", pool, ev.parse_trades(_gt_trades(rows)))
+    assert ev.smart_set(st, "base") == {"0xaaa", "0xbbb"}          # early in 3 distinct winning pools
+    # a bot with >6 trades in one pool is ignored
+    bot = [("buy", "0xBOT")] * 8 + [("buy", "0xCCC")]
+    assert "0xbot" not in ev.early_buyers(ev.parse_trades(_gt_trades(bot)))
+    # a fresh pool bought by a smart wallet is flagged; unknown wallets are not
+    assert ev.check_pool(st, "base", "newpool", ev.parse_trades(_gt_trades([("buy", "0xAAA"), ("sell", "0xBBB")]))) == 1
+    assert ev.hit_n(st, "base", "newpool") == 1 and ev.hit_n(st, "base", "other") == 0
+    assert ev.check_pool(st, "base", "p9", ev.parse_trades(_gt_trades([("buy", "0xZZZ")]))) == 0
+
+
+def test_evm_scanner_gets_smart_wallet_confirmation():
+    import time, multichain_sniper as mc, evm_wallets as ev
+    st = mc.state
+    now = time.time()
+    st.set_value(ev.KEY_HITS, {"base|poolX": {"n": 1, "ts": now}})
+    p = {"chain": "base", "addr": "0xtok", "name": "T", "src": "gt", "pool": "poolX", "mcap": 20000, "liq": 8000,
+         "created": now - 300, "buys5": 5, "sells5": 1, "buyers5": 3, "vol5": 500, "chg5": 5}
+    d = mc.Scanner().evaluate(p, now)
+    assert d is None or "smart_wallet" in d["confirmations"]
+    p["buys5"], p["buyers5"], p["vol5"], p["chg5"] = 20, 12, 5000, 30
+    d = mc.Scanner().evaluate(p, now)
+    assert d and "smart_wallet" in d["confirmations"]
+    st.set_value(ev.KEY_HITS, {})
+
+
+def test_evm_cycle_with_fake_fetch():
+    import time, evm_wallets as ev
+    st = _FakeState()
+    st.set_value(ev.KEY, {"base": {"0xaaa": ["a", "b", "c"]}})
+    calls = []
+    def fetch(slug, pool):
+        calls.append(pool)
+        return _gt_trades([("buy", "0xAAA"), ("buy", "0xQ")])
+    trending = lambda slug: {"data": [{"attributes": {"address": "tp1"}}]}
+    cands = [{"chain": "base", "pool": "fresh1", "created": time.time()}]
+    r = ev.cycle(st, {"base": "base"}, cands, fetch, trending, now=time.time())
+    assert r["watched"] == 1 and ev.hit_n(st, "base", "fresh1") == 1
+    assert "tp1" in calls and r["learned"] >= 1

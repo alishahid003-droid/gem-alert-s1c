@@ -74,6 +74,20 @@ def harvest_wallets(trades: List[dict], roster: set, state) -> int:
     return len(book) - n0
 
 
+def watch_set(state) -> dict:
+    """{label: wallet}: followed KOL wallets + our own pump.fun smart-money roster (layer2b) + wallets that
+    our logs show winning early (dev_rank smart_wallets_v1). All of them are watched on-chain the same way."""
+    out = dict(state.get_value(KEY_WALLETS) or {})
+    for key, pre in (("pumpfun_smart_money_roster", "pf"), ("smart_wallets_v1", "sw")):
+        try:
+            for w in state.get_value(key) or []:
+                if isinstance(w, str) and len(w) > 30:
+                    out.setdefault(f"{pre}:{w[:6]}", w)
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
 def poll_cycle(state, rpc: Optional[Callable] = None, now: Optional[float] = None, roster=None, tier_of=None,
                max_wallets: int = 12) -> Tuple[int, List[str]]:
     """One round-robin slice. Returns (new buys recorded, notes)."""
@@ -85,7 +99,7 @@ def poll_cycle(state, rpc: Optional[Callable] = None, now: Optional[float] = Non
     if tier_of is None:
         from layers import roster as _r
         tier_of = _r.tier_of
-    wallets = state.get_value(KEY_WALLETS) or {}
+    wallets = watch_set(state)
     if not wallets:
         return 0, ["no wallets harvested yet"]
     day = time.strftime("%Y-%m-%d", time.gmtime(now))

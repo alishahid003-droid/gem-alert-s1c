@@ -191,3 +191,9 @@ LATER (live path, one step at a time, only after proven paper edge):
 - NEW wallet_watch.py: wallet addresses harvested free from every KOL-feed result (kol_wallets_v1); worker task polls a round-robin slice every 60 s straight from the Solana RPC (getSignaturesForAddress, getTransaction), flags BUYS (token balance up, SOL down), cap WALLET_WATCH_MAX_CALLS_DAY (default 15000). Feeds copy_buys_v1 via copy_signals.refresh.
 - Fomo credit governor already existed (daily budget 7500, 402 back-off, free /v2/me check every 30 min); added hourly pacing (budget/24 x1.5) so a day cannot be burned in one hour.
 - Gaps: Base/BSC/Robinhood copy trading (no wallet addresses; plan: own GeckoTerminal pool-trades wallet scoreboard); dev-launch ALERT on dashboard.
+
+## 1M. Dev-launch alert + EVM copy trading + wider wallet watch (15 Oct 2026, ~12:00 PKT)
+- `dev_alerts.py`: when a creator on the good-dev scoreboard (dev_rank, stats in state `dev_stats_v1`) or the dev list launches, a Telegram alert + dashboard Alerts-tab entry (module DEV LAUNCH). Alert only; the same signal also adds the `good_dev` confirmation. One alert per coin, one per dev per 10 min.
+- `wallet_watch.py` now also watches our own pump.fun smart-money roster (layer2b, 13 wallets) and `smart_wallets_v1` on-chain, besides the KOL wallets harvested from the feed. This is the pump.fun / StonkFun "leaderboard" source (self-built; no free public leaderboard API exists).
+- `evm_wallets.py` (Base/BSC/Robinhood): learns wallets that were early buyers in >=3 distinct trending (winning) pools, from free GeckoTerminal trades; flags fresh pools a smart wallet is buying -> `smart_wallet` confirmation in multichain_sniper. Paper only (no live adapter on those chains). NOT tested against the live API from the build VM; first real check = log/state after restart. Survivor-biased, needs days of running to fill.
+- Tests: tests/test_fast_lane.py 38 pass; multichain + early tests 30 pass.

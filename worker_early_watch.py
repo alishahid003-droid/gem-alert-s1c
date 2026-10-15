@@ -314,6 +314,13 @@ async def main_async():
             if who and e.get("mint"):
                 creators.on_create(who, e["mint"])
             tracked = tracker.on_create(e)
+            try:
+                if who and (who in good_devs_set() or who in tracker.dev_list):
+                    import dev_alerts
+                    loop.run_in_executor(None, lambda w=who, m=e["mint"], sy=e.get("symbol", ""), n=e.get("name", ""):
+                                         dev_alerts.maybe_alert(state, w, m, sy, n, "good_dev" if w in good_devs_set() else "dev_list"))
+            except Exception:  # noqa: BLE001
+                pass
             recorder.on_create(e, tracked, (who in tracker.dev_list),
                                extra={**creators.snapshot(who or ""), "repeat_grad": creators.repeat_grad(who or "")})
             if not tracked:

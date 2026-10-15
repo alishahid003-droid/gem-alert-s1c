@@ -81,5 +81,6 @@ def refresh(state, log_glob="early_log/*.jsonl") -> Tuple[int, int]:
     devs, wallets = scan(log_glob)
     gd, sw = good_devs(devs), smart_wallets(wallets)
     state.set_value(KEY_DEVS, sorted(gd))
+    state.set_value("dev_stats_v1", {k: list(devs[k]) for k in gd})   # [launches, wins] for the dev-launch alert
     state.set_value(KEY_WALLETS, sorted(sw))
     return len(gd), len(sw)

@@ -57,7 +57,7 @@ def parse_pools(gt_json, chain: str) -> list:
             continue
         m5 = (a.get("transactions") or {}).get("m5") or {}
         out.append({
-            "chain": chain, "addr": addr, "name": a.get("name") or addr[:8], "src": "gt",
+            "chain": chain, "addr": addr, "name": a.get("name") or addr[:8], "src": "gt", "pool": a.get("address"),
             "dex": (((pool.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id"),
             "mcap": _num(a.get("market_cap_usd")) or _num(a.get("fdv_usd")),
             "liq": _num(a.get("reserve_in_usd")),
@@ -143,6 +143,13 @@ class Scanner:
         t0, m0 = self.first[k]
         if now - t0 >= 40 and mcap >= 1.25 * m0:
             conf.append("growth")
+        if p.get("pool"):
+            try:
+                import evm_wallets
+                if evm_wallets.hit_n(state, chain, p["pool"], now) >= 1:
+                    conf.append("smart_wallet")           # a wallet that was early in >=3 winning pools is buying
+            except Exception:  # noqa: BLE001
+                pass
         if p["src"] == "stonkfun" and (p.get("grad") or 0) >= 0.3:
             conf.append("graduating")
         if b is not None and s is not None and s > 1.5 * max(b, 1):
@@ -289,6 +296,16 @@ def run_loop(stop: Optional[threading.Event] = None):
             except Exception:  # noqa: BLE001
                 pass
             now = time.time()
+            try:
+                import evm_wallets
+                from utils.http import get_json
+                from config import CONFIG
+                _b = CONFIG.geckoterminal_base_url
+                evm_wallets.cycle(state, {c: s for c, s in slugs.items() if c != "solana"}, batches,
+                                  lambda sl, pool: (lambda r: r.get("json") if r.get("ok") else None)(get_json(f"{_b}/networks/{sl}/pools/{pool}/trades")),
+                                  lambda sl: (lambda r: r.get("json") if r.get("ok") else None)(get_json(f"{_b}/networks/{sl}/trending_pools")), now)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
             for p in batches:
                 if book is not None:
                     book.record(p, now)
