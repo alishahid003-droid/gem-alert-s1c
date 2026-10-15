@@ -174,3 +174,14 @@ LATER (live path, one step at a time, only after proven paper edge):
 ### Overnight note 15 Oct 04:12 PKT
 - Worker alive since 01:38 PKT, log and early_log growing, KILL_SWITCH present, dev_rank: 58 good devs.
 - Found: widening trade-feed tracking to every `narrative` coin burned the 20,000 trade-msg/day budget in ~2.5 h (feed paused until 00:00 UTC = 05:00 PKT). Budget cap is a real-money guard (~0.02 SOL/day), NOT raised. Fix in code: only famous_name / narrative_first / good_dev coins get the trade feed. Takes effect at the next restart.
+
+### Overnight note 15 Oct 07:12 PKT (check 2)
+- Worker alive, KILL_SWITCH present. Fresh version (restart 01:38): 2,456 coins, mean x0.82; score>=5 (98 coins) x0.83; trend-matched (170 coins pooled) x0.88, ex-best-2 x0.85. Nothing at break-even. good devs 62, smart wallets 1.
+
+## 1K. 15 Oct — copy-trading bridge, moonshot without virality (live still OFF)
+- NEW copy_signals.py: KOL-wallet buys (MadeOnSol feed, roster tiers) + Fomo followed buys + Fomo new-wallet buys -> state `copy_buys_v1` -> EarlyTracker confirmations `kol_buy`, `kol_converge` (2+ traders), `fomo_new_wallet`. Worker task `copy_refresher` every 45 s, re-evaluates the touched coins.
+- A copy confirmation lets a thin coin enter without the paid trade feed (cheap-rug filter still applies: dev dump, bundle, sell pressure, price sanity).
+- Score weights: kol_buy 3, kol_converge 3, fomo_new_wallet 3, good_dev 3, whale_buy 2. fast_moon (Core 3) now accepts kol_converge / fomo_new_wallet / good_dev / whale_buy WITHOUT a famous name (moonshot without virality).
+- BLOCKER: Fomo API credits are 0 (limit 250,000) -> followed-trader and new-wallet feeds from Fomo are inert until Ali tops up. KOL (MadeOnSol) feed works but has fired 0 buys on young coins so far.
+- Not covered yet: copy buys for coins older than the tracker window (>20 min); leaderboard-wallet copy on pump.fun/StonkFun needs Fomo credits or a trade feed; Base/BSC KOL polling; live adapters for BSC/Base/RHC (paper only).
+- Tests: test_fast_lane 29 pass; rest of suite 954 pass (test_rhc_sell.py hangs in the Linux VM on a network wait, unrelated, skipped).

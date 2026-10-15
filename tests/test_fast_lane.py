@@ -285,3 +285,87 @@ def test_good_dev_and_whale_confirm_and_score_high():
     from layers import fast_lane
     assert fast_lane.score({"confirmations": c}) >= 5
     assert fast_lane.score({"confirmations": ["dev_list"]}) == 0     # screenshot dev list carries no weight any more
+
+
+# ---- 15 Oct: copy-trading bridge (KOL / Fomo followed / Fomo new wallets) ---------------------------------------
+class _FakeState:
+    def __init__(self, d=None): self.d = dict(d or {})
+    def get_value(self, k): return self.d.get(k)
+    def set_value(self, k, v): self.d[k] = v
+
+
+def test_kol_buys_become_copy_signals_and_converge():
+    import time, copy_signals
+    from layers import roster
+    now = time.time()
+    t1, t2 = sorted(roster.TIER_1)[0], sorted(roster.TIER_2)[0]
+    trades = [{"action": "buy", "kol_name": t1, "token_mint": "MINTApump", "traded_at": None},
+              {"action": "buy", "kol_name": t2, "token_mint": "MINTApump"},
+              {"action": "sell", "kol_name": t1, "token_mint": "MINTBpump"},          # sells are ignored
+              {"action": "buy", "kol_name": "Random Guy", "token_mint": "MINTCpump"}]  # not followed
+    book = copy_signals.from_kol_trades(trades, roster.CONVERGENCE_ROSTER, roster.tier_of, now)
+    assert set(book) == {"MINTApump"} and book["MINTApump"]["n"] == 2 and book["MINTApump"]["best_tier"] == 4
+
+
+def test_old_kol_buys_are_dropped():
+    import time, copy_signals
+    from layers import roster
+    now = time.time()
+    old = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now - 7200))
+    b = copy_signals.from_kol_trades([{"action": "buy", "kol_name": sorted(roster.TIER_1)[0], "token_mint": "Xpump", "traded_at": old}],
+                                     roster.CONVERGENCE_ROSTER, roster.tier_of, now)
+    assert b == {}
+
+
+def test_fomo_new_wallet_signal_is_flagged_and_refresh_merges_sources():
+    import time, copy_signals
+    from layers import roster
+    now = time.time()
+    st = _FakeState({"fomo_signals": [{"kind": "new_wallet_buy", "token_address": "Npump", "trader": "fresh1", "ts": now - 30, "tier": "new"},
+                                        {"kind": "buy", "token_address": "Npump", "trader": "Unipcs", "ts": now - 20, "tier": "Tier 1"},
+                                        {"kind": "thesis", "token_address": "Zpump", "trader": "x", "ts": now}]})
+    fetch = lambda: {"ok": True, "buy_trades": [{"action": "buy", "kol_name": sorted(roster.TIER_2)[0], "token_mint": "Kpump"}], "sell_trades": []}
+    n, notes = copy_signals.refresh(st, now, kol_fetch=fetch)
+    book = st.d["copy_buys_v1"]
+    assert n == 2 and book["Npump"]["new_wallet"] is True and book["Npump"]["n"] == 2 and book["Kpump"]["kol"] is True
+    assert "Zpump" not in book                                                         # theses are not buys
+
+
+def test_refresh_survives_a_dead_feed():
+    import copy_signals
+    st = _FakeState()
+    n, notes = copy_signals.refresh(st, kol_fetch=lambda: {"ok": False, "reason": "budget paced"})
+    assert n == 0 and any("budget" in x for x in notes)
+
+
+def _thin_coin(t, mint="Cpump"):
+    t.on_create({"mint": mint, "traderPublicKey": "NEWDEV", "initialBuy": 1e7, "marketCapSol": 30, "symbol": "ZZ", "name": "zzq", "solAmount": 1})
+    return mint
+
+
+def test_a_followed_trader_buy_lets_a_thin_coin_enter_without_the_trade_feed():
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker()
+    m = _thin_coin(t)
+    assert t.evaluate(m) is None                                                       # no signal: thin coin never enters
+    t2 = EarlyTracker(); m2 = _thin_coin(t2)
+    t2.copy_fn = lambda mint: {"n": 1, "new_wallet": False}
+    d = t2.evaluate(m2)
+    assert d and "kol_buy" in d["confirmations"] and d["lane"] in ("core2", "core1")
+
+
+def test_converge_and_new_wallet_score_high_and_unlock_moon():
+    from layers.layer17_early_entry import EarlyTracker
+    t = EarlyTracker(); m = _thin_coin(t, "Dpump")
+    t.copy_fn = lambda mint: {"n": 2, "new_wallet": True}
+    d = t.evaluate(m)
+    c = d["confirmations"]
+    assert {"kol_buy", "kol_converge", "fomo_new_wallet"} <= set(c)
+    assert fast_lane.score({"confirmations": c}) >= 9
+    moon = fast_lane.route({"age_s": 20, "entry_mcap_sol": 30, "confirmations": ["kol_converge", "kol_buy", "pressure_free"]})
+    assert any(x["profile"] == "fast_moon" for x in moon)                              # a moonshot WITHOUT a famous name
+
+
+def test_worker_tracker_has_the_copy_hook():
+    tr = w.make_tracker()
+    assert tr.copy_fn("nothing-here") is None

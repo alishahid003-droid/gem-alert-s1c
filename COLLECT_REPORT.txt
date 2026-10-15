@@ -1,6 +1,6 @@
-COLLECTIVE REPORT  2026-10-14 19:39 UTC
-coins watched with an entry-like snapshot: 5275   (with any later price: 5068)
-worker restarts found: 27  (each = a possibly different code/settings version)
+COLLECTIVE REPORT  2026-10-15 05:12 UTC
+coins watched with an entry-like snapshot: 10340   (with any later price: 10081)
+worker restarts found: 31  (each = a possibly different code/settings version)
 
 BY VERSION (restart time PKT)   coins  reach2x  mean x(new ladder)  | score>=5: coins  reach2x
   14 14:30                          282       3%      x0.80              |   12      8%  mean x1.05 ex-best x0.80
@@ -8,38 +8,39 @@ BY VERSION (restart time PKT)   coins  reach2x  mean x(new ladder)  | score>=5: 
   14 15:44                         1260       2%      x0.78              |   28      0%  mean x0.70 ex-best x0.70
   14 18:14                          212       2%      x0.66              |    -     -
   14 18:38                           33       0%      x0.00              |    -     -
-  14 18:42                         3329       3%      x0.82              |  121      5%  mean x0.87 ex-best x0.85
+  14 18:42                         4789       3%      x0.81              |  154      5%  mean x0.88 ex-best x0.86
+  15 01:38                         3605       3%      x0.82              |  133      1%  mean x0.83 ex-best x0.82
 If "reach2x" and "mean x" swing a lot between versions, the pooled table below is a blend and should not be trusted alone.
 
 score   n    reach1.4x  reach2x  reach5x   dead/unpriced
-  -4    29       24%      14%      10%        7%
-  -3    35       17%      17%       3%        9%
-  -2  1070        3%       2%       0%        4%
-  -1   440        5%       3%       2%        4%
-   0   589        6%       4%       0%        4%
-   1   517        8%       5%       1%        5%
-   2  1701        3%       1%       0%        4%
-   3   617        6%       3%       1%        5%
-   4   105        6%       4%       1%        2%
-   5   130        8%       3%       2%        3%
-   6    36        8%       8%       0%        3%
-   7     6       17%       0%       0%        0%
+  -4    75       21%      11%       4%        3%
+  -3    65       17%      15%       5%        5%
+  -2  2108        3%       2%       1%        2%
+  -1   877        5%       3%       1%        2%
+   0  1149        6%       4%       1%        3%
+   1  1087        7%       4%       1%        3%
+   2  3262        3%       1%       0%        3%
+   3  1163        6%       4%       1%        3%
+   4   216        7%       6%       2%        2%
+   5   253        6%       2%       1%        2%
+   6    74        8%       5%       0%        1%
+   7    11        9%       0%       0%        0%
 
 cohort            n   reach2x  reach5x | simulated result of the NEW fast_sprint exit ladder (x of stake, after costs)
-all coins       5275       3%      1%  | mean x0.80   ex-best-2 x0.79   win%  4
-score>=3         894       4%      1%  | mean x0.78   ex-best-2 x0.76   win%  6
-score>=4         277       4%      1%  | mean x0.80   ex-best-2 x0.77   win%  7
-score>=5         172       4%      1%  | mean x0.85   ex-best-2 x0.82   win%  9
-score>=6          42       7%      0%  | mean x0.74   ex-best-2 x0.72   win%  7
+all coins      10340       3%      1%  | mean x0.81   ex-best-2 x0.80   win%  4
+score>=3        1717       4%      1%  | mean x0.78   ex-best-2 x0.77   win%  6
+score>=4         554       4%      1%  | mean x0.81   ex-best-2 x0.80   win%  6
+score>=5         338       3%      1%  | mean x0.85   ex-best-2 x0.83   win%  6
+score>=6          85       5%      0%  | mean x0.77   ex-best-2 x0.74   win%  7
 
 How to read: "mean x1.00" = break-even. Needs mean above 1.0 AND ex-best-2 above ~1.0 before live. Dead/unpriced coins count as total loss.
 Check at least 300 coins in the score>=5 cohort before trusting it.
 
 Largest single movers in the sample (they can dominate an average):
    47G8oFun peak x33  score -3  name Picklewizard
-   5X9QaxzS peak x22  score 3  name Fabrizio Romano 
-   CyHCAqNh peak x19  score -2  name mayhem bless me 
+   GCPX41Uj peak x31  score -2  name E=mc2
+   JCsfUhtj peak x24  score 1  name QuantumProof
 
-TREND-MATCHED coins (decisions with narrative/narrative_first): 114 coins
-   exit-ladder result on these 114: mean x0.91   without best 2: x0.86   win% 34
-   reached 1.4x: 28   reached 2x: 11   reached 5x: 3   no price/dead: 1   of 114
+TREND-MATCHED coins (decisions with narrative/narrative_first): 193 coins
+   exit-ladder result on these 193: mean x0.86   without best 2: x0.83   win% 33
+   reached 1.4x: 44   reached 2x: 18   reached 5x: 4   no price/dead: 3   of 193

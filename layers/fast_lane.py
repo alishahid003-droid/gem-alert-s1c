@@ -40,7 +40,7 @@ def route(decision: dict) -> List[dict]:
     n = len(conf)
     famous = "famous_name" in conf
     profiles = []
-    if age <= _f("FAST_MOON_MAX_AGE_S", 60) and mc <= _f("FAST_MOON_MAX_MCAP_SOL", 35) and (famous or "good_dev" in conf or "whale_buy" in conf) and n >= 3:
+    if age <= _f("FAST_MOON_MAX_AGE_S", 60) and mc <= _f("FAST_MOON_MAX_MCAP_SOL", 35) and (famous or "good_dev" in conf or "whale_buy" in conf or "kol_converge" in conf or "fomo_new_wallet" in conf) and n >= 3:
         profiles.append("fast_moon")                                # rare, strongest evidence: lottery shot for the 180-day book
     elif age <= _f("FAST_SPRINT_MAX_AGE_S", 120) and mc <= _f("FAST_SPRINT_MAX_MCAP_SOL", 55):
         profiles.append("fast_sprint")
@@ -69,7 +69,7 @@ def score(d) -> int:
     d = d or {}
     c = set(d.get("confirmations") or [])
     s = 0
-    for k, w in (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("narrative", 2), ("narrative_first", 2), ("dev_list", 0), ("repeat_grad", 2)):
+    for k, w in (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("kol_buy", 3), ("kol_converge", 3), ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("dev_list", 0), ("repeat_grad", 2)):
         if k in c:
             s += w
     s += 1 if "pressure_free" in c else 0

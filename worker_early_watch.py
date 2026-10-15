@@ -108,10 +108,15 @@ def good_devs_set() -> set:
     return _cached("gooddevs", 60, lambda: set(state.get_value("good_devs_v1") or [])) or set()
 
 
+def _copy_book() -> dict:
+    return _cached("copybook", 15, lambda: state.get_value("copy_buys_v1") or {}) or {}
+
+
 def make_tracker() -> EarlyTracker:
     t = _make_tracker()
     t.claim_fn = claim_trend_term
     t.good_dev_fn = lambda c: c in good_devs_set()
+    t.copy_fn = lambda m: _copy_book().get(m)
     return t
 
 
@@ -460,6 +465,28 @@ async def main_async():
                 traceback.print_exc()
             await asyncio.sleep(int(os.environ.get("DEV_RANK_REFRESH_S", "1200")))
 
+    async def copy_refresher():
+        """Every 45 s: pull KOL / Fomo copy-trading buys into copy_buys_v1 and re-check the coins they touched."""
+        import copy_signals
+        while True:
+            try:
+                n, notes = await loop.run_in_executor(None, copy_signals.refresh, state)
+                counters["copy_mints"] = n
+                book = state.get_value("copy_buys_v1") or {}
+                for m in list(book):
+                    if m in tracker.recs:
+                        dec = tracker.evaluate(m)
+                        if dec:
+                            counters["entries"] += 1
+                            loop.run_in_executor(None, act, dec)
+                    else:
+                        counters["copy_untracked"] = counters.get("copy_untracked", 0) + 1
+                if notes:
+                    print(f"[copy] {n} coins with copy buys; {', '.join(notes[:3])}", flush=True)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+            await asyncio.sleep(int(os.environ.get("COPY_REFRESH_S", "45")))
+
     async def live_guard():
         while True:
             await asyncio.sleep(8)
@@ -488,7 +515,7 @@ async def main_async():
                 traceback.print_exc()
 
     tasks = [asyncio.create_task(manager()), asyncio.create_task(sampler()), asyncio.create_task(watchdog()),
-             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher())]
+             asyncio.create_task(free_confirmer()), asyncio.create_task(live_guard()), asyncio.create_task(trend_refresher()), asyncio.create_task(dev_wallet_refresher()), asyncio.create_task(copy_refresher())]
     hk = asyncio.create_task(housekeeping())
     try:
         await stream.run_forever()

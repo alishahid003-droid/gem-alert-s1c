@@ -111,6 +111,7 @@ class EarlyTracker:
         self.trusted_fn = trusted_fn or (lambda w: False)
         self.blacklist_fn = blacklist_fn or (lambda w: False)
         self.hot_terms_fn = hot_terms_fn or (lambda: set())
+        self.copy_fn = lambda m: None        # copy_signals.info(): followed-trader / KOL / Fomo-new-wallet buys for this mint
         self.good_dev_fn = lambda c: False   # dev_rank.py scoreboard built from our own logs
         self.claim_fn = None               # claim_fn(term, mint) -> True if this is the FIRST coin to match a trending phrase
         self._phr_cache = (None, ())
@@ -193,6 +194,14 @@ class EarlyTracker:
             out.append("good_dev")          # creator won >=30% of >=3 judged launches in our own logs
         if r.max_buy >= _f("EARLY_WHALE_SOL", 3.0) and now - r.created <= _f("EARLY_WHALE_MAX_AGE_S", 90):
             out.append("whale_buy")         # one wallet put >=3 SOL into a young coin
+        ci = self.copy_fn(r.mint)
+        if ci:
+            if ci.get("n", 0) >= 1:
+                out.append("kol_buy")           # a followed trader / KOL wallet bought it
+            if ci.get("n", 0) >= 2:
+                out.append("kol_converge")      # 2+ different followed traders
+            if ci.get("new_wallet"):
+                out.append("fomo_new_wallet")   # a qualified new high-balance wallet bought it
         if self.creator_fn(r.creator):
             out.append("repeat_grad")       # creator already graduated a token (measured ~7x lift in a 2026 study)
         smart = self.smart_fn()
@@ -281,16 +290,17 @@ class EarlyTracker:
             not (r.free_ts and r.free_buys >= int(_f("EARLY_FREE_MIN_BUYS", 20)))
         dev_min = int(_f("EARLY_DEV_MIN_BUYERS", 0)) if self.feed_off else int(_f("EARLY_MIN_BUYERS_ANY", 4))
         devish = "dev_list" in conf or "repeat_grad" in conf
-        if thin and not (devish and len(r.buyers) >= dev_min):
+        copyish = any(c in conf for c in ("kol_buy", "kol_converge", "fomo_new_wallet"))   # copy-trading needs no trade feed
+        if thin and not ((devish and len(r.buyers) >= dev_min) or copyish):
             return None                      # a few independent buyers first: cheap rug filter
         c2_age, c2_mc = _f("EARLY_CORE2_MAX_AGE_S", 240), _f("EARLY_CORE2_MAX_MCAP_SOL", 55)
         c1_age, c1_mc = _f("EARLY_CORE1_MAX_AGE_S", 1200), _f("EARLY_CORE1_MAX_MCAP_SOL", 130)
         lanes = []
         if devish and age <= c2_age:
             lanes.append("dev_list")
-        if age <= c2_age and r.mcap_sol <= c2_mc and len(conf) >= 2:
+        if age <= c2_age and r.mcap_sol <= c2_mc and (len(conf) >= 2 or copyish):
             lanes.append("core2")
-        elif age <= c1_age and r.mcap_sol <= c1_mc and len(conf) >= 2:
+        elif age <= c1_age and r.mcap_sol <= c1_mc and (len(conf) >= 2 or copyish):
             lanes.append("core1")
         if ("core1" in lanes or "core2" in lanes) and age <= _f("EARLY_SPRINT_MAX_AGE_S", 600):
             lanes.append("sprint")           # same strong early entry also feeds the 96-hour compounding book
@@ -299,7 +309,7 @@ class EarlyTracker:
         if not lanes and conf == ["smart_wallet"] and age >= _f("EARLY_LEADERBOARD_AFTER_S", 60) \
                 and r.mcap_sol <= c1_mc:
             lanes.append("leaderboard")      # copy-trade fallback, only after stronger lanes had their chance
-        if thin:
+        if thin and not copyish:
             lanes = [x for x in lanes if x == "dev_list"]
         if not lanes:
             return None
