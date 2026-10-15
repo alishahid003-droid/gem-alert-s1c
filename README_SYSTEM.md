@@ -15,6 +15,7 @@
 | Module | Confirmation | Points | Source / status |
 |---|---|---|---|
 | Virality | famous_name | +3 | name matches a famous/trend term. Feeds: Google, Wikipedia, Bluesky, Mastodon work; X/TikTok/Reddit-popular empty |
+| Virality / meta | hot_meta | +2 | name shares a word with a coin launched 1-6 h earlier that already ran >=5x (test: 10x rate 6.5% vs 2.0%, 36,460 coins) |
 | Virality | narrative / narrative_first | +2 / +2 | coin name matches a live trend phrase / first coin with that phrase |
 | Dev launches | good_dev | +3 | dev on our scoreboard (>=3 launches, >=30% wins; log history + Helius backfill) |
 | Dev launches | repeat_grad | +2 | dev already graduated a coin before |
