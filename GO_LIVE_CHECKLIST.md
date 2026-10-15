@@ -203,3 +203,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Screenshot dev list is OFF as an entry/alert source (EARLY_DEV_LIST_ON=1 turns it back on). Reason: 0/69 graduated, 3.9% vs 5.9% base.
 - UNVERIFIED live: Helius parsed-history response shape was parsed tolerantly; check `[dev_history]` lines in logs/local_early-watch.log after restart.
 - GMGN: key is free but needs Ali to create it (Ed25519 key pair + IP whitelist at gmgn.ai/ai); its public docs do not list deployer history. Not wired.
+
+## 1O. RPC fix (15 Oct 2026, ~11:30 PKT) - commit 0a89aa1
+- Found in restart logs: wallet_watch failed on every call ("all pool endpoints failed") because executor/rpc_pool.py's Solana pool had only 3 free public RPCs. Ali's own Helius URL (.env SOLANA_RPC_URL) is now tried FIRST; API keys are masked in logs/results. So wallet watching and dev_history only start working after this fix is pushed + restarted.
+- TO VERIFY AFTER RESTART (logs/local_early-watch.log): `[wallet_watch]` lines without "all pool endpoints failed"; `[dev_history] <dev>.. -> {...launches, wins}`; `[dev_rank] good devs N`; DEV LAUNCH alerts on Telegram/dashboard; state evm_wallets_v1 growing for base/bsc/robinhood_chain; KILL_SWITCH still present.
+- Commits not yet pushed at time of writing: 9e16aa9..0a89aa1 (1d85043, 9e16aa9, dee78c0, 457f2fb, 0a89aa1 + this docs commit).

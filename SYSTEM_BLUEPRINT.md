@@ -15,14 +15,16 @@ Tested and failed on honest data: buy at creation (x0.81 @25% cost), buy on earl
 Why: at launch all coins look identical; winners (30x+) only separate AFTER the first 1-2 min, when price has already run 2.5-15x.
 Only real lifts found: early volume/buys (3x lift to reach 2x, but drift kills it), good devs (~20% vs 6% win; tiny sample), trend names (35% win, x0.86).
 
-## 2. The five modules (what each one is, status, what is missing)
+## 2. The five modules (status as of 15 Oct 2026, ~11:30 PKT)
 | # | Module | Status today | Gap / next build |
 |---|---|---|---|
-| 1 | Copy trading (Fomo-followed traders + KOL wallets) | roster.py has 5 Tier-1, 8 Tier-2, ~25 more; MadeOnSol KOL feed polls solana + robinhood (0 alerts); NOT connected to early-watch entries | wire kol_buy / kol_converge into EarlyTracker confirmations (Tier-1 buy = strong, 2 independent = strongest) |
-| 2 | New high-balance wallets | layer13/layer10 exist (dashboard-only); depends on Fomo credits | read Fomo API for fresh wallets with big balance buying one coin; add as whale_wallet signal |
-| 3 | Dev launches | self-built scoreboard dev_rank.py: 65 good devs, auto-refresh 20 min; screenshot list had no edge (weight 0) | add dev funding-wallet clusters (layer10), widen log history |
-| 4 | Virality | trend_feeds: Google, Wikipedia, Bluesky, Mastodon work; X/TikTok/Reddit-popular return nothing; first-coin-per-phrase claim | fix feeds, tighten to names/phrases |
-| 5 | Own filters / score | score() combines signals; no single check decides | re-fit weights weekly on logged data |
+| 1 | Copy trading | KOL feed (MadeOnSol, ~190 calls/day, paced) + direct on-chain wallet watch (wallet_watch.py: harvested KOL wallets + our pump.fun smart-money roster + smart_wallets_v1) -> kol_buy / kol_converge confirmations. Fomo followed traders: code ready, credits 0. Base/BSC/RHC: evm_wallets.py learns early buyers of winning pools (GeckoTerminal, live-verified: 16 BSC wallets learned) -> smart_wallet confirmation, paper only | wallet_watch was failing on public RPCs until the Helius fix (0a89aa1); verify after restart. EVM list needs ~a day to fill |
+| 2 | New high-balance wallets | Fomo layer13 + fomo_new_wallet confirmation wired; hourly credit pacing added | Fomo credits are 0 (reset date unknown) - nothing flows until they return |
+| 3 | Dev launches | dev_rank scoreboard (65 good devs, 20-min refresh) + dev_history.py backfill (Helius/RPC + DexScreener) + dev_alerts.py Telegram/dashboard alert (DEV LAUNCH). Screenshot list OFF (0/69 graduated) | dev_history untested live (check [dev_history] log lines); MadeOnSol Deployer Hunter starved by its call budget; GMGN key optional, no deployer history in public docs |
+| 4 | Virality | trend_feeds: Google, Wikipedia, Bluesky, Mastodon work; X/TikTok/Reddit-popular return nothing | fix feeds, tighten to names/phrases |
+| 5 | Own filters / score | score() combines signals incl. new copy/dev/whale confirmations; rug/dump filters; GoPlus honeypot gate on EVM only (pump.fun curve always sellable) | re-fit weights weekly on logged data |
+
+**Honest state:** no entry rule beats break-even yet (best fresh-data result x0.83 after costs). Live stays OFF (KILL_SWITCH) until a stream passes the gate: >=30 fresh trades, mean >x1.0 after dropping best 2, stake <=5% of wallet.
 
 ## 3. Chains
 - Solana pump.fun: the real entry engine (early-watch). Only place live execution exists (PumpPortal).
