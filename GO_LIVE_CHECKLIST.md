@@ -264,3 +264,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Wallet cluster Fn9n3ft.. (15 'winners'), DKKybx.., FRQD8L.., EvDTDv.. etc: profit ~$0-$1 -> bots. 4 of them were in OUR smart-wallet pool (polluting smart_wallet confirmation). 63 listed in bot_wallets.txt and now excluded (wallet_watch, worker smart_wallets, st_enrich rebuild; st_enrich also needs >$100 profit).
 - No wallet found early in several REAL winners with real profit (STONK buyers made $0.4-3M but only on that one coin).
 - GeckoTerminal FDV for pump.fun coins is unreliable; 'born' size uses pool creation date, wrong for older tokens. Snipers/insiders fields come back 0 almost always (ST does not fill them for old coins).
+
+## 16 Oct runner_lab + wallet_probe (unbiased test, 300 random coins)
+- Runner features (103 runners vs 160 duds, Solana Tracker launch data): only weak/thin separators. Creator launches 3-15 + >=10 buys at 1 min: holdout 2.7% runner rate (base 0.49%). Creator with a graduated coin ~4% (11 runners / 2 duds). Bundles >=5: ~5% but 14 runners / 2 duds, holdout n=1. Snipers, dev buy, holder count: no use (holders is measured today = leakage). Insiders: 0 everywhere (Solana Tracker does not fill it).
+- Wallet BwWK17cb.. (first-4 buyer in 80 of 103 runners, 150 buys/coin = volume bot): in the random sample it is early in 23 of 300 coins (7.7%) and those coins hit 3x only 4% -> 0.84x/0.91x after cost. SELECTION ILLUSION, not a signal. sssssDdM.. 19 coins, 0.97x/1.05x (n=19, noise). Other candidates: too few.
+- Conclusion: no launch-time feature or wallet found that lifts the runner rate anywhere near the ~30% needed to pay after costs. Live stays OFF. S1c keeps collecting data in paper mode.
