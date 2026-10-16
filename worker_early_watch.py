@@ -89,7 +89,8 @@ def smart_wallets() -> set:
         from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
         return get_smart_money_roster()
     def fetch2():
-        return set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or []) | set(state.get_value("st_early_wallets_v1") or [])
+        import bot_wallets
+        return (set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or []) | set(state.get_value("st_early_wallets_v1") or [])) - bot_wallets.load()
     return _cached("smart", 30, fetch2) or set()
 
 

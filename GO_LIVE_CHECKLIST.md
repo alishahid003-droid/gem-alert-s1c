@@ -256,3 +256,11 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Buy at launch (creator already graduated a coin, TP5/SL.5): EV 1.01 at 15% cost, 1.13 at 5% cost, n=218 only (thin, assumes instant fill). Everything else at launch: 0.83-0.99.
 - Buy after graduation (631 coins, entry ~$50k mcap median): 9% reach 2x, 4% 3x, 1% 5x; TP/SL EV 0.69-0.85 at 8-15% cost. Waiting for +15/30/50% momentum first: still 0.77-0.82 ex-best2. No edge.
 - Coins Ali named from FOMO (Pawn, Feels Good, John Phil: 0 launches in our log; Useless 5, Claws 2, Mars 33, Whale 58, Claudia 123 with 14 graduated, best post-grad 2.0x). Several are simply not in our 10-16 Oct launch stream -> either older coins or other launchpads; coverage gap to check next.
+
+## 16 Oct boom_lab findings (free GeckoTerminal + Solana Tracker, last ~6 months)
+- Real memecoin monsters on Solana started on pump.fun and graduated to pumpswap: ANSEM ($35k -> ~$444M, 155k holders), CATE ($26k -> ~$122M, 142k holders), CLAUDIA ($48k -> $11.7M in 4 days, 33x from first $50k close). STONK / ANTFUN also 100k+ holders.
+- Distribution tell: Claudia had 2,123 bundler wallets holding 96% of initial supply (+3 snipers); baton 1,093 bundlers / 19% ; STREAM 335 bundlers. Winners are often heavily bundled/sybil-seeded at launch.
+- 15 coins created 14-15 Oct (ARF, NODF, UDR, GDF, XTO, SARP, SI276, DOPE, ATFS...) show impossible FDV ($100M+ born), ~2,500-3,000 holders each, identical first-buyer profits -> coordinated/wash clusters, NOT organic winners.
+- Wallet cluster Fn9n3ft.. (15 'winners'), DKKybx.., FRQD8L.., EvDTDv.. etc: profit ~$0-$1 -> bots. 4 of them were in OUR smart-wallet pool (polluting smart_wallet confirmation). 63 listed in bot_wallets.txt and now excluded (wallet_watch, worker smart_wallets, st_enrich rebuild; st_enrich also needs >$100 profit).
+- No wallet found early in several REAL winners with real profit (STONK buyers made $0.4-3M but only on that one coin).
+- GeckoTerminal FDV for pump.fun coins is unreliable; 'born' size uses pool creation date, wrong for older tokens. Snipers/insiders fields come back 0 almost always (ST does not fill them for old coins).

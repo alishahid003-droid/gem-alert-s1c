@@ -16,6 +16,7 @@ KEY_OUT = "st_early_wallets_v1"
 KEY_DAY = "st_fb_calls_day"           # + ":YYYY-MM-DD"
 KEY_DIAG = "st_fb_diag_v1"
 MIN_WINNERS = int(os.environ.get("ST_MIN_WINNERS", "3"))
+MIN_PNL_USD = float(os.environ.get("ST_MIN_PNL_USD", "100"))   # 16 Oct: $1-profit wallets in 15 "winners" were a bot cluster
 
 
 def parse_first_buyers(body) -> List[dict]:
@@ -57,7 +58,8 @@ def rebuild(state, min_winners: int = MIN_WINNERS) -> List[str]:
     for _m, ws in (state.get_value(KEY_DONE) or {}).items():
         for w in set(ws):
             cnt[w] = cnt.get(w, 0) + 1
-    out = sorted(w for w, c in cnt.items() if c >= min_winners)
+    import bot_wallets
+    out = sorted(w for w, c in cnt.items() if c >= min_winners and w not in bot_wallets.load())
     state.set_value(KEY_OUT, out)
     return out
 
@@ -88,7 +90,7 @@ def run(state, winner_mints: List[str], now: float = None, get: Optional[Callabl
         rows = parse_first_buyers(res["body"])
         state.set_value(KEY_DIAG, {"n_rows": len(rows), "sample": rows[:2],
                                    "keys": sorted(res["body"].keys())[:8] if isinstance(res["body"], dict) else "list"})
-        done[m] = [r["wallet"] for r in rows if (r["pnl"] or 0) > 0]
+        done[m] = [r["wallet"] for r in rows if (r["pnl"] or 0) > MIN_PNL_USD]
     state.set_value(KEY_DONE, done)
     out = rebuild(state)
     return f"{calls} calls, {len(done)} winners processed, {len(out)} early wallets (>= {MIN_WINNERS} winners)"

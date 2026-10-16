@@ -74,6 +74,11 @@ def harvest_wallets(trades: List[dict], roster: set, state) -> int:
     return len(book) - n0
 
 
+def _bots():
+    import bot_wallets
+    return bot_wallets.load()
+
+
 def watch_set(state) -> dict:
     """{label: wallet}: followed KOL wallets + our own pump.fun smart-money roster (layer2b) + wallets that
     our logs show winning early (dev_rank smart_wallets_v1). All of them are watched on-chain the same way."""
@@ -81,7 +86,7 @@ def watch_set(state) -> dict:
     for key, pre in (("pumpfun_smart_money_roster", "pf"), ("smart_wallets_v1", "sw"), ("st_leaderboard_v1", "st"), ("st_early_wallets_v1", "se")):
         try:
             for w in state.get_value(key) or []:
-                if isinstance(w, str) and len(w) > 30:
+                if isinstance(w, str) and len(w) > 30 and w not in _bots():
                     out.setdefault(f"{pre}:{w[:6]}", w)
         except Exception:  # noqa: BLE001
             pass
