@@ -592,7 +592,7 @@ def test_score_breakdown_text_matches_score():
 def test_serial_launcher_penalty_unless_proven_dev():
     from layers import fast_lane
     base = {"confirmations": ["famous_name"], "launches": 8}
-    assert fast_lane.score(base) == 3 - 2
+    assert fast_lane.score(base) == 3   # penalty switched off 16 Oct (SERIAL_LAUNCHER_PENALTY=0)
     assert fast_lane.score({"confirmations": ["famous_name", "good_dev"], "launches": 8}) == 6
     assert fast_lane.score({"confirmations": ["famous_name"], "launches": 1}) == 3
 

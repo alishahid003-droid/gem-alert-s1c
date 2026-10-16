@@ -78,7 +78,7 @@ def score_parts(d) -> List[Tuple[str, int]]:
         parts.append(("velocity_free", 1))
     nl = d.get("launches") or 0
     if nl >= int(_f("SERIAL_LAUNCHER_MIN", 3)) and "good_dev" not in c and "repeat_grad" not in c:
-        parts.append((f"serial launcher ({nl} launches)", -2))   # 15 Oct: dropping >=3-launch creators removes 49% of coins, 12% of winners
+        parts.append((f"serial launcher ({nl} launches)", int(_f("SERIAL_LAUNCHER_PENALTY", 0))))   # 16 Oct: minute-1 snaps of 21k coins show 3-15 launches hit 3x 0.9% vs 0.3% for 1 launch -> penalty off; was -2. 15 Oct: dropping >=3-launch creators removes 49% of coins, 12% of winners
     fb, fs = d.get("fb") or 0, d.get("fs") or 0
     if fb or fs:
         r = fs / max(fb, 1)

@@ -239,3 +239,9 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Train/test (first vs second half): both below 1.0 ex-best-2 (0.82-0.88).
 - Pools: 223 early wallets, 200 leaderboard wallets, first-buyers diag shows pnl 0.0 on sample rows (not yet proving skill).
 - Decision: live stays OFF. Gate not passed. TODO: add rule "ignore coins with 0 buyers in our stream" to entry_gate.
+
+## 16 Oct: why "closing records" looked empty + first real pattern study (snap_winners.py)
+- 'final' rows show buys=0 for ~93% of coins BY DESIGN: the metered PumpPortal trade feed only watches proven lanes. Trade-level data exists only for those. The free DexScreener minute-by-minute 'snap' rows cover 21k coins and are the right base for pattern study (snap_winners.py).
+- 21,037 coins, measured from the ~1-minute snap: 1.1% reach 2x, 0.5% 3x, 0.2% 5x, 0.1% 10x. Minute-1 buys, volume, mcap do NOT separate winners.
+- Only separators found: creator with >=1 graduate (3x rate 2.3% vs 0.5% base, n=481); creator 3-15 launches (0.9% vs 0.3% for 1 launch); launches>=3 + buys>=6 + buy/sell>=2 (1.5% 3x, n=893).
+- Serial-launcher -2 penalty was WRONG -> switched off (SERIAL_LAUNCHER_PENALTY=0). Even the best filter hits 3x only ~2%: still no positive expected value without fast entry. Live stays OFF.
