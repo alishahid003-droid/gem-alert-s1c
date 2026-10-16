@@ -21,7 +21,9 @@ if __name__ == '__main__':
             mc, lq = r.get('mcap_usd'), r.get('liq_usd')
             if mc and lq is not None and mc / max(lq, 1) > 150: mc = None      # price print not backed by liquidity = fake
             if mc and r.get('pair_ts') and r['ts'] - r['pair_ts'] / 1000 > 7200: mc = None   # pair older than 2h = not this launch
+            if mc and mc > 30e6: mc = None        # >$30M inside an hour = wrong token / fake print
             oc[r['mint']][r['cp_min']] = mc
+    fin = {r['mint']: r for r in rows if r['t'] == 'final'}
     dec = {}
     for r in rows:
         if r['t'] == 'decision' and r['ts'] > 1760417000 and r.get('lane') != 'dev_list' and r.get('fb') is not None:
@@ -32,6 +34,8 @@ if __name__ == '__main__':
         e = d['mcap_sol'] * SOL
         v = oc.get(m, {})
         pk = max([x / e for x in v.values() if x] or [0])
+        f = fin.get(m)
+        if f and f.get('last_sol') and pk * e > 20 * max(f['last_sol'], d['mcap_sol']) * SOL: pk = 0   # DexScreener disagrees 20x with our own stream
         if pk > 500: dropped.append((m[:8], d.get('name', ''), round(pk))); continue   # impossible for a fresh launch = wrong token matched
         data.append((score(d), d, pk, m))
     print('signals', len(data), 'dropped as impossible (>500x):', len(dropped), dropped[:6])

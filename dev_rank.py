@@ -37,7 +37,7 @@ def scan(log_glob="early_log/*.jsonl", now=None) -> Tuple[Dict[str, list], Dict[
                     elif '"outcome"' in head:
                         r = json.loads(l)
                         if r.get("mcap_usd"):
-                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"]
+                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"] if r["mcap_usd"] <= 30e6 else 0  # >$30M inside an hour = wrong token / fake print
                     elif '"grad"' in head:
                         grads.add(json.loads(l)["mint"])
                     elif '"final"' in head:
@@ -87,7 +87,7 @@ def hot_words(log_glob="early_log/*.jsonl", now=None, hot=5.0, max_freq=30):
                     elif '"outcome"' in head:
                         r = json.loads(l)
                         if r.get("mcap_usd"):
-                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"]
+                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"] if r["mcap_usd"] <= 30e6 else 0  # >$30M inside an hour = wrong token / fake print
                 except Exception:  # noqa: BLE001
                     continue
     freq, hotc = collections.Counter(), collections.Counter()
@@ -154,7 +154,7 @@ def winner_mints(log_glob="early_log/*.jsonl", now=None, min_peak=10.0, limit=40
                     elif '"outcome"' in head:
                         r = json.loads(l)
                         if r.get("mcap_usd"):
-                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"]
+                            oc[r["mint"]][r["cp_min"]] = r["mcap_usd"] if r["mcap_usd"] <= 30e6 else 0  # >$30M inside an hour = wrong token / fake print
                 except Exception:  # noqa: BLE001
                     continue
     rows = []
