@@ -251,3 +251,8 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Only cut above 1.0 = "mcap<1,500 at minute 1" (n=155, EV 1.03 -> 0.99 ex-best2, second half 0.89): not robust, likely thin-price artefact. Not adopted.
 - Hour of day, clone names, mint suffix, dev buy size: no usable edge. Early-buyer wallets: 18 wallets seen in >=3 tracked coins, none with a 3x.
 - Verdict: no tested filter or exit beats cost. Live stays OFF. Fast-entry (sub-second) is the missing ingredient, not more signals.
+
+## 16 Oct: buy-at-launch and buy-after-graduation tests (speed24.py, grad24.py)
+- Buy at launch (creator already graduated a coin, TP5/SL.5): EV 1.01 at 15% cost, 1.13 at 5% cost, n=218 only (thin, assumes instant fill). Everything else at launch: 0.83-0.99.
+- Buy after graduation (631 coins, entry ~$50k mcap median): 9% reach 2x, 4% 3x, 1% 5x; TP/SL EV 0.69-0.85 at 8-15% cost. Waiting for +15/30/50% momentum first: still 0.77-0.82 ex-best2. No edge.
+- Coins Ali named from FOMO (Pawn, Feels Good, John Phil: 0 launches in our log; Useless 5, Claws 2, Mars 33, Whale 58, Claudia 123 with 14 graduated, best post-grad 2.0x). Several are simply not in our 10-16 Oct launch stream -> either older coins or other launchpads; coverage gap to check next.
