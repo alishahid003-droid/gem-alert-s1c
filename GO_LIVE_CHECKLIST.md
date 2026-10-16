@@ -231,3 +231,11 @@ LATER (live path, one step at a time, only after proven paper edge):
 - NOT confirmed: endpoint credit cost and free-plan access to /first-buyers (check log `[st_first_buyers]`; diag in state `st_fb_diag_v1`). Early+profitable wallets may be snipers/bots; 24 h data decides if it helps.
 - Tests: 48 passing. Live stays OFF (KILL_SWITCH present).
 - Where we stand / next: (1) 24 h decision report at ~11:43 PKT 16 Oct (outcome by score and by each confirmation, ex-best-2, 10-25% costs); (2) read kol_feed_diag_v1, copy buys still 0; (3) confirm leaderboard + first-buyers wallets arrive; (4) no rule beats break-even yet (all coins x0.81, score>=5 x0.85) so no live trading until the gate passes.
+
+## 24h decision report (2026-10-16, cleaned data, 2,920 decisions, 15% round-trip cost, return = value at last checkpoint)
+- No score level clears x1.0 once the best 2 trades are removed: score>=3 0.86, >=4 0.88, >=5 0.87 (hit2x 16%, hit5x 4%, hit10x 1%). ALL signals 0.80.
+- The only "big mean" (score>=5 = 1.35, kol_buy 6.69, hot_meta 2.34) comes from ONE token (SPCXxcqX..., a tokenised-stock-style mint, 0 buyers in our stream, $1.5M liquidity) = wrong token, not a win. Remove it and the edge is gone.
+- Confirmations alone (ex-best-2): kol_buy 0.91 (n=44), good_dev 0.51 (hit2x 46% but loses after cost), smart_wallet 0.60, whale_buy 0.45, hot_meta 0.71. None clears 1.0; none has >=30 clean winners.
+- Train/test (first vs second half): both below 1.0 ex-best-2 (0.82-0.88).
+- Pools: 223 early wallets, 200 leaderboard wallets, first-buyers diag shows pnl 0.0 on sample rows (not yet proving skill).
+- Decision: live stays OFF. Gate not passed. TODO: add rule "ignore coins with 0 buyers in our stream" to entry_gate.
