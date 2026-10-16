@@ -17,18 +17,24 @@ if __name__ == '__main__':
     rows = load()
     oc = collections.defaultdict(dict)
     for r in rows:
-        if r['t'] == 'outcome': oc[r['mint']][r['cp_min']] = r.get('mcap_usd')
+        if r['t'] == 'outcome':
+            mc, lq = r.get('mcap_usd'), r.get('liq_usd')
+            if mc and lq is not None and mc / max(lq, 1) > 150: mc = None      # price print not backed by liquidity = fake
+            if mc and r.get('pair_ts') and r['ts'] - r['pair_ts'] / 1000 > 7200: mc = None   # pair older than 2h = not this launch
+            oc[r['mint']][r['cp_min']] = mc
     dec = {}
     for r in rows:
         if r['t'] == 'decision' and r['ts'] > 1760417000 and r.get('lane') != 'dev_list' and r.get('fb') is not None:
             dec.setdefault(r['mint'], r)
     data = []
+    dropped = []
     for m, d in dec.items():
         e = d['mcap_sol'] * SOL
         v = oc.get(m, {})
         pk = max([x / e for x in v.values() if x] or [0])
+        if pk > 500: dropped.append((m[:8], d.get('name', ''), round(pk))); continue   # impossible for a fresh launch = wrong token matched
         data.append((score(d), d, pk, m))
-    print('signals', len(data))
+    print('signals', len(data), 'dropped as impossible (>500x):', len(dropped), dropped[:6])
     by = collections.defaultdict(list)
     for s, d, pk, m in data: by[s].append(pk)
     print('score  n   hit1.4x  hit2x  hit5x  none/dead')

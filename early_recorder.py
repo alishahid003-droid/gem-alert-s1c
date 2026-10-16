@@ -92,7 +92,8 @@ class Recorder:
             pair = prices.get(mint)
             self._write({"t": "outcome", "ts": round(now, 1), "mint": mint, "cp_min": CHECKPOINTS_MIN[i],
                          "mcap_usd": float((pair or {}).get("marketCap") or (pair or {}).get("fdv") or 0) or None,
-                         "liq_usd": ((pair or {}).get("liquidity") or {}).get("usd"), "listed": bool(pair)}, now)
+                         "liq_usd": ((pair or {}).get("liquidity") or {}).get("usd"), "listed": bool(pair),
+                         "pair_ts": (pair or {}).get("pairCreatedAt")}, now)
             n += 1
             if i + 1 >= len(CHECKPOINTS_MIN):
                 del self.pending[mint]
