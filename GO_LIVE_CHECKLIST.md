@@ -245,3 +245,9 @@ LATER (live path, one step at a time, only after proven paper edge):
 - 21,037 coins, measured from the ~1-minute snap: 1.1% reach 2x, 0.5% 3x, 0.2% 5x, 0.1% 10x. Minute-1 buys, volume, mcap do NOT separate winners.
 - Only separators found: creator with >=1 graduate (3x rate 2.3% vs 0.5% base, n=481); creator 3-15 launches (0.9% vs 0.3% for 1 launch); launches>=3 + buys>=6 + buy/sell>=2 (1.5% 3x, n=893).
 - Serial-launcher -2 penalty was WRONG -> switched off (SERIAL_LAUNCHER_PENALTY=0). Even the best filter hits 3x only ~2%: still no positive expected value without fast entry. Live stays OFF.
+
+## 16 Oct lab (lab24.py): 17,020 coins, buy at ~1-min snapshot, TP/SL exits searched, 15% round-trip cost, train/test halves
+- Base: 0.6% reach 3x. Best exit (TP5x / SL 0.7x) on ALL coins = 0.84x. Every cut tried stays 0.83-0.92x (creator-with-graduate 0.92/0.89; launches 3-15 + buys>=6: 0.85).
+- Only cut above 1.0 = "mcap<1,500 at minute 1" (n=155, EV 1.03 -> 0.99 ex-best2, second half 0.89): not robust, likely thin-price artefact. Not adopted.
+- Hour of day, clone names, mint suffix, dev buy size: no usable edge. Early-buyer wallets: 18 wallets seen in >=3 tracked coins, none with a 3x.
+- Verdict: no tested filter or exit beats cost. Live stays OFF. Fast-entry (sub-second) is the missing ingredient, not more signals.
