@@ -10,6 +10,7 @@ PAPER only. Real money stays off.
 Usage: python worker_early_watch.py
 """
 import asyncio
+import entry_gate
 import json
 import os
 import time
@@ -450,7 +451,11 @@ async def main_async():
                         continue
                     m5 = (pair.get("txns") or {}).get("m5") or {}
                     vol = float(((pair.get("volume") or {}).get("m5")) or 0)
-                    mc_usd = float(pair.get("marketCap") or pair.get("fdv") or 0)
+                    mc_raw = float(pair.get("marketCap") or pair.get("fdv") or 0)
+                    mc_usd = entry_gate.sane_mcap(mc_raw, getattr(r, "mcap_sol", None), px)
+                    if mc_raw and not mc_usd:
+                        counters["gate_rejects"] = counters.get("gate_rejects", 0) + 1
+                        print(f"[gate] ignored DexScreener mcap ${mc_raw:,.0f} for {r.mint[:8]} (stream says {getattr(r, 'mcap_sol', None)} SOL)", flush=True)
                     if _RECORDER and now - r.created <= float(os.environ.get("EARLY_SNAP_MAX_AGE_S", "300")):
                         _RECORDER.on_snap(r.mint, now - r.created, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol, mc_usd, now)
                     dec = tracker.on_free(r.mint, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol,

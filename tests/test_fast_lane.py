@@ -642,3 +642,11 @@ def test_st_first_buyers_collects_early_profitable_wallets():
         assert se.run(st, ["m5"], now=1e6, get=get, max_calls=10, day_cap=4).startswith("0 calls")          # day budget respected
     finally:
         os.environ.pop("SOLANATRACKER_API_KEY", None)
+
+
+def test_entry_gate_rejects_fake_dexscreener_mcaps():
+    import entry_gate as g
+    assert g.sane_mcap(80_000, 700.0, 100.0) == 80_000            # normal launch kept
+    assert g.sane_mcap(531e6, 27.9, 100.0) == 0.0                 # TRUMP-style: huge cap vs a 28 SOL stream coin
+    assert g.sane_mcap(101e6, None, 100.0) == 0.0                 # Veil-style print: over $30M in the first hour
+    assert g.sane_mcap(None, 5, 100.0) == 0.0 and g.sane_mcap("x", 5, 100.0) == 0.0
