@@ -633,8 +633,8 @@ def test_st_first_buyers_collects_early_profitable_wallets():
             status_code = 200
             def __init__(self, rows): self.rows = rows
             def json(self): return {"buyers": self.rows}
-        data = {"m1": [{"wallet": "A", "pnl": 10}, {"wallet": "B", "pnl": -3}], "m2": [{"wallet": "A", "pnl": {"realized": 4}}, {"wallet": "C", "pnl": 1}],
-                "m3": [{"wallet": "A", "pnl": 2}, {"wallet": "C", "pnl": 5}], "m4": [{"wallet": "C", "pnl": 9}]}
+        data = {"m1": [{"wallet": "A", "pnl": 1000}, {"wallet": "B", "pnl": -3}], "m2": [{"wallet": "A", "pnl": {"realized": 400}}, {"wallet": "C", "pnl": 150}],
+                "m3": [{"wallet": "A", "pnl": 200}, {"wallet": "C", "pnl": 500}], "m4": [{"wallet": "C", "pnl": 900}]}
         get = lambda url, h: R(data[url.rsplit("/", 1)[1]])
         msg = se.run(st, ["m1", "m2", "m3", "m4"], now=1e6, get=get, max_calls=10)
         assert st.d[se.KEY_OUT] == ["A", "C"] and "4 winners" in msg                 # A in 3 winners, C in 3, B lost money
