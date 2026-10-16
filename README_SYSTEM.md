@@ -67,3 +67,11 @@ Live requires all of: KILL_SWITCH file removed by Ali; EXECUTION_ENABLED=true; E
 - `collect_report.py`, `dev_analysis.py`, `score_backtest.py`, `runner_test.py` — analysis scripts (read-only).
 - `GO_LIVE_CHECKLIST.md` (sections 1J–1O: what was built, how to verify), `SYSTEM_BLUEPRINT.md` (modules, chains, targets), this file.
 - Code map: `worker_early_watch.py` (main loop + tasks), `layers/layer17_early_entry.py` (tracker, confirmations, filters), `layers/fast_lane.py` (score + router), `dev_rank.py` / `dev_history.py` / `dev_alerts.py` (devs), `copy_signals.py` / `wallet_watch.py` (copy trading), `evm_wallets.py` + `multichain_sniper.py` (Base/BSC/Robinhood), `layers/layer13_fomo_copytrade.py` (Fomo).
+
+## 7. 16 Oct 2026 research results (all read-only scripts; full numbers in GO_LIVE_CHECKLIST.md "16 Oct" sections)
+- `report24.py` / `lab24.py` / `speed24.py` / `grad24.py` / `snap_winners.py`: cleaned-data tests (17k+ coins, 15% cost, train/test). No score, filter, exit, launch-time or post-graduation entry clears x1.0 robustly. Base: 0.5% of coins reach 3x after minute 1.
+- `history_study.py` / `boom_lab.py` / `boomers.py`: 6-month winners via GeckoTerminal + Solana Tracker (laptop only; this workspace cannot reach those hosts). Real monsters (ANSEM, CATE, CLAUDIA) began on pump.fun and graduated; heavy bundling common; 15 coins of 14-15 Oct were wash clusters.
+- `runner_lab.py` / `wallet_probe.py`: runner vs dud launch features + candidate wallets. Only weak separators; wallet BwWK17.. is a volume bot present in ~8% of coins (not a signal).
+- `bot_wallets.txt` + `bot_wallets.py`: 63 bot/sybil wallets excluded from smart-wallet pool; st_enrich now needs >$100 profit per coin.
+- Serial-launcher -2 penalty switched off (SERIAL_LAUNCHER_PENALTY=0). entry_gate.py rejects fake DexScreener mcaps.
+- STATUS: live OFF. Gate (>=30 fresh trades, mean >x1.0 after dropping best 2) not passed. Solana Tracker credits: ~800 of 2,500 used by 16 Oct (renews 15 Nov) - do not run more credit-heavy studies this month.

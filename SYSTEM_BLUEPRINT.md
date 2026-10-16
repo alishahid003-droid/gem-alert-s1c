@@ -22,6 +22,7 @@ Only real lifts found: early volume/buys (3x lift to reach 2x, but drift kills i
 | 2 | New high-balance wallets | Fomo layer13 + fomo_new_wallet confirmation wired; hourly credit pacing added | Fomo credits are 0 (reset date unknown) - nothing flows until they return |
 | 3 | Dev launches | dev_rank scoreboard (65 good devs, 20-min refresh) + dev_history.py backfill (Helius/RPC + DexScreener) + dev_alerts.py Telegram/dashboard alert (DEV LAUNCH). Screenshot list OFF (0/69 graduated) | dev_history untested live (check [dev_history] log lines); MadeOnSol Deployer Hunter starved by its call budget; GMGN key optional, no deployer history in public docs |
 | 3b | Wallet sources (Solana Tracker) | solana_tracker.py leaderboard (daily) + st_enrich.py first-buyers of our 10x winners (caps 45/day, 1,800/month) -> wallet_watch + smart_wallet | parser fix and free-plan access of /first-buyers unverified until restart; check [leaderboard] and [st_first_buyers] logs |
+| 3c | Bot filter + research (16 Oct) | bot_wallets.txt (63 sybil wallets excluded), entry_gate.py, boom_lab/runner_lab/wallet_probe studies | result: no tradable edge found; see GO_LIVE_CHECKLIST 16 Oct sections |
 | 4 | Virality | trend_feeds: Google, Wikipedia, Bluesky, Mastodon work; X/TikTok/Reddit-popular return nothing | fix feeds, tighten to names/phrases |
 | 5 | Own filters / score | score() combines signals incl. new copy/dev/whale confirmations; rug/dump filters; GoPlus honeypot gate on EVM only (pump.fun curve always sellable) | re-fit weights weekly on logged data |
 
