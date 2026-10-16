@@ -6,7 +6,9 @@ Output folder boom_lab/: report.txt (read this), winners.csv, repeat_wallets.csv
 import json, os, sys, time, csv, collections, datetime, hashlib, statistics as st, urllib.request, urllib.parse, urllib.error
 OUT = "boom_lab"; CACHE = f"{OUT}/cache"; os.makedirs(CACHE, exist_ok=True)
 GT = "https://api.geckoterminal.com/api/v2"; ST = "https://data.solanatracker.io"
-DAYS = 185; MIN_FDV = float(os.environ.get("BOOM_MIN_FDV", 3e6)); PAGES = 3; ANALYSE_TOP = 90; DEEP_TOP = 25; GAP = 3.2
+DAYS = 185; MIN_FDV = float(os.environ.get("BOOM_MIN_FDV", 1e6)); PAGES = 3; ANALYSE_TOP = 150; DEEP_TOP = 40; GAP = 3.2
+LAUNCH = {"pumpswap","pump-fun","raydium-launchlab","meteora-dbc","boop-fun","moonshot","bags-fm","moonit","heaven","wavebreak","token-mill","zora","clanker-solana","printr-v2","virtuals-solana","daos-fun","uniswap-v4-base","uniswap-v2-base","uniswap-v3-base","aerodrome-v2-base","aerodrome-slipstream-3","pancakeswap_v2","pancakeswap-v3-bsc","pancakeswap-infinity-clmm","four-meme","uniswap-v4-bsc"}
+SKIP = {"USDC","USDT","USDG","PYUSD","USDF","USDS","DAI","WETH","WBNB","SOL","WSOL","CBBTC","WBTC","ETH","BTC","CASH","U","USD1","USDE","EURC","JITOSOL","MSOL","BNSOL","STETH","WSTETH","BNB","AERO","VIRTUAL","VVV","PENGU","TRUMP","2Z","SKR","WYT"}
 NAMED = ["PONS", "MARS", "USELESS", "STONK", "SHROOM", "FEELS GOOD", "JOHN PHIL", "CLAWS", "PAWN", "CLAUDIA", "WHALE"]
 def env(k):
     try:
@@ -57,6 +59,8 @@ cands = {}
 def add(p, force=False):
     i = pinfo(p)
     if not i["created"]: return
+    b0 = (i["name"] or "").split("/")[0].strip().upper()
+    if not force and (b0 in SKIP or "USD" in b0 or i["fdv"] > 5e10): return
     if not force and ((NOW - i["created"]).days > DAYS or i["fdv"] < MIN_FDV): return
     i["named"] = force; cands[i["pool"]] = i
 for nm in NAMED:
@@ -70,8 +74,8 @@ for nm in NAMED:
 for net in targets:
     dexes = [d["id"] for d in get(f"{GT}/networks/{net}/dexes?page=1").get("data", [])]
     say(net, "platforms/DEXes:", dexes[:30])
-    for dx in dexes[:10]:
-        for pg in range(1, PAGES + 1):
+    for dx in [d for d in dexes if d in LAUNCH] + dexes[:10]:
+        for pg in range(1, (8 if dx in LAUNCH else PAGES) + 1):
             d = get(f"{GT}/networks/{net}/dexes/{dx}/pools?page={pg}").get("data", [])
             for p in d: add(p)
             if len(d) < 20: break
@@ -91,6 +95,7 @@ for k, c in enumerate(order):
     if not day: continue
     px = day[-1][4]; sup = c["fdv"] / px if px else 0
     f = day[0]; peak = max(day, key=lambda x: x[2]); e50 = next((x for x in day if x[4] * sup >= 5e4), None)
+    if any(r0["token"] == c["base"] for r0 in rows): continue
     rows.append(dict(name=c["name"], named=c["named"], net=c["net"], dex=c["dex"], created=str(c["created"])[:10], age_days=(NOW - c["created"]).days,
         born_fdv=round(f[1] * sup), day1_high_fdv=round(f[2] * sup), peak_fdv=round(peak[2] * sup), peak_after_days=(peak[0] - f[0]) // 86400,
         fdv_now=round(c["fdv"]), liq_now=round(c["liq"]), x_from_50k_close=round(peak[2] / e50[4], 1) if e50 and peak[0] >= e50[0] else "",
@@ -127,12 +132,13 @@ def short(x, n=260): return json.dumps(x, default=str)[:n]
 for r in sol:
     t = stget(f"/tokens/{r['token']}"); fbd = stget(f"/first-buyers/{r['token']}")
     tok = t.get("token") or {}; risk = t.get("risk") or {}
-    cr = tok.get("creator") or t.get("creator") or (t.get("deployer")) or ""
+    cr = ((t.get("pools") or [{}])[0].get("deployer")) or tok.get("creator") or ""
     if cr: creators[cr] += 1
     pools = [(p.get("market"), str(p.get("createdAt"))[:10]) for p in (t.get("pools") or [])][:3]
     say(f"\n{r['name']} | {r['dex']} | born ${r['born_fdv']:,} peak ${r['peak_fdv']:,}")
     say("   launch pools:", pools, "| creator:", cr or "?")
-    say("   risk:", short({k: risk.get(k) for k in risk if k not in ("risks",)}, 420) if risk else t.get("_error"))
+    bd = risk.get("bundlers") or {}
+    say("   holders:", t.get("holders"), "| txns:", t.get("txns"), "| bundlers:", bd.get("count"), "initial supply bundled %:", bd.get("totalInitialPercentage"), "| snipers:", (risk.get("snipers") or {}).get("count"), "| insiders:", (risk.get("insiders") or {}).get("count"), "| top10 %:", risk.get("top10"), "| dev %:", (risk.get("dev") or {}).get("percentage"), "| rugged:", risk.get("rugged"))
     rows_fb = fbd if isinstance(fbd, list) else fbd.get("buyers") or fbd.get("data") or []
     got = []
     for x in rows_fb:
