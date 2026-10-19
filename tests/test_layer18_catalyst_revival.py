@@ -128,3 +128,14 @@ def test_late_is_logged_not_alerted_and_failures_dont_raise(tmp_path, monkeypatc
     bad = c18.run_cycle(send=lambda t: {"ok": True}, fetch_json=lambda *a, **k: None, fetch_text=lambda u: None,
                         dex_batch=lambda a: {}, registry={}, now=NOW, log_dir=str(tmp_path / "x"))
     assert bad["alerts"] == 0 and "no feed returned titles" in bad["errors"]
+
+
+def test_noise_filters_generic_names_big_caps_weak_terms():
+    weak = {"jason": {"score": 5, "feeds": 2, "trend": True, "trusted": False, "fresh": True},
+            "roadster": {"score": 5, "feeds": 2, "trend": False, "trusted": False, "fresh": True},
+            "cosmos": {"score": 6, "feeds": 1, "trend": True, "trusted": False, "fresh": True}}
+    coins = [c18.pair_to_coin(_pair("J", "J", "Jason", 40_000, 30), NOW),            # generic name
+             c18.pair_to_coin(_pair("R", "R", "Roadster", 40_000, 30), NOW),         # 2 plain feeds, no trend/trust
+             c18.pair_to_coin(_pair("C", "C", "Cosmos", 40_000, 30, mcap=15_000_000), NOW),   # too big
+             c18.pair_to_coin(_pair("K", "K", "Cosmos", 40_000, 30, mcap=200_000), NOW)]
+    assert [m["coin"]["mint"] for m in c18.pick_matches(weak, coins)] == ["K"]

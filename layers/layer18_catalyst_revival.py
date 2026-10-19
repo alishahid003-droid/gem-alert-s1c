@@ -157,15 +157,26 @@ def classify(c: dict) -> str:
     return "HEADS-UP"
 
 
+# ordinary words / first names: a coin called "Jason" is not a Jason headline (found live: pure noise)
+_GENERIC = set("""jason andy steve scott john mike david james robert chris mark paul peter tom tim ben dan sam max alex
+auto security trust fund grand north south east west rush lions tigers eagles money power energy health system
+global united national international digital market capital group house home life love time light star king queen""".split())
+
+
 def pick_matches(hot: Dict[str, dict], coins: List[dict]) -> List[dict]:
     """Best hot term per coin, then the deepest-liquidity coin per term is the leader (others = clones)."""
     min_liq, min_age = _f("CATALYST_MIN_LIQ_USD", 8_000), _f("CATALYST_MIN_AGE_H", 12) * 60
+    max_mcap = _f("CATALYST_MAX_MCAP_USD", 3_000_000)      # a $15M coin is not a dormant dumped coin
     found: Dict[str, dict] = {}
     for c in coins:
-        if c["liq"] < min_liq or c["age_min"] is None or c["age_min"] < min_age:
+        if c["liq"] < min_liq or c["age_min"] is None or c["age_min"] < min_age or (c["mcap"] or 0) > max_mcap:
             continue
         best = None
         for term, info in hot.items():
+            if term in _GENERIC and not info.get("trusted"):
+                continue
+            if not (info.get("trusted") or info.get("trend") or info.get("feeds", 0) >= 3 or " " in term):
+                continue          # two mentions of a common word is not a catalyst
             if name_matches(term, c["sym"], c["name"]) and (best is None or info["score"] > hot[best]["score"]):
                 best = term
         if best:
@@ -384,7 +395,8 @@ def run_cycle(send: Optional[Callable[[str], dict]] = None, *, fetch_json: Calla
         seen[c["mint"]] = {"ts": now, "v": verdict}
         if c["price"]:
             pend.append({"mint": c["mint"], "term": m["term"], "verdict": verdict, "price": c["price"], "ts": now, "done": []})
-        if verdict != "LATE" and m["leader"] and res["alerts"] < max_alerts:
+        loud = verdict == "CONFIRMED" or m["info"].get("trusted") or m["info"].get("fresh")
+        if verdict != "LATE" and m["leader"] and loud and res["alerts"] < max_alerts:
             if guard("send", lambda: send(format_alert(m, verdict))) is not None:
                 res["alerts"] += 1
     state.set_value(PENDING_KEY, pend[-400:])
