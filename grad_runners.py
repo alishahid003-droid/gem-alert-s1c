@@ -61,6 +61,7 @@ for f in sorted(glob.glob("early_log/*.jsonl")):
 say("graduations logged by our stream:", len(grad), "| with create row:", sum(1 for m in grad if m in create))
 now = time.time()
 pool_m = [m for m, ts in grad.items() if m in create and now - ts > 3 * 86400]   # need >=3 days of aftermath
+if os.environ.get("GR_CACHED"): pool_m = [m for m in pool_m if os.path.exists(f"{CACHE}/{hashlib.md5((GT + '/networks/solana/tokens/' + m + '/pools?page=1').encode()).hexdigest()}.json")]
 random.seed(7); random.shuffle(pool_m); uni = pool_m[:UNIV]
 say("universe used (graduated >3 days ago, random sample):", len(uni))
 # ---------------- 2. price path after graduation ----------------
@@ -82,7 +83,8 @@ for k, m in enumerate(uni):
     i0 = next((i for i, x in enumerate(L) if x[0] + 3600 > G), None)       # candle containing / right after graduation
     if i0 is None or i0 + 2 >= len(L): continue
     ent = L[i0][4]; emc = ent * SUPPLY                                       # close of graduation hour ~ a trader entering within the hour
-    if not 25000 < emc < 400000: continue
+    if os.environ.get("GR_BAND") and not 25000 < emc < 400000: continue
+    if ent <= 0 or max(x[2] for x in L[i0 + 1:i0 + 1 + 14 * 24]) / ent > 2000: continue   # drop broken price data
     after = L[i0 + 1:i0 + 1 + 14 * 24]
     if len(after) < 24: continue
     peak = max(x[2] for x in after) / ent
@@ -93,7 +95,7 @@ for k, m in enumerate(uni):
         mins_to_grad=round((G - cr["ts"]) / 60, 1), creator_launches=cr.get("creator_launches", 0), creator_grads=cr.get("creator_grads", 0),
         init_sol=cr.get("init_sol", 0), pre_b=last.get("b", 0), pre_s=last.get("s", 0), pre_v=last.get("v", 0), hour=datetime.datetime.utcfromtimestamp(G).hour,
         creator=cr.get("creator", "")))
-say("coins with usable price path & entry mcap $25k-400k:", len(coins))
+say("coins with usable price path (entry mcap NOT filtered, supply assumed 1B so mcap column is unreliable):", len(coins))
 if not coins: say("NOTHING to analyse (feeds unreachable or early_log too new)"); sys.exit()
 N = len(coins); say("\n================ 1. BASE RATES AFTER GRADUATION (buy at close of graduation hour) ================")
 for t in (2, 3, 5, 10, 20): say(f"  reached {t}x within 14d: {sum(c['peak_x'] >= t for c in coins)} of {N} ({100 * sum(c['peak_x'] >= t for c in coins) / N:.1f}%)")
