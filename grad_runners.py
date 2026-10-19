@@ -74,31 +74,35 @@ def path(m):
     c = get(f"{GT}/networks/solana/pools/{pool}/ohlcv/hour?aggregate=1&limit=1000&currency=usd")
     L = sorted((c.get("data", {}).get("attributes", {}) or {}).get("ohlcv_list") or [])
     return dict(pool=pool, candles=L, liq=float(p["attributes"].get("reserve_in_usd") or 0))
-coins = []
+coins = []; drop = collections.Counter()
 for k, m in enumerate(uni):
     if k % 20 == 0: say("...price paths", k, "of", len(uni))
     P = path(m)
-    if not P or len(P["candles"]) < 3: continue
+    if not P: drop["no pool on GeckoTerminal"] += 1; continue
+    if len(P["candles"]) < 1: drop["pool has no candles at all"] += 1; continue
     G = grad[m]; L = P["candles"]
     i0 = next((i for i, x in enumerate(L) if x[0] + 3600 > G), None)       # candle containing / right after graduation
-    if i0 is None or i0 + 2 >= len(L): continue
-    ent = L[i0][4]; emc = ent * SUPPLY                                       # close of graduation hour ~ a trader entering within the hour
-    if os.environ.get("GR_BAND") and not 25000 < emc < 400000: continue
-    if ent <= 0 or max(x[2] for x in L[i0 + 1:i0 + 1 + 14 * 24]) / ent > 2000: continue   # drop broken price data
-    after = L[i0 + 1:i0 + 1 + 14 * 24]
-    if len(after) < 24: continue
-    peak = max(x[2] for x in after) / ent
-    path_x = [(x[2] / ent, x[3] / ent) for x in after]
+    if i0 is None: drop["no candles on/after graduation"] += 1; continue
+    eA = L[i0][1]; eB = L[i0][4]                                            # A = price at graduation (instant fill), B = close of graduation hour (fill within the hour)
+    winA = L[i0:i0 + 14 * 24]; winB = L[i0 + 1:i0 + 1 + 14 * 24]
+    # GeckoTerminal only lists hours that had trades, so a coin that died simply stops having candles - NOT a reason to drop it
+    if eA <= 0 or max(x[2] for x in winA) / eA > 5000: drop["broken price data"] += 1; continue
+    pathA = [(x[2] / eA, x[3] / eA) for x in winA]; peakA = max(h for h, _ in pathA)
+    if winB and eB > 0 and max(x[2] for x in winB) / eB <= 5000: pathB = [(x[2] / eB, x[3] / eB) for x in winB]; peakB = max(h for h, _ in pathB)
+    else: pathB = [(0.01, 0.0)] * 24; peakB = 0.0                          # pool drained in the first hour: a buyer after the hour has nothing
     cr = create[m]; sn = [s for s in snaps[m] if s["ts"] <= G]; last = sn[-1] if sn else {}
-    coins.append(dict(mint=m, pool=P["pool"], grad_ts=G, entry_mc=round(emc), peak_x=round(peak, 2), path=path_x,
-        first_hr_vol=round(L[i0 + 1][5]) if len(L[i0 + 1]) > 5 else 0, liq=round(P["liq"]),
+    coins.append(dict(mint=m, pool=P["pool"], grad_ts=G, entry_mc=round(eA * SUPPLY), peak_close=round(max(x[4] for x in winA) / eA, 2), peak_x=round(peakA, 2), peakB=round(peakB, 2), path=pathA, pathB=pathB,
+        first_hr_vol=round(L[i0][5]) if len(L[i0]) > 5 else 0, liq=round(P["liq"]),
         mins_to_grad=round((G - cr["ts"]) / 60, 1), creator_launches=cr.get("creator_launches", 0), creator_grads=cr.get("creator_grads", 0),
         init_sol=cr.get("init_sol", 0), pre_b=last.get("b", 0), pre_s=last.get("s", 0), pre_v=last.get("v", 0), hour=datetime.datetime.utcfromtimestamp(G).hour,
         creator=cr.get("creator", "")))
+say("coins DROPPED and why:", dict(drop))
 say("coins with usable price path (entry mcap NOT filtered, supply assumed 1B so mcap column is unreliable):", len(coins))
 if not coins: say("NOTHING to analyse (feeds unreachable or early_log too new)"); sys.exit()
-N = len(coins); say("\n================ 1. BASE RATES AFTER GRADUATION (buy at close of graduation hour) ================")
+N = len(coins); say("\n================ 1. BASE RATES AFTER GRADUATION (entry A = price at graduation, instant fill) ================")
 for t in (2, 3, 5, 10, 20): say(f"  reached {t}x within 14d: {sum(c['peak_x'] >= t for c in coins)} of {N} ({100 * sum(c['peak_x'] >= t for c in coins) / N:.1f}%)")
+say("  SAME but using hourly CLOSES instead of highs (wicks on thin pools are often untradeable, so this is the more realistic ceiling):")
+for t in (2, 3, 5, 10, 20): say(f"  closed an hour at >= {t}x within 14d: {sum(c['peak_close'] >= t for c in coins)} of {N} ({100 * sum(c['peak_close'] >= t for c in coins) / N:.1f}%)")
 say("  median entry mcap $%d | died (never above 1.2x and ended <0.3x): %d" % (st.median(c["entry_mc"] for c in coins), sum(1 for c in coins if c["peak_x"] < 1.2 and c["path"][-1][1] < 0.3)))
 def sim(sub, tp, sl):
     R = []
@@ -112,7 +116,9 @@ def sim(sub, tp, sl):
     return R
 say("\n================ 2. BUY-AFTER-GRADUATION SIMULATION (cost 15%, hourly candles, stop first if ambiguous) ================")
 for tp, sl in ((2, .6), (3, .6), (5, .5), (10, .5)):
-    R = sim(coins, tp, sl); s = sorted(R, reverse=True); say(f"  TP{tp} SL{sl}: EV={sum(R)/len(R):.2f} ex-best-2={sum(s[2:])/(len(s)-2):.2f} (n={N})")
+    R = sim(coins, tp, sl); s = sorted(R, reverse=True); say(f"  A instant   TP{tp} SL{sl}: EV={sum(R)/len(R):.2f} ex-best-2={sum(s[2:])/(len(s)-2):.2f} (n={N})")
+    R = sim([dict(path=c["pathB"]) for c in coins], tp, sl); s = sorted(R, reverse=True); say(f"  B +1 hour   TP{tp} SL{sl}: EV={sum(R)/len(R):.2f} ex-best-2={sum(s[2:])/(len(s)-2):.2f} (n={N})")
+say("  (A counts dumped/rugged coins as the losses a real buyer would have taken; dead-on-arrival pools without any trades are listed under DROPPED above and are not in these numbers - including them would only make results worse)")
 RUN = [c for c in coins if c["peak_x"] >= 5]; DUD = [c for c in coins if c["peak_x"] < 1.5]
 say(f"\nrunners (>=5x): {len(RUN)} | duds (<1.5x): {len(DUD)}")
 # ---------------- 3. features at the time ----------------
