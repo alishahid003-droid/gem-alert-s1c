@@ -2768,6 +2768,11 @@ def run_poll_radar():
         print(f"[layer16] cycle failed: {type(e).__name__}: {e}")
         out = {"candidates": 0, "alerts": 0, "paper": 0, "errors": [str(e)]}
     print(f"[layer16] cycle done: {out}")
+    try:   # layer 18: influencer/news catalyst -> dormant coin revival (alerts + shadow log only)
+        from layers import layer18_catalyst_revival as l18
+        print(f"[layer18] cycle done: {l18.run_cycle()}")
+    except Exception as e:  # never let it take the radar runner down
+        print(f"[layer18] cycle failed: {type(e).__name__}: {e}")
     _safe(state.record_runner_heartbeat, "poll-radar", _runner_where(),
           f"candidates={out.get('candidates')} alerts={out.get('alerts')} paper={out.get('paper')} errors={len(out.get('errors') or [])}")
 
