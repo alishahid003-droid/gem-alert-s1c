@@ -243,18 +243,28 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
     return True
 
 
+# 20 Oct 2026: the "trail" fraction below is how close to peak we REQUIRE
+# before selling (mult <= peak * trail), so giveback = 1 - trail. Checked
+# against 215 closed trailing_stop trades: configured giveback was 30-55%,
+# but the ACTUAL giveback (peak vs. what we sold at) was a median of 64% --
+# these coins move in violent jumps between our 20s/60s polls and thin
+# liquidity means the price we see often isn't fully sellable anyway. A
+# tighter trigger can't fix the poll-gap/liquidity gap, but it narrows how
+# far price has to fall before we even START trying to sell, which is the
+# one lever available without redesigning the monitor. Tightened +8-10pts
+# per lane (fast_moon left alone -- it's the explicit lottery/runner lane).
 EARLY_RULES = {
-    "sprint": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
+    "sprint": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
     # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
-    "core2": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
-    "core1": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.40),
-    "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.60),
+    "core2": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "core1": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.68),
     # FAST module (14 Oct 2026): earlier first slice, trail starts at 1.4x (see EARLY_TRAIL_AFTER), big runner
-    "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.55),
-    "fast_core": ({1.5: 0.20, 3: 0.20, 8: 0.10}, 0.45, 0.50),
-    "fast_moon": ({5: 0.10, 20: 0.10}, 0.50, 0.50),                 # lottery: 80% rides, trail starts at 3x
-    "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.70),
-    "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.70),
+    "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.65),
+    "fast_core": ({1.5: 0.20, 3: 0.20, 8: 0.10}, 0.45, 0.60),
+    "fast_moon": ({5: 0.10, 20: 0.10}, 0.50, 0.50),                 # lottery: 80% rides, trail starts at 3x -- left as-is
+    "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.78),
+    "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.78),
 }
 
 
@@ -283,7 +293,13 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
         why = ("stop_loss", f"hard stop at {mult:.2f}x")
     elif peak >= ta and mult <= peak * trail:
         why = ("trailing_stop", f"{mult:.1f}x is {int((1 - trail) * 100)}% below the {peak:.1f}x peak")
-    elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "90")) and peak < 1.5 and mult < 1.2:
+    # 20 Oct 2026: every time_stop exit in 1,090 paper trades fired at exactly
+    # ~90 min (never earlier, never later -- it's a hard flush, not catching
+    # a real reversal) with a median loss of -35% (range -9% to -67%), zero
+    # wins out of 128. Cut the window in half: a coin that hasn't shown signs
+    # of life by 45 min isn't going to recover by 90, and leaving it running
+    # the extra 45 min only lets the loss drift further before the flush.
+    elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "45")) and peak < 1.5 and mult < 1.2:
         why = ("time_stop", f"no move after {age_min:.0f} min")
     elif age_min >= float(os.environ.get("EARLY_MAX_HOLD_MIN", "1440")):
         why = ("max_hold", "24h hold limit")
