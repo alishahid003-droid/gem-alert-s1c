@@ -175,18 +175,38 @@ def loop(chains, pages=5):
     report(entries(cache, chains), (max(ts) - min(ts)) / 3600 if ts else 0)
 
 
+E2E_MAX_MCAP_USD = 20_000_000.0   # same sanity clip already used for early_log pricing (GO_LIVE_CHECKLIST sec.4):
+                                  # GeckoTerminal candle data occasionally prints an impossible single-candle
+                                  # spike with no real volume behind it (verified 20 Oct: "crack.fun" mint
+                                  # CJRZ1vTzb7Vz8RLhPrbHZg65GbqooiUQTZR8tP6BWBxk went $9k->$638M mcap in one
+                                  # 56-minute-old candle on $9.2k volume -- not a real trade). Truncate a coin's
+                                  # path at the first candle whose high implies more than this, instead of
+                                  # simulating an exit against a print nobody could have actually traded.
+
+
+def _sane_candles(cd, supply):
+    out = []
+    for c in cd:
+        if c[2] * supply > E2E_MAX_MCAP_USD:
+            capped_px = E2E_MAX_MCAP_USD / supply
+            out.append([c[0], c[1], min(c[2], capped_px), c[3], min(c[4], capped_px)] + list(c[5:]))
+            break
+        out.append(c)
+    return out
+
+
 def entries(cache, chains):
     """One entry per pool the proxy gate fires on -> dict(time, chain, mcap, conf, rules inputs, multiples per book)."""
     out = []
     for key, v in cache.items():
         if v["chain"] not in chains or not v.get("final") or len(v.get("candles") or []) < 10:
             continue
+        cd = _sane_candles(v["candles"], v["supply"])
         meta = {"supply": v["supply"], "created_ts": v["created_ts"], "symbol": v["symbol"]}
-        r = rc._build(meta, v["candles"], v["chain"])
+        r = rc._build(meta, cd, v["chain"])
         f = (r.get("fired") or {}).get("proxy") if r.get("ok") else None
         if not f:
             continue
-        cd = v["candles"]
         i = min(range(len(cd)), key=lambda k: abs(cd[k][4] * v["supply"] - f["mcap"]))
         conf = [c for c in f["conf"] if c not in ("buyers", "pressure")]   # no fake buyer/pressure confirmations
         tier = "standard" if len(conf) >= 4 else "probe"
