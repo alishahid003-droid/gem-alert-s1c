@@ -35,10 +35,17 @@ _load_dotenv()
 from executor.rpc_pool import rpc_call
 
 MINTS = {
-    "B69fvpeHS4CU3QTSMVRjedhAYtckYrF69xYV2H2zpump": "Kimchi/SOL (dexscreener)",
-    "GZQZ4r6SQcNZLQXBuuWcEbyiGsxbDaE172DJRduKpump": "Kimchi/SOL キムチ (dextools)",
-    "AMLGPnAQaWPNded32PFkRZRzqPGnTqxaUkS4pY2pump": "kimchi-puppy (solflare)",
-    "Bg76TvSMemkuxYysHtwEVPQHq7o9ktzpyTnc6ZBPpump": "Kimchicoin (dextools)",
+    # Real candidate (21 Oct 2026): sourced from @btlrtrades on X ("kimchi himself holds 75% of" the
+    # supply) + independently corroborated by a KuCoin news article reporting he "holds 75.32% of total
+    # supply" -- two independent sources agreeing on both the mechanism and the percentage. Still only a
+    # tweet + one news outlet, not an official/on-chain-verified source -- this script is the actual proof.
+    "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn": "$Kimchi (real candidate, 21 Oct 2026 sources)",
+    # Kept as a sanity check -- the 4 originally-searched mints, none of which showed real distributed
+    # holders (99.8-100% held by a single address = the pump.fun bonding curve, never graduated/traded).
+    "B69fvpeHS4CU3QTSMVRjedhAYtckYrF69xYV2H2zpump": "Kimchi/SOL (dexscreener, likely wrong/dead copycat)",
+    "GZQZ4r6SQcNZLQXBuuWcEbyiGsxbDaE172DJRduKpump": "Kimchi/SOL キムチ (dextools, likely wrong/dead copycat)",
+    "AMLGPnAQaWPNded32PFkRZRzqPGnTqxaUkS4pY2pump": "kimchi-puppy (solflare, likely wrong/dead copycat)",
+    "Bg76TvSMemkuxYysHtwEVPQHq7o9ktzpyTnc6ZBPpump": "Kimchicoin (dextools, likely wrong/dead copycat)",
 }
 CANDIDATE_WALLET = "2yu3iNjH6zLa8Uqf1s4yKJ1kB9MHYPhMkDbpu8tLmBMC"
 
