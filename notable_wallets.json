@@ -2,11 +2,11 @@
   "_comment": "Registry of REAL people's wallet addresses that Ali has personally seen publicly posted (by the person themselves, or a trusted screenshot/clip) -- e.g. a known influencer/creator/trader posting 'here is my wallet'. layer20_notable_wallet_watch.py cross-references every new coin's largest holders against this list: if a big chunk of a brand-new coin's supply lands in one of these wallets, it creates a strong (but UNVERIFIED) impression that the named person launched/endorsed it -- the pattern Ali flagged 21 Oct 2026 after the $Kimchi memecoin (riding trader @kimchi1x's fame after his reported $40M TRUMP trade) hit ~$38.7-40M mcap within about an hour. Add/confirm an entry the moment you see someone post their wallet or verify a match; this grows the registry Ali-side the way bot_wallets.txt grows.",
   "_format": "wallet address -> {name, chain, source, added_ts, confirmed: true/false}. confirmed=false still fires alerts (so it gets watched) but is labeled UNVERIFIED in the alert text until checked on-chain.",
   "wallets": {
-    "2yu3iNjH6zLa8Uqf1s4yKJ1kB9MHYPhMkDbpu8tLmBMC": {
+    "Cfq1ts1iFr1eUWWBm8eFxUzm5R3YA3UvMZznwiShbgZt": {
       "name": "Kimchi (@kimchi1x)",
       "chain": "solana",
-      "source": "bitcoinfoundation.org (citing on-chain researcher 'Specter'): wallet he 'previously shared publicly on X' -- article explicitly does NOT verify it is his wallet. NOT independently confirmed as a $Kimchi-coin holder yet -- run verify_kimchi_wallet.py on your own machine (real RPC access) to check.",
-      "added_ts": 1792555200,
+      "source": "Verified 21 Oct 2026 (Ali's own RPC, verify_kimchi_wallet.py): top holder (27.7%) of the real $Kimchi mint (pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn, confirmed real/graduated -- distributed holders, not a dead bonding-curve shell). 27.7% is down from the 75.32% a KuCoin article reported at launch, consistent with other coverage of him withdrawing/selling tokens since. NOT independently confirmed as literally his wallet (no source names this address directly) -- it's the strongest on-chain candidate found, not a certainty.",
+      "added_ts": 1792630620,
       "confirmed": false
     }
   }
