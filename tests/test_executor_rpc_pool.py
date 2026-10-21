@@ -16,6 +16,11 @@ from utils.http import ApiUnreachable
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
+    # rpc_call() reads SOLANA_RPC_URL fresh on every call and puts it FIRST in the pool when set
+    # (executor/rpc_pool.py, Helius-first behavior added once Ali's real key landed in .env). These
+    # tests assert against the static RPC_ENDPOINT_POOLS fallback order, so a real .env with a Helius
+    # key present (true on Ali's own machine / this sandbox) must not leak into the expected order.
+    monkeypatch.delenv("SOLANA_RPC_URL", raising=False)
     yield
 
 

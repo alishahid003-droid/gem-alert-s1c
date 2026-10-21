@@ -2778,6 +2778,11 @@ def run_poll_radar():
         print(f"[layer19] cycle done: {l19.run_cycle()}")
     except Exception as e:  # never let it take the radar runner down
         print(f"[layer19] cycle failed: {type(e).__name__}: {e}")
+    try:   # layer 20: notable-wallet impersonation watch -- known person's wallet funded by a new coin (alerts + shadow log only)
+        from layers import layer20_notable_wallet_watch as l20
+        print(f"[layer20] cycle done: {l20.run_cycle()}")
+    except Exception as e:  # never let it take the radar runner down
+        print(f"[layer20] cycle failed: {type(e).__name__}: {e}")
     _safe(state.record_runner_heartbeat, "poll-radar", _runner_where(),
           f"candidates={out.get('candidates')} alerts={out.get('alerts')} paper={out.get('paper')} errors={len(out.get('errors') or [])}")
 
