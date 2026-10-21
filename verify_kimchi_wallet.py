@@ -7,8 +7,31 @@ first "confirmed": true entry.
 
 Run: python verify_kimchi_wallet.py
 """
+import os
 import sys
 sys.path.insert(0, ".")
+
+
+def _load_dotenv():
+    """Standalone scripts in this repo don't auto-load .env (no python-dotenv dependency) -- every other
+    one-off script here (wallet_edge_builder.py, grad_fast_top10.py) reads it by hand. This script was
+    missing that step entirely, which is why it silently fell through to the free public RPC pool instead
+    of using Ali's real Helius key (SOLANA_RPC_URL) -- the free pool then choked on these pump.fun mints
+    with a -32603 Internal JSON-RPC error. Fixed 21 Oct 2026."""
+    try:
+        for line in open(".env", encoding="utf-8", errors="ignore"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+    except OSError:
+        pass
+
+
+_load_dotenv()
 from executor.rpc_pool import rpc_call
 
 MINTS = {
@@ -19,11 +42,22 @@ MINTS = {
 }
 CANDIDATE_WALLET = "2yu3iNjH6zLa8Uqf1s4yKJ1kB9MHYPhMkDbpu8tLmBMC"
 
+have_helius = "helius" in (os.environ.get("SOLANA_RPC_URL") or "").lower()
+print(f"Using Helius key from .env: {'yes' if have_helius else 'NO -- SOLANA_RPC_URL not found in .env, falling back to free public RPC'}\n")
+
 for mint, label in MINTS.items():
     print(f"\n=== {label}  {mint} ===")
-    largest = rpc_call("solana", "getTokenLargestAccounts", [mint])
-    if not largest.get("ok"):
-        print("  FAILED:", largest.get("reason") or largest)
+    largest = None
+    last_err = None
+    for attempt in range(3):   # a couple of these mints are old/low-traffic -- retry past a transient -32603
+        largest = rpc_call("solana", "getTokenLargestAccounts", [mint])
+        if largest.get("ok"):
+            break
+        last_err = largest.get("reason") or largest
+        import time as _t
+        _t.sleep(2)
+    if not largest or not largest.get("ok"):
+        print("  FAILED after 3 attempts:", last_err)
         continue
     accounts = (largest.get("result") or {}).get("value") or []
     supply_resp = rpc_call("solana", "getTokenSupply", [mint])
