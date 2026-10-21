@@ -2783,6 +2783,11 @@ def run_poll_radar():
         print(f"[layer20] cycle done: {l20.run_cycle()}")
     except Exception as e:  # never let it take the radar runner down
         print(f"[layer20] cycle failed: {type(e).__name__}: {e}")
+    try:   # layer 21: celebrity/known-person signal watch via public Telegram intel channels (alerts + shadow log only; fails closed until Ali runs telegram_login_setup.py once)
+        from layers import layer21_celeb_signal_watch as l21
+        print(f"[layer21] cycle done: {l21.run_cycle()}")
+    except Exception as e:  # never let it take the radar runner down
+        print(f"[layer21] cycle failed: {type(e).__name__}: {e}")
     _safe(state.record_runner_heartbeat, "poll-radar", _runner_where(),
           f"candidates={out.get('candidates')} alerts={out.get('alerts')} paper={out.get('paper')} errors={len(out.get('errors') or [])}")
 
