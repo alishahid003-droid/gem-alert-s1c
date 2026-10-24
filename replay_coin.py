@@ -36,6 +36,11 @@ def _f(name, default):
 
 
 def _get(path, params=None, tries=6):
+    """Fetches one GeckoTerminal endpoint. Treats a 5xx (GeckoTerminal having a bad moment -- seen in
+    practice on /ohlcv/minute, e.g. a plain 500 with no body) the same as a rate limit: retry with backoff,
+    then give up and return None rather than raising, so one flaky coin never takes the whole --loop process
+    down. Every caller already treats a None/empty result as "nothing usable for this coin" and moves on
+    (see fetch_mature in e2e_test.py), so this is a pure uptime fix, not a behavior change."""
     for i in range(tries):
         try:
             r = requests.get(GT + path, params=params, timeout=25,
@@ -47,6 +52,9 @@ def _get(path, params=None, tries=6):
             print(f"   rate-limited, waiting {wait}s ..."); time.sleep(wait); continue
         if r.status_code == 404:
             return None
+        if r.status_code >= 500:
+            wait = 15 + 10 * i
+            print(f"   GeckoTerminal {r.status_code}, waiting {wait}s ..."); time.sleep(wait); continue
         r.raise_for_status()
         return r.json()
     return None

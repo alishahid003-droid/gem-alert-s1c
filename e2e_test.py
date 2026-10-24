@@ -158,17 +158,27 @@ def loop(chains, pages=5):
     last_disc = 0.0
     try:
         while True:
-            n = 0
-            if time.time() - last_disc > 20 * 60:           # listing new pools every 20 min is plenty
-                n = discover(cache, chains, pages); _save(cache); last_disc = time.time()
-            done, left = fetch_mature(cache, chains, 40)
-            ent = entries(cache, chains)
-            print(f"[{time.strftime('%H:%M')}] +{n} listed, +{done} fetched, {left} ready & waiting, "
-                  f"{sum(1 for v in cache.values() if v.get('final'))} replayed, {len(ent)} entries (need 30 for a verdict)")
-            if len(ent) >= 30 and done:
-                ts = [v["created_ts"] for v in cache.values() if v.get("final")]
-                report(ent, (max(ts) - min(ts)) / 3600)
-            time.sleep(60 if not done else 5)
+            try:
+                n = 0
+                if time.time() - last_disc > 20 * 60:           # listing new pools every 20 min is plenty
+                    n = discover(cache, chains, pages); _save(cache); last_disc = time.time()
+                done, left = fetch_mature(cache, chains, 40)
+                ent = entries(cache, chains)
+                print(f"[{time.strftime('%H:%M')}] +{n} listed, +{done} fetched, {left} ready & waiting, "
+                      f"{sum(1 for v in cache.values() if v.get('final'))} replayed, {len(ent)} entries (need 30 for a verdict)")
+                if len(ent) >= 30 and done:
+                    ts = [v["created_ts"] for v in cache.values() if v.get("final")]
+                    report(ent, (max(ts) - min(ts)) / 3600)
+                time.sleep(60 if not done else 5)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:  # noqa: BLE001 -- a bad cycle must never kill the whole --loop process
+                # this is the actual fix for the 21-25 Oct outage: an unhandled GeckoTerminal 500 on
+                # /ohlcv/minute crashed the process with no retry, and the loop sat dead until someone
+                # noticed and restarted it by hand. Log it, save what we have, keep going.
+                print(f"   cycle error (continuing): {type(e).__name__}: {e}")
+                _save(cache)
+                time.sleep(30)
     except KeyboardInterrupt:
         pass
     ts = [v["created_ts"] for v in cache.values() if v.get("final")]
