@@ -4,6 +4,24 @@ Old versions are archived in docs/archive/ (history only - never read them for s
 UPDATE RULE (Claude, after every change): rewrite THIS file, copy it to the Notion master page, then commit. Ali pushes.
 Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=Claude
 
+## 0. STATUS -- 25 Oct 2026, 03:00 PKT (CURRENT -- sections 1-1S below are 13-16 Oct history, kept for the record, not current)
+- Live trading: EXECUTION_ENABLED=true, EARLY_LIVE_LANES=sprint, LIVE_MAX_STAKE_USD=5, LIVE_MAX_OPEN=3, LIVE_DAILY_LOSS_USD=17. BUT logs/live_exec.log's last real fill is 14 Oct -- Sprint has NOT actually fired a live trade in 11 days.
+- ROOT CAUSE found tonight: PumpPortal's per-coin trade-feed subscription needs its linked wallet funded >= 0.02 SOL (~$3.60-4.00 at current prices). Ali confirmed that wallet holds only ~$2 -- under the threshold -- so PumpPortal's own server has been rejecting subscribeTokenTrade/subscribeAccountTrade every cycle (trades_blocked=True in early_stream.py), starving Sprint of the live per-coin confirmations it needs. The API KEY itself is fine (present, correct length, loads OK) -- this is purely a funding-threshold gap, not a key problem. ACTION NEEDED (A): top up that linked PumpPortal wallet to ~0.04 SOL (0.02 threshold + buffer for $5 stakes + tx fees). This is the single blocker between the code and Sprint actually firing live.
+- e2e_test.py --loop had been SILENTLY DEAD for 3+ days (crashed hard on a GeckoTerminal 500 error, confirmed via Ali's screenshot). FIXED tonight (commit 42f10ca): replay_coin.py now retries 5xx like 429 instead of crashing; e2e_test.py's loop() also catches any future per-cycle exception instead of dying outright. Confirmed alive and still writing to logs/e2e_cache.json as of tonight.
+- Layer 20 (notable-wallet impersonation watch, built 21 Oct after the Kimchi incident) and Layer 21 (celebrity/known-person Telegram signal watch, built tonight) were committed/pushed days ago but had NEVER actually executed once in production: they sat after layer18/19 in the poll-radar cycle, and layer19's slow wallet checks always consumed the full 540s kill-budget first. FIXED (commit 1bbc8ac): reordered to run right after layer16, before layer18/19.
+- That reorder fix immediately exposed a SECOND real bug: layer20 had no internal time budget, and on its first cold run tried to RPC-check every holder of every candidate mint from the last 240 minutes in one pass -- hanging the ENTIRE poll-radar cycle (confirmed: every cycle since 1bbc8ac landed printed only [layer16] then "timed out after 540s -- killed" -- layer18/19 got ZERO turns, worse than before the reorder). FIXED tonight (commit 95a8173): layer20 now bails out after a 45s internal budget (NOTABLE_WATCH_TIME_BUDGET_S) and defers the rest to next cycle instead of hanging the shared cycle. 13/13 layer20+21 tests still pass.
+- ACTION NEEDED (A): the live local_runner.py process is still running code from BEFORE all three fixes above. Run start_local_mode.bat again (Admin CMD: taskkill, then start_local_mode.bat -- it `git pull`s first) so layer20/21 actually start executing and the 540s-hang regression clears. The e2e loop and wallet_edge_builder do NOT need restarting -- confirmed alive and unaffected by any of tonight's fixes.
+- FOMO credits: still 0 of 250,000 remaining, last_error=credits_exhausted -- unchanged, over a month now, no published reset date. Auto-resume check every 30 min stays in place; nothing more to do here until FOMO's own limit resets on their side.
+- Architecture clarity (Ali's "six sides" framing, 25 Oct): the system already covers all six as separate FINDER modules feeding one router (layers/router.py), each coin routed to exactly ONE book -- no new modules needed, the gaps are DATA (FOMO exhausted, PumpPortal underfunded) and PROVEN EDGE (no lane has cleared the paper go/no-go gate except Sprint, which is live but funding-starved), not missing architecture:
+  1. FOMO side -> fomo_followers / fomo_new finders (blocked on exhausted credits, above)
+  2. Compounding -> compound book (2-3x/day target via repeat small wins)
+  3. Moonshots -> core2/sprint moonshot lanes (own-analysis + radar finders)
+  4. Copy-trading known traders -> leaderboard + notable_wallet (layer20) finders
+  5. Dev launches -> dev_list finder
+  6. Known wallets/virality/influencers -> layer18 (virality), layer19 (sniper-wallet), layer21 (celeb Telegram) finders
+  All feed layers/router.py which assigns each coin to core1/core2/compound/sprint/watch, never double-booked.
+- $125,000 target -- honest math (25 Oct): the compounding path needs a sustained ~2.5-3x/day pace to reach $125k on a realistic timeline, which only works starting from ~$4,500-5,000 of working capital, not from $50-100. The moonshot path (one 500x-800x hit) is the only route from near-zero capital, but the one dataset example found (crack.fun, x797.7) is the SAME mint already flagged for GeckoTerminal data corruption, so it is NOT counted as a confirmed system catch. Highest-probability concrete next steps right now: (a) get Sprint's live lane actually firing by clearing the PumpPortal wallet-funding gap above -- it is the only lane with a working, already-live execution path; (b) keep the e2e and wallet_edge loops running uninterrupted now that both are fixed, since every clean day of data moves the compounding lane closer to a provable edge instead of a guess.
+
 ## 1. STATUS - 14 Oct 2026, 01:15 PKT
 - Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 927 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
@@ -118,6 +136,11 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Honest risk: the targets are the growth REQUIRED, not shown performance. Sprint is lottery-like. Live stakes tiny, one lane first.
 
 ## 8. CHANGE LOG (newest first)
+- 25 Oct 02:5x PKT: Layer20 time-budget fix (95a8173) -- reorder regression (layer20 hanging the whole poll-radar cycle) found and fixed same night; restart still required to pick up all three of tonight's fixes.
+- 25 Oct 02:13 PKT: Reordered poll-radar to run layer20/21 before layer18/19 (1bbc8ac) -- they had never once executed since being added.
+- 24-25 Oct: e2e_test.py --loop fixed (42f10ca) after being silently dead 3+ days on a GeckoTerminal 5xx crash.
+- 25 Oct: PumpPortal wallet-funding gap diagnosed -- key is fine, linked wallet needs >= 0.02 SOL (~$2 current balance is short).
+- 21 Oct: Layer 20 (notable-wallet impersonation watch) + Layer 21 (celeb/Telegram signal watch) built, committed, pushed (08faba0).
 - 14 Oct 01:15 Live night test: dev_list lane live, $5 stake, tune, 40% runner ladder (paper_ledger.py), restore_safe.bat. Section 1A.
 - 13 Oct 23:30 Live mode enabled (sprint, $8 cap) after $21 funding; entry cap raised to 300; PumpPortal metered feed guarded.
 - 13 Oct 16:50 e2e_test.py: unbiased end-to-end replay (real gate, tiers, exits) with --loop, 4h-old coins only, optional free CoinGecko key; commits facdfac, 344b944.
