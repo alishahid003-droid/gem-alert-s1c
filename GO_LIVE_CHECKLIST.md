@@ -22,6 +22,33 @@ Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=C
   All feed layers/router.py which assigns each coin to core1/core2/compound/sprint/watch, never double-booked.
 - $125,000 target -- honest math (25 Oct): the compounding path needs a sustained ~2.5-3x/day pace to reach $125k on a realistic timeline, which only works starting from ~$4,500-5,000 of working capital, not from $50-100. The moonshot path (one 500x-800x hit) is the only route from near-zero capital, but the one dataset example found (crack.fun, x797.7) is the SAME mint already flagged for GeckoTerminal data corruption, so it is NOT counted as a confirmed system catch. Highest-probability concrete next steps right now: (a) get Sprint's live lane actually firing by clearing the PumpPortal wallet-funding gap above -- it is the only lane with a working, already-live execution path; (b) keep the e2e and wallet_edge loops running uninterrupted now that both are fixed, since every clean day of data moves the compounding lane closer to a provable edge instead of a guess.
 
+## 0A. FINAL CONSOLIDATED CHECKLIST -- path to live, as of 25 Oct 2026, 03:30 PKT (supersedes the older "NEXT ACTIONS" ordering in section 5 below where they conflict; section 5 still holds for anything not repeated here)
+
+**What tonight's deep-check actually found (verified against real data, not restated):**
+- The e2e_test.py "GO" verdict (backtest replay on historical candles, own disclaimer: "candle fills are optimistic") and the REAL live paper-trading ledger (actual simulated execution against live data) DISAGREE. Real ledger tonight: 93 closed trades, only 10 wins (11%), net loss across every active book. The backtest GO is not sufficient proof by itself -- confirmed by checking, not assumed.
+- Entry SPEED is not the bottleneck right now: checked real entry-age data for tonight's 93 trades -- median 53s from coin launch, winners and losers entered at essentially the same average age (65.5s vs 67.8s). The older "fast-entry is the missing ingredient" conclusion (16 Oct backtest study) does not hold up against tonight's real execution data.
+- The real, still-unclosed gap is DATA KIND, not data speed: every free-data feature tested over weeks (16 Oct, 998-coin study, clean re-test) has no proven edge. PumpPortal's paid trade feed (real buyer wallets, dev-dump, bundling detection) is the one kind of signal never yet tested against real outcomes, because it has been funding-blocked since it was built.
+- No $10-20/month subscription fixes this -- checked current pricing on Helius/QuickNode/Chainstack: real-time Solana websocket data starts ~$49/month everywhere. The actual fix is PumpPortal's own metered, pay-per-use feed (pennies/day) behind a one-time ~0.04 SOL (~$4-7) wallet top-up -- already underway.
+
+**FINAL CHECKLIST TO MAKE S1c LIVE, IN ORDER:**
+
+ALI:
+1. [ ] Fund the PumpPortal-linked wallet to ~0.04 SOL (0.02 SOL threshold + buffer) -- the single highest-leverage action open right now. Unblocks the one untested kind of signal (real wallet/buyer data).
+2. [ ] Keep `python e2e_test.py --loop` and `python wallet_edge_builder.py` running uninterrupted (both confirmed fixed and alive tonight) -- every clean day strengthens or kills the evidence.
+3. [ ] One-time, free: my.telegram.org signup -> `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` in `.env` -> run `python telegram_login_setup.py` once, to activate Layer 21 (currently fails closed by design, not broken).
+4. [ ] `git push` after every session Claude commits (standing workflow -- Claude has no push credentials here).
+5. [ ] ~24-48h after PumpPortal funding: tell Claude it's been running -- that's the trigger for the next real test (below).
+
+CLAUDE (once PumpPortal has been flowing 24-48h):
+6. [x] DONE tonight: fixed layer20/21 never-executing bug (ordering), layer20 cycle-hang bug (time budget), e2e_test.py silent-crash bug (5xx retry).
+7. [ ] Re-run the entry-feature-vs-outcome study WITH real PumpPortal wallet/buyer data included -- the one test never done with this data, since it was always blocked. This is the actual next research step, not a new layer.
+8. [ ] Re-run the cost-vs-edge math (10-25% round-trip) on that new data. Only a result that clears break-even AFTER cost, on the REAL ledger, counts.
+9. [ ] Hold off on any new detection layers until 7+8 produce a verdict -- layers 18-21 stay shadow-mode (alert + log only) until each has enough real outcome data to prove or kill itself on its own.
+10. [ ] Decide what to do with the near-empty paper books (core1 $1.62, sprint $0.20, compound $0.00 as of tonight) -- either reseed for continued paper testing, or treat the drain itself as evidence the current free-data rules don't have an edge. Report the choice, don't make it silently.
+11. [ ] GO-LIVE GATE, clarified: >=30 fresh trades, mean P&L above x1.0 after costs, dropping the best trade, measured on the REAL PAPER LEDGER -- never the e2e backtest alone. The backtest is a cheap pre-screen, not proof. No lane's live cap (LIVE_MAX_STAKE_USD / LIVE_MAX_OPEN) increases beyond today's tiny test size until this is met on real-ledger data with the new PumpPortal signal included.
+
+Everything else in section 5 ("NEXT ACTIONS") still stands for anything not repeated above (per-lane 50-entry go/no-go, second pool-discovery source, etc.).
+
 ## 1. STATUS - 14 Oct 2026, 01:15 PKT
 - Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 927 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
