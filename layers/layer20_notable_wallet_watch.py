@@ -214,7 +214,19 @@ def run_cycle(send: Optional[Callable[[str], dict]] = None, *, rpc: Callable = r
             return default
 
     min_pct = _f("NOTABLE_WATCH_MIN_PCT", 0.10)
+    # Fixed 25 Oct 2026: layer20 now runs every poll-radar cycle (moved ahead of layer18/19
+    # so it's no longer starved by the 540s cycle timeout -- see scheduler.py). But with no
+    # internal time budget, a cold seen_set (first run, or a long NOTABLE_WATCH_MAX_AGE_MIN
+    # backlog) could itself eat the whole 540s doing RPC-heavy holder lookups one mint at a
+    # time, hanging the ENTIRE poll-radar cycle (layer18/19 never even starting) instead of
+    # just this layer's own slice. Bail out early and leave the rest for the next cycle --
+    # they stay candidates (not marked seen) so nothing is skipped, just spread over time.
+    budget_s = _f("NOTABLE_WATCH_TIME_BUDGET_S", 45.0)
+    deadline = time.time() + budget_s
     for c in candidates:
+        if time.time() >= deadline:
+            errors.append(f"time budget ({budget_s:.0f}s) hit -- {res['candidates'] - res['checked']} candidate(s) deferred to next cycle")
+            break
         mint = c["mint"]
         res["checked"] += 1
         holders = guard("fetch_largest_holder_owners", lambda c=c: fetch_largest_holder_owners(mint, rpc=rpc), [])
