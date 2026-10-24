@@ -2768,16 +2768,14 @@ def run_poll_radar():
         print(f"[layer16] cycle failed: {type(e).__name__}: {e}")
         out = {"candidates": 0, "alerts": 0, "paper": 0, "errors": [str(e)]}
     print(f"[layer16] cycle done: {out}")
-    try:   # layer 18: influencer/news catalyst -> dormant coin revival (alerts + shadow log only)
-        from layers import layer18_catalyst_revival as l18
-        print(f"[layer18] cycle done: {l18.run_cycle()}")
-    except Exception as e:  # never let it take the radar runner down
-        print(f"[layer18] cycle failed: {type(e).__name__}: {e}")
-    try:   # layer 19: "insider/sniper" watch -- validated smart wallets buying brand-new coins early (alerts + shadow log only)
-        from layers import layer19_smart_wallet_watch as l19
-        print(f"[layer19] cycle done: {l19.run_cycle()}")
-    except Exception as e:  # never let it take the radar runner down
-        print(f"[layer19] cycle failed: {type(e).__name__}: {e}")
+    # Layers 20/21 run BEFORE 18/19 on purpose (fixed 25 Oct 2026): local_runner.py kills this whole
+    # process at 540s (LOCAL_RADAR_MINUTES*3, capped at 600), and layer19's per-wallet network checks
+    # routinely eat the rest of that budget -- confirmed in logs/local_poll-radar.log, every single
+    # cycle ends with "timed out after 540s -- killed" right after layer19's line, so layer20/21, which
+    # were appended last, had NEVER ONCE executed since they were added, restart or not. Both are cheap
+    # (layer21 returns near-instantly until Ali's Telegram setup is done; layer20 is a handful of RPC
+    # calls bounded by a 1-wallet registry) so moving them earlier costs nothing and guarantees they get
+    # a turn even when 18/19 run long.
     try:   # layer 20: notable-wallet impersonation watch -- known person's wallet funded by a new coin (alerts + shadow log only)
         from layers import layer20_notable_wallet_watch as l20
         print(f"[layer20] cycle done: {l20.run_cycle()}")
@@ -2788,6 +2786,16 @@ def run_poll_radar():
         print(f"[layer21] cycle done: {l21.run_cycle()}")
     except Exception as e:  # never let it take the radar runner down
         print(f"[layer21] cycle failed: {type(e).__name__}: {e}")
+    try:   # layer 18: influencer/news catalyst -> dormant coin revival (alerts + shadow log only)
+        from layers import layer18_catalyst_revival as l18
+        print(f"[layer18] cycle done: {l18.run_cycle()}")
+    except Exception as e:  # never let it take the radar runner down
+        print(f"[layer18] cycle failed: {type(e).__name__}: {e}")
+    try:   # layer 19: "insider/sniper" watch -- validated smart wallets buying brand-new coins early (alerts + shadow log only)
+        from layers import layer19_smart_wallet_watch as l19
+        print(f"[layer19] cycle done: {l19.run_cycle()}")
+    except Exception as e:  # never let it take the radar runner down
+        print(f"[layer19] cycle failed: {type(e).__name__}: {e}")
     _safe(state.record_runner_heartbeat, "poll-radar", _runner_where(),
           f"candidates={out.get('candidates')} alerts={out.get('alerts')} paper={out.get('paper')} errors={len(out.get('errors') or [])}")
 
