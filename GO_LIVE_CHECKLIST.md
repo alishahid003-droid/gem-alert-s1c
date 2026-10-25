@@ -68,6 +68,11 @@ Everything else in section 5 ("NEXT ACTIONS") still stands for anything not repe
   5. 1 Nov: go live with real circuit breakers tested (daily loss cap, kill switch) so a bad stretch early on doesn't wipe the $200 before the full 15-day window plays out.
 - **Standing from here:** this supersedes nothing in 0/0A -- it is the concrete target those steps feed into. The PumpPortal-informed re-test (0A, Claude step 7) is now explicitly gated to land before 31 Oct so there's real evidence behind the 1 Nov config, not just the backtest.
 
+**Full context (Ali, 26 Oct 2026 02:41 PKT) -- how S1c fits the bigger picture, not an isolated bet:**
+- Two parallel tracks: (1) ~$18,500 Ali is arranging separately to clear immediate liabilities and fund S1B going live -- S1B is technically ready (16 accounts, $950,000 funded capital, both compliance checks closed as of Oct 21, confirmed in Notion). Once live, S1B's monthly $5,000-$8,000+ income covers ongoing expenses. (2) $200-250 into S1C, deployed 1-5 Nov, given a 10-15 day window to compound/aggregate toward $107,000 using every module in parallel (FOMO, compound, copy/dev-trading, own-analysis, virality, moonshot/sprint) -- not a single pick, many positions running at once, reached either via several compounding together or one real moonshot landing inside the window.
+- S1C's deployment plan (the allocation above) already matches this shape and does not need to change structurally. What it needs is the PumpPortal data gap closed (see 0A) so the modules are working with real signal instead of the free-data rules already shown to have no edge.
+
+
 ## 1. STATUS - 14 Oct 2026, 01:15 PKT
 - Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 927 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
