@@ -49,6 +49,25 @@ CLAUDE (once PumpPortal has been flowing 24-48h):
 
 Everything else in section 5 ("NEXT ACTIONS") still stands for anything not repeated above (per-lane 50-entry go/no-go, second pool-discovery source, etc.).
 
+## 0B. NOV 1 LIVE DEPLOYMENT PLAN (Ali, 25 Oct 2026 14:55 PKT) -- $200 capital, target $107,000 in 15 days from go-live
+
+- **Ali's plan:** deploy $200 live on 1 Nov 2026; the system has to compound/aggregate across FOMO, compound, moonshot and copy/dev lanes toward $107,000 within 15 days of going live (~by 16 Nov).
+- **Honest math (stated to Ali plainly):** $200 -> $107,000 = 535x. That needs ~52% compounding growth per day, sustained for all 15 days with no bad day. Recorded here so the plan is built against the real number, not an assumed one.
+- **Proposed $200 allocation across existing books (not yet applied to .env -- final split depends on the PumpPortal-informed edge test below):**
+  - Sprint (96h moonshot, cash-out+reseed): $80 (40%)
+  - Core1 (30-day moonshot): $50 (25%)
+  - Compound (small steady 2-3x stacking): $30 (15%)
+  - Core2/Core3 (180-day moonshot, repurposed as tail-shot): $30 (15%)
+  - Copy/dev_list/leaderboard (kept live for real-trade logging, low stake): $10 (5%)
+  - FOMO books: $0 (still fully credit-blocked; auto-activates once credits return)
+- **7-day pre-launch timeline (today -> 1 Nov):**
+  1. PumpPortal wallet funded (Ali, in progress) -> real buyer/wallet data starts flowing for the first time.
+  2. ~27-28 Oct: 24-48h of real PumpPortal data in hand -> Claude re-runs the entry-feature-vs-outcome test WITH it (never possible before tonight).
+  3. ~29-30 Oct: real-ledger verdict on genuine edge, if any, with the new data -> this tunes the actual per-lane stake sizing, not a guess.
+  4. 31 Oct: final `.env` config locked for the $200 split above, tuned by whatever the verdict shows.
+  5. 1 Nov: go live with real circuit breakers tested (daily loss cap, kill switch) so a bad stretch early on doesn't wipe the $200 before the full 15-day window plays out.
+- **Standing from here:** this supersedes nothing in 0/0A -- it is the concrete target those steps feed into. The PumpPortal-informed re-test (0A, Claude step 7) is now explicitly gated to land before 31 Oct so there's real evidence behind the 1 Nov config, not just the backtest.
+
 ## 1. STATUS - 14 Oct 2026, 01:15 PKT
 - Everything is PAPER (EXECUTION_ENABLED=false). No live trades anywhere. 927 tests pass.
 - Running since the 14:12 PKT restart: all items in section 3. Dashboard: http://localhost:8787
