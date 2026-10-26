@@ -70,7 +70,8 @@ def _famous_rx():
 class Rec:
     __slots__ = ("mint", "symbol", "name", "creator", "created", "dev_tokens", "init_sol", "mcap_sol0", "mcap_sol",
                  "buyers", "buys", "sells", "buy_sol", "sell_sol", "creator_sold", "smart", "decided", "trades",
-                 "fast", "last_ts", "peak_sol", "free_buys", "free_sells", "free_vol", "free_ts", "max_buy", "max_buyer")
+                 "fast", "last_ts", "peak_sol", "free_buys", "free_sells", "free_vol", "free_ts", "free_liq",
+                 "max_buy", "max_buyer")
 
     def __init__(self, mint, symbol, name, creator, created, dev_tokens, init_sol, mcap_sol):
         self.mint, self.symbol, self.name, self.creator, self.created = mint, symbol, name, creator, created
@@ -87,6 +88,7 @@ class Rec:
         self.free_buys = self.free_sells = 0     # free DexScreener txn counts (14 Oct): the metered trade feed only watches dev coins
         self.free_vol = 0.0
         self.free_ts = 0.0
+        self.free_liq = None    # 26 Oct: pool liquidity$ at the DexScreener snapshot -- catches thin-pool rugs the free path let through
         self.max_buy = 0.0                    # biggest single non-creator buy (SOL) and who made it: the 'insider / big fresh wallet' signal
         self.max_buyer = ""
 
@@ -173,14 +175,20 @@ class EarlyTracker:
         return self.evaluate(r.mint, now)
 
     def on_free(self, mint: str, buys: int, sells: int, vol_usd: float, mcap_sol: Optional[float] = None,
-                now: Optional[float] = None) -> Optional[dict]:
+                now: Optional[float] = None, liquidity_usd: Optional[float] = None) -> Optional[dict]:
         """Free-data path (DexScreener 5-minute txn counts). Gives non-dev coins buying-pressure and volume
-        confirmations without the paid trade feed. Returns a decision the first time the coin qualifies."""
+        confirmations without the paid trade feed. Returns a decision the first time the coin qualifies.
+        26 Oct 2026: liquidity_usd added -- 23 of the night's catastrophic (-75%+) stop_loss exits were ALL
+        on this free path (pressure_free/velocity_free), none on the paid-feed path. Every one entered a pool
+        thin enough to lose 80-98% between two 6-second re-price checks -- a liquidity-depth problem, not a
+        speed problem (positions were already getting checked every 6s). See EARLY_FREE_MIN_LIQ_USD below."""
         now = now if now is not None else time.time()
         r = self.recs.get(mint)
         if r is None or r.decided:
             return None
         r.free_buys, r.free_sells, r.free_vol, r.free_ts = int(buys or 0), int(sells or 0), float(vol_usd or 0), now
+        if liquidity_usd is not None:
+            r.free_liq = float(liquidity_usd)
         if mcap_sol and mcap_sol > 0:
             r.mcap_sol = mcap_sol
             r.peak_sol = max(r.peak_sol, mcap_sol)
@@ -216,7 +224,12 @@ class EarlyTracker:
             out.append("velocity")
         if r.buys >= int(_f("EARLY_MIN_BUYS", 12)) and r.buys / max(r.sells, 1) >= _f("EARLY_MIN_BUY_SELL", 2.5):
             out.append("pressure")
-        if r.free_ts:
+        # 26 Oct 2026: require real pool depth before trusting the free-path pressure/velocity signals.
+        # r.free_liq is None when DexScreener hasn't reported liquidity yet (treated as unknown, not failing --
+        # we don't want to silently disable the whole free path if the field is ever absent) and a real $0-ish
+        # reading (thin/fake pool) blocks both confirmations below the floor.
+        free_liq_ok = r.free_liq is None or r.free_liq >= _f("EARLY_FREE_MIN_LIQ_USD", 3000)
+        if r.free_ts and free_liq_ok:
             if r.free_buys >= int(_f("EARLY_FREE_MIN_BUYS", 20)) and \
                     r.free_buys / max(r.free_sells, 1) >= _f("EARLY_FREE_MIN_BUY_SELL", 1.6):
                 out.append("pressure_free")

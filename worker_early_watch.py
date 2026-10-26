@@ -479,8 +479,9 @@ async def main_async():
                         print(f"[gate] ignored DexScreener mcap ${mc_raw:,.0f} for {r.mint[:8]} (stream says {getattr(r, 'mcap_sol', None)} SOL)", flush=True)
                     if _RECORDER and now - r.created <= float(os.environ.get("EARLY_SNAP_MAX_AGE_S", "300")):
                         _RECORDER.on_snap(r.mint, now - r.created, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol, mc_usd, now)
+                    liq_usd = float(((pair.get("liquidity") or {}).get("usd")) or 0) or None
                     dec = tracker.on_free(r.mint, int(m5.get("buys") or 0), int(m5.get("sells") or 0), vol,
-                                          (mc_usd / px) if (mc_usd and px) else None)
+                                          (mc_usd / px) if (mc_usd and px) else None, liquidity_usd=liq_usd)
                     if dec:
                         counters["entries"] += 1
                         counters["free_entries"] = counters.get("free_entries", 0) + 1
