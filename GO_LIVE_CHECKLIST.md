@@ -343,3 +343,45 @@ LATER (live path, one step at a time, only after proven paper edge):
 - Runner features (103 runners vs 160 duds, Solana Tracker launch data): only weak/thin separators. Creator launches 3-15 + >=10 buys at 1 min: holdout 2.7% runner rate (base 0.49%). Creator with a graduated coin ~4% (11 runners / 2 duds). Bundles >=5: ~5% but 14 runners / 2 duds, holdout n=1. Snipers, dev buy, holder count: no use (holders is measured today = leakage). Insiders: 0 everywhere (Solana Tracker does not fill it).
 - Wallet BwWK17cb.. (first-4 buyer in 80 of 103 runners, 150 buys/coin = volume bot): in the random sample it is early in 23 of 300 coins (7.7%) and those coins hit 3x only 4% -> 0.84x/0.91x after cost. SELECTION ILLUSION, not a signal. sssssDdM.. 19 coins, 0.97x/1.05x (n=19, noise). Other candidates: too few.
 - Conclusion: no launch-time feature or wallet found that lifts the runner rate anywhere near the ~30% needed to pay after costs. Live stays OFF. S1c keeps collecting data in paper mode.
+
+## §0C — LOSS-PATTERN ANALYSIS + BOOK RESET (26 Oct 2026, 08:35 UTC / 13:35 PKT)
+
+**Multi-chain coverage confirmed.** `multichain_sniper.py` scans Solana, Base, and BSC
+via GeckoTerminal (`GT_SLUGS = {"solana","bsc","base"}`) plus a separate `robinhood_chain`
+feed. Live tonight on all three: Solana (majority of volume), Base (REPO/ETH), robinhood_chain
+(LAUNCH/WETH, INSE/WETH, WDY/WETH). Detection is NOT Solana-only -- it just hasn't been
+the focus of recent bug-fixing, which was all on the Solana `layers/` finder stack.
+
+**Analyzed all 241 closed paper trades across sprint/core1/core2/compound (pre-reset).**
+Exit-type breakdown (this is the real pattern, not noise):
+- stop_loss:     106 trades (44.4%) -- 100% losses, avg -57.1% -- hit hard stop-loss floor
+- time_stop:      60 trades (25.1%) -- 100% losses, avg -30.7%, avg hold 45.1min -- ran out
+  of time stalled, never moved, got cut
+- rug_liquidity:   5 trades (2.1%)  -- 100% losses -- liquidity vanished in 1-2.3 minutes
+  (classic rug pattern, confirmations list looked fine going in: pressure/buyers/velocity/
+  volume/fresh -- current confirmations do NOT detect this)
+- trailing_stop:  55 trades (23.0%) -- 48/55 WIN, avg +51.9%, avg hold 8.4min -- this is
+  where ALL the profit comes from
+- fully_sold:     11 trades (4.6%)  -- 100% win -- take-profit hit
+
+**Conclusion: ~70% of all trades (stop_loss + time_stop) are pure losses with no
+offsetting signal pattern found (confirmations on winners and losers overlap heavily --
+pressure/buyers/velocity/volume/fresh appear on both). The edge lives entirely in what
+happens AFTER entry (exit management: trailing_stop/fully_sold), not in which coins get
+picked. Entry-mcap and entry-age, re-checked this session, show no separation between
+winners and losers either (after removing 2 corrupted $1.9B-mcap outlier rows). This
+confirms, a second way, the earlier finding that entry speed is not the bottleneck --
+now extended to: entry SELECTION overall (which confirmations fire) isn't clearly
+separating winners from losers in this sample. The real lever is tightening stop_loss/
+time_stop exit rules and/or improving what happens in the first ~1-2 minutes to avoid
+rug_liquidity deaths, not changing what layer17-21 flag as a candidate.**
+
+**Action taken:** archived all 241 closed trades to
+`grad_runners/archived_closed_trades_pre_reset_1793003701.json` (full backup also at
+`.gem_alert_state.json.bak_pre_reset_26oct`), reset sprint/core1/core2/compound to clean
+$100 seed / $0 realized P&L. 20 open positions left untouched. Commit f039e40.
+Going forward, these four books measure ONLY post-fix performance (after layer20/21 time
+budget fix + worker_early_watch.py smart_wallet wiring), not diluted by 241 pre-fix trades.
+
+**Not yet done:** no code change to exit logic (stop_loss/time_stop thresholds) based on
+this finding -- that's the next real lever to pull, pending Ali's steer on priority.
