@@ -419,3 +419,38 @@ measured against this system's own data (same honesty caveat `liq_mcap_check`'s 
 docstring already carries for its 1%/2% ratios). Once a batch of fresh post-restart trades
 accumulates, re-check whether $3000 is actually separating the good/bad _free entries or
 needs tuning.
+
+## §0E — SECOND ENTRY ENGINE'S LIQUIDITY/STALENESS HOLES FIXED (26 Oct 2026, 12:55 UTC / 17:55 PKT)
+
+**First post-reset batch (163 trades, ~5h after restart) showed performance had NOT
+improved -- Sprint and Compound both back at $0.00.** Investigated honestly rather than
+declaring the §0D fix a failure: it worked exactly on its target (layer17_early_entry.py's
+`_free` path), but 25 of 32 catastrophic losses this batch came from `multichain_sniper.py`
+-- a THIRD, independent entry engine (GeckoTerminal-sourced, chains: solana/bsc/base/
+robinhood_chain) that was never touched. Correction to an earlier mid-session misstatement:
+these were NOT from the PumpPortal paid-feed path as I first said -- verified by `tags.src`
+on the actual closed-trade records ("gt", not the paid feed).
+
+**Two distinct, separately-confirmed bugs in multichain_sniper.py, not one:**
+1. Its liquidity floor (`MC_MIN_LIQ_USD`) only applied `if src == "gt"` -- stonkfun entries
+   carry their own real `liq` field and skipped the check entirely. Also the $2500 floor
+   itself was too low -- 14 trades (rug_liquidity/stop_loss) drained through it, several
+   within 2-40 seconds of entry (LNCH, Squzepad, minigang). Fixed: raised to $4000, applied
+   to every source with a reported liq (not just gt); liq=None still fails open.
+2. 11 catastrophic losses were `written_off` (pool stopped reporting data, NOT a price
+   crash) -- all 11 sat unpriced for exactly the full 30-minute `UNPRICEABLE_MINUTES_
+   BEFORE_WRITE_OFF` window before being booked as a loss. That logic was working as
+   designed (an honest, deliberate rule: unpriceable = full loss, never silently dropped)
+   but 30 minutes needlessly tied up open-position slots on something dead by cycle 3-4.
+   Cut to 8 minutes (now env-tunable).
+
+Commit 7c40ac5. Targeted tests + full suite (1012/1012) both pass. **Needs a restart to
+take effect**, same as every change tonight.
+
+**Honest framing for Ali:** three independent entry engines exist in this system
+(layer17_early_entry.py paid-feed + its _free fallback, multichain_sniper.py). Each had its
+own version of the same missing-liquidity-floor problem, found one at a time by running the
+system and tracing real losses -- not by inspection in advance. This is the actual process
+of hardening against adversarial memecoin markets, not a sign of repeated incompetence --
+but it does mean "is this finished" has no honest single answer; it means "here's what's
+been found and closed so far, here's what a fresh batch shows next."
