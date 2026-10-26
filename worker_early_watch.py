@@ -84,13 +84,33 @@ def load_dev_list() -> set:
     return out
 
 
+def _wallet_edge_confident() -> set:
+    """26 Oct 2026: the ONE signal that has passed genuine held-out validation so far
+    (wallet_edge_validate.py: +16pt lift, 54% vs 38% base, on coins the wallet list never
+    trained on) -- grad_runners/smart_wallets.csv, built by wallet_edge_builder.py. Was
+    alert-only via layer19 until now; folding it into the live "smart_wallet" confirmation
+    so the one tested edge actually reaches entry decisions instead of just being logged."""
+    import csv
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "grad_runners", "smart_wallets.csv")
+    out = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                w = (row.get("wallet") or "").strip()
+                if w:
+                    out.add(w)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def smart_wallets() -> set:
     def fetch():
         from layers.layer2b_pumpfun_smart_money import get_smart_money_roster
         return get_smart_money_roster()
     def fetch2():
         import bot_wallets
-        return (set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or []) | set(state.get_value("st_early_wallets_v1") or [])) - bot_wallets.load()
+        return (set(fetch() or set()) | set(state.get_value("smart_wallets_v1") or []) | set(state.get_value("st_leaderboard_v1") or []) | set(state.get_value("st_early_wallets_v1") or []) | _cached("wallet_edge", 300, _wallet_edge_confident)) - bot_wallets.load()
     return _cached("smart", 30, fetch2) or set()
 
 
