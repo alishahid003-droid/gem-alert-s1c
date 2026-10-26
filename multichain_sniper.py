@@ -117,7 +117,16 @@ class Scanner:
                         and mcap <= _f("MC_MOMENTUM_MAX_MCAP_USD", 250_000))
         if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or (mcap > cap and not momentum and not big):
             return None
-        if p["src"] == "gt" and (liq or 0) < _f("MC_MIN_LIQ_USD", 2500):
+        # 26 Oct 2026: of tonight's catastrophic (<-75%) losses, 14 were real liquidity
+        # drains (rug_liquidity/stop_loss, some within 40s of entry) that got through the
+        # old $2500 floor -- too low for how fast a thin Base/BSC/Solana pool can empty.
+        # Raised to $4000 AND applied to every src with a reported liq (not just "gt") --
+        # stonkfun carries its own real liq field and was skipping this check entirely.
+        # liq is None only when the source genuinely doesn't report it; that still passes
+        # (fails open), same principle as the layer17 _free liquidity gate from earlier
+        # tonight -- missing data never silently blocks a whole source, only a real thin
+        # reading does.
+        if liq is not None and liq < _f("MC_MIN_LIQ_USD", 4000):
             return None
         created = p.get("created") or self.first[k][0]
         age_min = max(0.0, (now - created) / 60.0)

@@ -31,12 +31,25 @@ import state
 from executor import exit_rules
 from executor.moonbag import DEFAULT_TRIM_LADDER
 
+
+def _f_env(name: str, default: float) -> float:
+    try:
+        v = os.environ.get(name, "").strip()
+        return float(v) if v else default
+    except ValueError:
+        return default
+
 OPEN_KEY = "paper_open_positions"
 CLOSED_KEY = "paper_closed_positions"
 MAX_OPEN = 80                      # bounds DexScreener calls per cycle
 MAX_CLOSED_KEPT = 3000
 UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3      # AND at least UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF
-UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = 30.0  # time-based: the fast watcher ticks every 20 s
+# 26 Oct 2026: all 11 written_off exits in the post-liquidity-fix batch sat unpriced for the
+# full ~30 min before being booked -- the coin is dead within the first few unpriced cycles
+# (3 cycles already means no price for 60s+ on a 20s ticker); the other ~29 minutes just tied
+# up an open-position slot a live signal could have used. Cut to 8 min -- still generous
+# against a brief data-provider hiccup, no longer generous against an actually-dead pool.
+UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = _f_env("UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF", 8.0)
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
 # Base is paper-tracked too (no buy path yet -- checklist 7.3): the alert
