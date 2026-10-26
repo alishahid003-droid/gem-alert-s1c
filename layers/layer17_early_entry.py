@@ -224,11 +224,16 @@ class EarlyTracker:
             out.append("velocity")
         if r.buys >= int(_f("EARLY_MIN_BUYS", 12)) and r.buys / max(r.sells, 1) >= _f("EARLY_MIN_BUY_SELL", 2.5):
             out.append("pressure")
-        # 26 Oct 2026: require real pool depth before trusting the free-path pressure/velocity signals.
-        # r.free_liq is None when DexScreener hasn't reported liquidity yet (treated as unknown, not failing --
-        # we don't want to silently disable the whole free path if the field is ever absent) and a real $0-ish
-        # reading (thin/fake pool) blocks both confirmations below the floor.
-        free_liq_ok = r.free_liq is None or r.free_liq >= _f("EARLY_FREE_MIN_LIQ_USD", 3000)
+        # 26 Oct 2026, revised same night: the original version of this check failed OPEN when
+        # r.free_liq was None (liquidity not yet reported by DexScreener). That turned out to be
+        # the actual hole -- a fresh batch showed 45 catastrophic (<-75%) losses almost all on
+        # coins ~24s old, exactly the window where DexScreener hasn't indexed real liquidity yet.
+        # Fail-open was treating "we don't know" as "assume it's fine" on precisely the riskiest,
+        # least-known coins. Flipped to fail CLOSED (unreported liquidity now blocks the free-path
+        # confirmations, same as a confirmed-thin pool) and the floor raised 3000 -> 6000 as a
+        # second, independent tightening. Trade-off accepted knowingly: fewer _free entries
+        # overall, including some that would have won, in exchange for cutting this loss pattern.
+        free_liq_ok = r.free_liq is not None and r.free_liq >= _f("EARLY_FREE_MIN_LIQ_USD", 6000)
         if r.free_ts and free_liq_ok:
             if r.free_buys >= int(_f("EARLY_FREE_MIN_BUYS", 20)) and \
                     r.free_buys / max(r.free_sells, 1) >= _f("EARLY_FREE_MIN_BUY_SELL", 1.6):

@@ -232,12 +232,42 @@ def test_price_sanity_allows_normal_dev_list_entry():
 
 
 def test_free_data_confirms_sprint_without_trade_feed():
+    # 26 Oct 2026: pressure_free/velocity_free now require a REPORTED, healthy liquidity_usd
+    # (fail-closed on None -- see test_free_data_blocks_without_liquidity below for why).
     t = EarlyTracker()
     t.on_create(create("F1", mc=30.0), now=T0)
-    assert t.on_free("F1", buys=8, sells=2, vol_usd=900, mcap_sol=35.0, now=T0 + 45) is None      # too little: no entry
-    dec = t.on_free("F1", buys=30, sells=8, vol_usd=4000, mcap_sol=40.0, now=T0 + 60)
+    assert t.on_free("F1", buys=8, sells=2, vol_usd=900, mcap_sol=35.0, now=T0 + 45,
+                      liquidity_usd=8000.0) is None      # too little: no entry
+    dec = t.on_free("F1", buys=30, sells=8, vol_usd=4000, mcap_sol=40.0, now=T0 + 60,
+                     liquidity_usd=8000.0)
     assert dec and dec["uses_free"] and "pressure_free" in dec["confirmations"] and "velocity_free" in dec["confirmations"]
     assert "sprint" in dec["lanes"] and ("core1" in dec["lanes"] or "core2" in dec["lanes"])
+
+
+def test_free_data_blocks_without_liquidity():
+    # 26 Oct 2026: a fresh paper-trading batch showed 45 catastrophic (<-75%) losses almost all
+    # on coins ~24s old -- exactly the window where DexScreener hasn't indexed real liquidity
+    # yet. The original fail-OPEN design treated that unknown as "assume fine", which is the
+    # opposite of what you want on the riskiest, least-known coins. Confirms the free path does
+    # NOT fire pressure_free/velocity_free when liquidity_usd is unreported (None), even with
+    # buy/volume numbers that would otherwise clearly qualify.
+    t = EarlyTracker()
+    t.on_create(create("F2", mc=30.0), now=T0)
+    dec = t.on_free("F2", buys=30, sells=8, vol_usd=4000, mcap_sol=40.0, now=T0 + 60,
+                     liquidity_usd=None)
+    assert dec is None or "pressure_free" not in dec.get("confirmations", [])
+    assert dec is None or "velocity_free" not in dec.get("confirmations", [])
+
+
+def test_free_data_blocks_thin_liquidity():
+    # Same fix: a reported but thin pool (below EARLY_FREE_MIN_LIQ_USD, default $6000) is
+    # blocked too, not just missing data.
+    t = EarlyTracker()
+    t.on_create(create("F3", mc=30.0), now=T0)
+    dec = t.on_free("F3", buys=30, sells=8, vol_usd=4000, mcap_sol=40.0, now=T0 + 60,
+                     liquidity_usd=1500.0)
+    assert dec is None or "pressure_free" not in dec.get("confirmations", [])
+    assert dec is None or "velocity_free" not in dec.get("confirmations", [])
 
 
 def test_free_data_sell_pressure_and_insane_price_block():
