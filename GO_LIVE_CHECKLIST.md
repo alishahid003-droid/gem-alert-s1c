@@ -454,3 +454,39 @@ system and tracing real losses -- not by inspection in advance. This is the actu
 of hardening against adversarial memecoin markets, not a sign of repeated incompetence --
 but it does mean "is this finished" has no honest single answer; it means "here's what's
 been found and closed so far, here's what a fresh batch shows next."
+
+## §0F — _FREE LIQUIDITY GATE FLIPPED TO FAIL-CLOSED (26 Oct 2026, 16:15 UTC / 21:15 PKT)
+
+**Third post-restart check (253 trades, ~3h after the §0E restart) was worse, not better** --
+Sprint/Core2/Compound all back at $0.00, net P&L more negative than the previous batch.
+Investigated honestly rather than declare it a wash.
+
+**Confirmed §0D and §0E WORKED on what they targeted:** multichain catastrophic losses
+dropped 25 -> 12 this batch; all 4 written_off trades this batch correctly cut off at ~8.1
+min (not 30). Both real, both holding.
+
+**But a new dominant failure appeared: 45 of 57 catastrophic (<-75%) losses this batch were
+on the SAME `_free` path fixed in §0D, still firing `pressure_free`/`velocity_free`.** Root
+cause, traced carefully (not guessed): the §0D fix failed OPEN when liquidity was unreported
+(`free_liq is None`), intended to avoid silently disabling the whole path on missing data.
+That was the wrong call for this path specifically -- missing liquidity is disproportionately
+common on brand-new coins (this batch's losses were entering ~24s old, before DexScreener
+has indexed real pool depth), which is exactly the riskiest window, not a rare case to be
+lenient about.
+
+**Fixed (commit 6cc204e): flipped to fail CLOSED** -- `pressure_free`/`velocity_free` now
+require liquidity to be BOTH reported AND >= the floor (raised $3000 -> $6000, second
+independent tightening). Known trade-off, accepted: fewer `_free`-path entries overall,
+including some winners, in exchange for cutting this loss pattern. Existing test updated,
+two new tests added locking in the new behavior. Full suite 1014/1014 passed. **Needs
+restart.**
+
+**Status for Ali, plainly:** three liquidity-related holes found and closed across three
+engines/paths in one night (layer17 `_free` -- twice, multichain_sniper.py once), each
+found only after running the system and tracing real losses. This is not evidence the
+system is broken beyond repair -- it is evidence the holes ARE findable and ARE getting
+closed, one real batch of data at a time. What it does mean honestly: no single "final"
+restart tonight should be expected to flip results immediately. The next clean read needs
+a longer, quieter observation window once the fail-closed change has had several hours to
+run, not another 3-hour spot-check -- otherwise each check just finds the next hole before
+the current fix has had room to prove out.
