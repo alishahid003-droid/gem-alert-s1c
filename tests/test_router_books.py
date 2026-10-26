@@ -170,6 +170,31 @@ def test_bust_reseeds_book_and_counts(monkeypatch):
     assert books.status("sprint")["busts"] == 1
 
 
+def test_bust_waits_for_fresh_open_position_but_not_forever(monkeypatch):
+    """26 Oct 2026 fix: an open 'early' position used to block bust-reseed indefinitely. A fresh
+    one (<BUST_WAIT_MINUTES old) should still block it; an old one (stale, still legitimately
+    priced -- a long-riding runner, not a dead coin) should no longer stall the whole book."""
+    from executor import books, paper_ledger
+    monkeypatch.setattr(books, "_rows", lambda b: [{"pnl_usd": -95.0}])
+    store = {}
+    monkeypatch.setattr(books.state, "get_value", lambda k, d=None: store.get(k, d))
+    monkeypatch.setattr(books.state, "set_value", lambda k, v: store.__setitem__(k, v))
+    now = 100_000.0
+
+    # Fresh open position (5 minutes old): bust-reseed should still wait, as before.
+    paper_ledger.open_paper("solana", "FreshRunner", "early_sprint", "early_sprint", 10, 5000,
+                            strategy="early", exit_profile="sprint", now=now - 300, module="sprint")
+    assert books.total_value("sprint") == 5.0
+    assert books.check_bust("sprint", now=now) is None
+    assert books.total_value("sprint") == 5.0          # unchanged: still waiting on the fresh position
+
+    # Same position, now 90 minutes old (past the 60-min default BUST_WAIT_MINUTES): should reseed.
+    later = now + 90 * 60
+    got = books.check_bust("sprint", now=later)
+    assert got is not None
+    assert books.total_value("sprint") == 100.0        # reseeded despite the still-open old position
+
+
 def test_tier_stakes_cap_and_loss_brake():
     eq = books.equity("sprint")
     pr = books.tier_stake_usd("sprint", "probe")

@@ -110,16 +110,29 @@ def check_bust(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     """A moonshot/daily book whose total value fell below BUST_BELOW_USD (default $10 of a $100 seed)
     is BUST: log it (the bust count is a headline metric -- how often does $100 die?), reseed the
     book at its seed and restart its clock so the 24h evidence run keeps producing trades.
-    Paper only. Oct 13 2026: all three target books were empty 3 hours into the first run."""
+    Paper only. Oct 13 2026: all three target books were empty 3 hours into the first run.
+
+    26 Oct 2026: the "let the open position resolve first" guard below had no timeout. Found via
+    a live state check that core1/sprint/compound each sat at exactly $0.00 for 3+ hours straight,
+    each blocked by a SINGLE open "early" runner that was still legitimately priceable (not stuck/
+    dead -- a real, possibly-winning position just taking a long time). Every other signal for
+    that book got refused the whole time with no way to act on anything. The runner itself is left
+    alone (never force-closed -- it may still be a real winner), but the book no longer waits on
+    it forever: past BUST_WAIT_MINUTES (default 60) of being under the bust floor, it reseeds and
+    keeps trading in parallel while the stuck runner continues riding independently."""
     if BOOKS[book_id]["kind"] not in ("moonshot", "daily"):
         return None
     c = cfg(book_id)
     if total_value(book_id) >= (_f("BUST_BELOW_USD", 10.0) or 10.0):
         return None
-    from executor import paper_ledger
-    if any(p.get("strategy") == "early" and p.get("module") == book_id for p in paper_ledger._open().values()):
-        return None            # let this book's open sniper slices resolve first (legacy scalper/stage1 rows don't count)
     now = now if now is not None else time.time()
+    from executor import paper_ledger
+    blockers = [p for p in paper_ledger._open().values()
+                if p.get("strategy") == "early" and p.get("module") == book_id]
+    if blockers:
+        oldest_open = min((p.get("opened_ts") or now) for p in blockers)
+        if now - oldest_open < _f("BUST_WAIT_MINUTES", 60.0) * 60.0:
+            return None         # let this book's open sniper slice(s) resolve first, but not forever
     rec = state.get_value(BUST_KEY)
     rec = rec if isinstance(rec, dict) else {}
     rec.setdefault(book_id, []).append({"ts": now, "realized_at_bust": realized_pnl(book_id) + bust_offset(book_id),
