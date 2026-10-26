@@ -385,3 +385,37 @@ budget fix + worker_early_watch.py smart_wallet wiring), not diluted by 241 pre-
 
 **Not yet done:** no code change to exit logic (stop_loss/time_stop thresholds) based on
 this finding -- that's the next real lever to pull, pending Ali's steer on priority.
+
+## §0D — LIQUIDITY-DEPTH FIX FOR THE _FREE PATH (26 Oct 2026, 09:05 UTC / 14:05 PKT)
+
+**Call frequency ruled out as the cause of catastrophic losses.** Positions re-price every
+6s (`EARLY_MANAGE_SECONDS`). The worst stop_loss trades (-75% to -98%) still got 5-20 checks
+before closing -- the pool collapsed between two 6s samples, not because checks were too
+slow. No realistic check-frequency change would have caught these.
+
+**Real cause, confirmed from the data:** every one of the 23 catastrophic (<-75%) stop_loss
+trades (11 unique coins) was entered via the `_free` confirmation path (pressure_free/
+velocity_free -- the DexScreener-based fallback `on_free()` uses when the paid PumpPortal
+trade feed is off, which it has been for 36+ hours). ZERO catastrophic losses used the
+paid-feed confirmations (pressure/buyers/velocity/volume/fresh). The free path had no
+liquidity-depth check at all -- only a volume check (`EARLY_FREE_MIN_VOL_USD`), which a
+thin/fake pool can pass with one wash-traded burst.
+
+**Fix implemented and committed (401b0fe):** threaded DexScreener's `liquidity.usd` through
+`worker_early_watch.py`'s free-data poll into `layer17_early_entry.EarlyTracker.on_free`
+(new `liquidity_usd` param, stored as `Rec.free_liq`). `pressure_free`/`velocity_free` now
+require `free_liq >= EARLY_FREE_MIN_LIQ_USD` (default $3000) to fire. Fails open when
+liquidity is unreported (None) so a missing field never silently disables the whole free
+path -- only a real, reported thin reading blocks it. Verified: targeted test (thin
+liquidity blocked, healthy liquidity unaffected, missing data fails open) + full suite
+1012/1012 passed.
+
+**Needs a restart to take effect** (same as every code change tonight -- Ali must kill and
+restart `start_local_mode.bat`). Until restarted, `worker_early_watch.py` is still running
+the old code without this gate.
+
+**Not yet done / open question:** the $3000 floor is a reasonable-sounding default, not
+measured against this system's own data (same honesty caveat `liq_mcap_check`'s own
+docstring already carries for its 1%/2% ratios). Once a batch of fresh post-restart trades
+accumulates, re-check whether $3000 is actually separating the good/bad _free entries or
+needs tuning.
