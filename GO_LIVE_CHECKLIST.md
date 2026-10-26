@@ -490,3 +490,40 @@ restart tonight should be expected to flip results immediately. The next clean r
 a longer, quieter observation window once the fail-closed change has had several hours to
 run, not another 3-hour spot-check -- otherwise each check just finds the next hole before
 the current fix has had room to prove out.
+
+## §0G — THE REAL CAUSE OF BOOKS STUCK AT $0.00 FOUND (27 Oct 2026, 01:32 PKT / 20:32 UTC)
+
+**1:30 AM scheduled check-in found something more fundamental than a trading-performance
+problem.** Set out to evaluate whether the fail-closed `_free` liquidity fix (§0F) reduced
+catastrophic losses. Instead found: core1, sprint, and compound had each sat at EXACTLY
+$0.00 for 3+ HOURS STRAIGHT -- not low, mathematically dead, refusing every single signal
+the whole time regardless of quality. Could not evaluate any of tonight's fixes against
+these three books because they had not opened a single new trade in hours.
+
+**Root cause, confirmed from live state (not guessed): `check_bust()`'s guard -- "let this
+book's one open sniper position resolve before reseeding" -- had no timeout.** Each dead
+book had exactly one open "early" position, genuinely still priceable (not stuck/dead data,
+real live mcap updates), simply riding for 190+ minutes as a long runner. That's correct
+behavior for the runner itself (should not be force-closed), but it meant the ENTIRE BOOK
+stayed frozen at $0 the whole time, unable to reseed and act on any other signal -- a
+single slow-moving position silently blocking the whole book indefinitely.
+
+**This also explains the whole night's pattern of "fixes don't seem to move the balance
+numbers":** three of four books have likely been intermittently stuck this way for much of
+the night, so improved entry quality from the liquidity fixes had no books available to
+prove itself on.
+
+**Fixed (commit 68d2fef):** `check_bust()` now times the block. Under `BUST_WAIT_MINUTES`
+(default 60 min), it still waits as before. Past that, it reseeds the book at its $100 seed
+and resumes trading in parallel -- the long-running position is never force-closed, it
+keeps riding independently and closes on its own exit rules whenever that happens. New test
+confirms both halves: a fresh (5-min) blocker still waits; a stale (90-min) one no longer
+blocks reseed. Full suite 1015/1015 passed (run in two halves due to a tool time limit, not
+a shortcut -- both halves clean). **Needs a restart to take effect.**
+
+**Honest framing:** this is a different KIND of bug than tonight's earlier three (which
+were all about which coins get let IN). This one is about a book getting permanently stuck
+regardless of entry quality -- arguably a bigger deal, because it means the system could
+look broken from the balance number alone even when the entry-side fixes are working
+correctly. Worth watching closely post-restart: does the balance actually start moving
+again, not just whether new trades open.
