@@ -748,3 +748,42 @@ in ~2 minutes instead. Whether robinhood_chain entries should be filtered out ea
 
 **Needs a restart** to apply, same as every prior fix this run -- the running process does
 not pick up code changes until it reloads.
+
+---
+
+## §0L — 28 Oct 2026: bsc/base/robinhood_chain disabled by default -- full-history data says they don't work
+
+Ali pushed back hard on §0K leaving "should the system refuse these chains" as an open
+question instead of answering it. It shouldn't have been left open -- 1,023 early-sniper
+trades across all four chains were already sitting in the ledger. Pulled the real numbers:
+
+| chain | n | win rate | total pnl | dead-on-arrival |
+|---|---|---|---|---|
+| solana | 753 | 15.5% | -$11,047.28 | 17.8% |
+| robinhood_chain | 161 | 26.1% | -$2,516.68 | 59.0% |
+| base | 72 | 36.1% | -$1,045.35 | 55.6% |
+| bsc | 37 | **0.0%** | -$1,073.49 | 56.8% |
+
+bsc is a flat 0% win rate -- every single one of 37 trades a loss. base and robinhood_chain
+both have higher win rates than solana but still lose money overall because more than half
+of every trade on those chains dies unpriced (§0K) before it ever gets a chance to win.
+solana is the only chain with real volume and no single-chain catastrophe -- still losing
+overall, but that's a strategy-tuning question, not "this chain cannot work" the way the
+other three's numbers show.
+
+`multichain_sniper.py`: added `DISABLED_CHAINS` (env-overridable via `MC_DISABLED_CHAINS`,
+default `bsc,base,robinhood_chain`). `run_loop()`'s `slugs` dict is now filtered against it
+before the scan loop starts, and the `resolve_rhc()` robinhood-chain-slug lookup is skipped
+entirely when robinhood_chain is disabled. Only solana entries happen going forward unless
+this is explicitly re-enabled per chain (no code change needed -- just the env var).
+
+2 new tests in `tests/test_multichain_sniper.py`: default disables exactly
+{bsc, base, robinhood_chain}, and the env override re-enables a named chain correctly. Full
+suite: 1,027/1,027 passed.
+
+This directly answers the question §0K left open: yes, stop entering these three chains,
+now, not as a future option. solana remains live and paper-tracked; its own losing record
+(-$11,047.28, 15.5% win rate) is a separate, still-open problem -- the entry/exit rules
+themselves, not the data/pricing-source failures found in §0K.
+
+**Needs a restart** to apply, same as every prior fix this run.

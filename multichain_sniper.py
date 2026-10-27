@@ -20,6 +20,16 @@ import state
 
 GT_SLUGS = {"solana": "solana", "bsc": "bsc", "base": "base"}
 RHC_CANDIDATES = ("robinhood-chain", "robinhood", "robinhood_chain")
+# 28 Oct 2026 (Ali): 1,023 early-sniper trades across all four chains, full history, show bsc/base/
+# robinhood_chain are not viable -- bsc is a flat 0% win rate across 37 trades (every single one a
+# loss, -$1,073 total); base and robinhood_chain both have >55% of their trades die unpriced before
+# ever getting a chance to win, and lose money overall (-$1,045 and -$2,517) despite higher win rates
+# than solana, because the wins aren't big enough to cover that dead-on-arrival rate. solana is the
+# only chain with real volume (753 trades) and no single-chain catastrophe -- still losing overall
+# (-$11,047, 15.5% win rate) but that is a strategy-tuning problem, not "this chain cannot work at
+# all" the way bsc/base/robinhood_chain's numbers show. Disabled by default; re-enable one chain by
+# removing it from DISABLED_CHAINS (env override) if/when its numbers improve enough to justify it.
+DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc,base,robinhood_chain").split(",") if c.strip()}
 
 
 def _f(name, default):
@@ -274,7 +284,7 @@ def resolve_rhc() -> Optional[str]:
 
 def run_loop(stop: Optional[threading.Event] = None):
     sc = Scanner()
-    slugs = dict(GT_SLUGS)
+    slugs = {c: s for c, s in GT_SLUGS.items() if c not in DISABLED_CHAINS}
     rhc = None
     cycle = 0
     try:
@@ -282,11 +292,12 @@ def run_loop(stop: Optional[threading.Event] = None):
         book = Book()
     except Exception:  # noqa: BLE001
         book = None
-    print("[multichain] sniper loop started (solana non-pump + StonkFun, bsc, base, robinhood)", flush=True)
+    active = ", ".join(sorted(slugs)) or "none"
+    print(f"[multichain] sniper loop started (active: {active}; disabled: {', '.join(sorted(DISABLED_CHAINS)) or 'none'})", flush=True)
     while not (stop and stop.is_set()):
         t0 = time.time()
         try:
-            if rhc is None and cycle % 15 == 0:
+            if rhc is None and cycle % 15 == 0 and "robinhood_chain" not in DISABLED_CHAINS:
                 rhc = resolve_rhc()
                 if rhc:
                     slugs["robinhood_chain"] = rhc

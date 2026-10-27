@@ -76,3 +76,28 @@ def test_tier_of():
     assert m.tier_of(["a", "b", "c", "d"]) == "standard"
     assert m.tier_of(["buyers", "pressure", "c", "d", "e", "f"]) == "conviction"
     assert m.tier_of(["a", "b", "c", "d", "e", "f"]) == "standard"
+
+
+def test_disabled_chains_default_excludes_bsc_base_robinhood():
+    """28 Oct 2026 (Ali): full-history data (1,023 early-sniper trades) showed bsc at a flat 0%
+    win rate (37/37 losses, -$1,073), and base/robinhood_chain both losing money overall with
+    >55% of trades dying unpriced before ever getting a chance to win. Only solana has real
+    volume and no single-chain catastrophe. These three chains are disabled by default."""
+    assert m.DISABLED_CHAINS == {"bsc", "base", "robinhood_chain"}
+    slugs = {c: s for c, s in m.GT_SLUGS.items() if c not in m.DISABLED_CHAINS}
+    assert slugs == {"solana": "solana"}
+
+
+def test_disabled_chains_env_override(monkeypatch):
+    """A chain can be re-enabled later (if its numbers improve) by removing it from the env
+    override, without a code change."""
+    monkeypatch.setenv("MC_DISABLED_CHAINS", "bsc")
+    import importlib
+    m2 = importlib.reload(m)
+    try:
+        assert m2.DISABLED_CHAINS == {"bsc"}
+        slugs = {c: s for c, s in m2.GT_SLUGS.items() if c not in m2.DISABLED_CHAINS}
+        assert slugs == {"solana": "solana", "base": "base"}
+    finally:
+        monkeypatch.delenv("MC_DISABLED_CHAINS", raising=False)
+        importlib.reload(m)
