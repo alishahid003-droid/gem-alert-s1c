@@ -276,6 +276,14 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
         elif r is not None and r > 1.5:
             base *= 0.8
     out = min(base, eq * c["max_share"], free_equity(book_id))
+    # 27 Oct 2026: absolute backstop, independent of the equity math above. Every cap until now was
+    # RELATIVE to equity() -- exactly the single point of failure a now-fixed accounting bug exploited
+    # (a phantom equity reading let a single $100-seed book size a $1,289 stake, all caps "working
+    # correctly" relative to the wrong number). This ceiling is pinned to the book's actual SEED, not
+    # its current (possibly wrong) equity, so no future bug anywhere upstream of this line can ever
+    # again produce a single stake many times the book's real size.
+    hard_cap = _f(f"{book_id.upper()}_MAX_STAKE_USD", None) or c["seed"] * _f("MAX_STAKE_SEED_MULT", 3.0)
+    out = min(out, hard_cap)
     return round(max(0.0, out), 2) if out >= 5.0 else 0.0
 
 
@@ -323,6 +331,12 @@ def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: O
         base *= 0.8
     cap_mc = _f("TIER_MAX_MCAP_FRAC", 0.02) * mcap if mcap else float("inf")
     out = min(base, eq * TIER_MAX_SHARE, free_equity(book_id), cap_mc)
+    # 27 Oct 2026: same absolute backstop as stake_usd() below, pinned to the book's real seed rather
+    # than its (possibly corrupted) current equity -- see that comment for the full reasoning. This is
+    # the path the $1,289.59 oversized stake actually went through; every cap above it was relative to
+    # equity() and all of them "passed" because equity() itself was wrong.
+    hard_cap = _f(f"{book_id.upper()}_MAX_STAKE_USD", None) or c["seed"] * _f("MAX_STAKE_SEED_MULT", 3.0)
+    out = min(out, hard_cap)
     return round(out, 2) if out >= 5.0 else 0.0
 
 

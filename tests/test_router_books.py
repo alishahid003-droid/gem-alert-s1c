@@ -226,6 +226,24 @@ def test_bust_offset_uses_latest_snapshot_not_sum(monkeypatch):
     assert books.equity("compound") == 100.0
 
 
+def test_absolute_stake_ceiling_survives_any_equity_bug(monkeypatch):
+    """27 Oct 2026 hardening: every stake cap until now (tier %, max_share, free_equity, cap_mc) was
+    RELATIVE to equity() -- exactly the single point of failure a real bug exploited (a corrupted
+    equity() reading of $1,309.74 on a $100-seed book let a $1,289.59 stake through every one of
+    those caps, since they were all "working correctly" relative to the wrong number). This locks in
+    an absolute backstop pinned to the book's real SEED (not its current, possibly-wrong equity) in
+    both tier_stake_usd() and stake_usd(), so no future bug anywhere upstream can reproduce this."""
+    from executor import books
+    monkeypatch.setattr(books, "equity", lambda book_id: 1309.74)
+    monkeypatch.setattr(books, "free_equity", lambda book_id: 1309.74)
+    monkeypatch.setattr(books, "pace", lambda book_id, now=None: {"has_target": False})
+    monkeypatch.setattr(books, "loss_streak", lambda book_id: 0)
+    tier_stake = books.tier_stake_usd("compound", "conviction", mcap=50_000.0)
+    plain_stake = books.stake_usd("compound")
+    assert tier_stake <= 300.0, f"tier_stake_usd let {tier_stake} through a corrupted equity reading"
+    assert plain_stake <= 300.0, f"stake_usd let {plain_stake} through a corrupted equity reading"
+
+
 def test_tier_stakes_cap_and_loss_brake():
     eq = books.equity("sprint")
     pr = books.tier_stake_usd("sprint", "probe")

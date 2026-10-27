@@ -586,3 +586,52 @@ book that happened to bust 3x in 3 minutes tonight, which is what exposed it; th
 three books are carrying the identical latent bug and will hit it the first time any of
 them busts twice. **Needs a restart to take effect for new trades; the state correction to
 the one mis-sized position is already applied directly and doesn't need a restart.**
+
+## §0I -- Audit after §0H: absolute stake ceiling added as a backstop against this whole
+## CLASS of bug, not just the one instance (27 Oct 2026)
+
+Ali's correct pushback after §0H: fixing the exact bug found and stopping there is reactive,
+not an actual fix to the system. Did a full audit of every balance/equity/stake-sizing
+function in `executor/books.py`, not just the bust path, before reporting back.
+
+**Confirmed, not assumed:** the §0H fix (`bust_offset()` using the latest snapshot instead
+of summing) lives in ONE shared function used identically by every book -- sprint, core1,
+core2, compound all call the same `realized_pnl()` -> `bust_offset()`. There is no
+per-book copy of this logic. The fix is already live for all four books from the moment it
+was committed; sprint/core1/core2 were never "left broken", they simply hadn't shown the
+symptom yet (each had only busted once, where the old and new formulas agree).
+
+**Audited and ruled clean:** `withdrawn()` (cashouts are genuinely additive real
+withdrawals, correct to sum -- unlike bust snapshots, which are cumulative state, not
+deltas); every other `sum()` in `paper_ledger.py` (plain aggregates over real per-trade
+rows, not state snapshots); `multichain_sniper.py`'s scan loop (confirmed single-threaded
+and sequential, not a source of the concurrency risk originally suspected).
+
+**Real structural gap found and fixed:** every stake cap in the system (`TIER_MAX_SHARE`,
+`max_share`, `free_equity`, `cap_mc`) was RELATIVE to `equity()` -- which is exactly the
+single point of failure §0H's bug exploited. If equity() is ever wrong again, for any
+reason, every one of those caps "passes" because they're all computed relative to the same
+wrong number. Added an ABSOLUTE ceiling, independent of equity(), pinned to each book's
+real seed (`seed x MAX_STAKE_SEED_MULT`, default 3x = $300 on a $100 book) in both
+`tier_stake_usd()` and `stake_usd()` -- the two functions every entry path sizes through.
+Verified by replaying the exact disaster scenario (equity forced to the same $1,309.74
+phantom reading) and confirming the new ceiling still caps the stake at $300 instead of
+$1,289.59, with no dependence on the specific bug that caused it this time.
+
+**Also checked, not fixed (no confirmed incident, flagging as a known risk the new ceiling
+now defends against):** `worker_early_watch.py` (asyncio) and `local_runner.py`'s
+`multichain_sniper` thread are separate OS processes, both able to call `can_open()` ->
+size a stake -> `open_paper()` for the same book. `_OPEN_LOCK` only protects the final
+state WRITE inside one process; the READ-then-DECIDE step (computing equity/free_equity
+and sizing the stake) is not locked across processes, so two signals landing close together
+in time could each size against the same stale balance. Checked the real trade history for
+evidence this has actually produced an oversized position independent of the §0H bug --
+found none; every oversized trade traces cleanly to the one bug already fixed. Not building
+a cross-process lock speculatively tonight without a confirmed incident, but the new
+absolute ceiling above already bounds worst-case damage from this risk to 3x seed even if
+it ever does fire.
+
+New test (`test_absolute_stake_ceiling_survives_any_equity_bug`) locks in the ceiling
+directly. Full suite 1017/1017 passed. Committed.
+
+**Needs a restart** for the ceiling to govern new trades.
