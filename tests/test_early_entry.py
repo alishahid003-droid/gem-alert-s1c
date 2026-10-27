@@ -234,14 +234,69 @@ def test_price_sanity_allows_normal_dev_list_entry():
 def test_free_data_confirms_sprint_without_trade_feed():
     # 26 Oct 2026: pressure_free/velocity_free now require a REPORTED, healthy liquidity_usd
     # (fail-closed on None -- see test_free_data_blocks_without_liquidity below for why).
+    # 28 Oct 2026: the standard path also now requires exactly 3 confirmations and mcap $5-20k
+    # (see layer17_early_entry.py's Oct 28 gate comment) -- a bare pressure_free+velocity_free
+    # pair (2 confirmations) is exactly the shape the audit found losing badly even at a good
+    # mcap (20.1% win, -$224.67, n=194), so this test adds a whale_buy (>=3 SOL within 90s of
+    # creation) to reach 3 confirmations and stay inside $5-20k (mcap_sol=40 * 150 = $6,000),
+    # without changing what this test is actually verifying (that the free-data path works).
     t = EarlyTracker()
     t.on_create(create("F1", mc=30.0), now=T0)
+    t.on_trade(buy("F1", "whale1", 3.5, 32.0), now=T0 + 10)   # whale_buy: >=3 SOL within 90s
     assert t.on_free("F1", buys=8, sells=2, vol_usd=900, mcap_sol=35.0, now=T0 + 45,
                       liquidity_usd=8000.0) is None      # too little: no entry
     dec = t.on_free("F1", buys=30, sells=8, vol_usd=4000, mcap_sol=40.0, now=T0 + 60,
                      liquidity_usd=8000.0)
     assert dec and dec["uses_free"] and "pressure_free" in dec["confirmations"] and "velocity_free" in dec["confirmations"]
+    assert "whale_buy" in dec["confirmations"] and len(dec["confirmations"]) == 3
     assert "sprint" in dec["lanes"] and ("core1" in dec["lanes"] or "core2" in dec["lanes"])
+
+
+def test_mcap_and_conf_count_gate_blocks_two_confirmations():
+    """28 Oct 2026 (Ali): full pre-entry audit of this chain's own 417 all-time early-origin
+    trades found entry mcap $5-20k + EXACTLY 3 confirmations + no hot_meta: n=29, win_rate=
+    34.5%, net=+$10.43, vs everything else: n=388, win_rate=14.9%, net=-$438.82. A 2-
+    confirmation entry (pressure+velocity, no smart_wallet) at a good mcap is exactly the
+    losing shape found at scale (n=194, win_rate=20.1%, net=-$224.67) and this excludes."""
+    t = EarlyTracker(smart_fn=lambda: set())   # no tracked smart wallets -> smart_wallet can never fire
+    t.on_create(create("G1", mc=40.0), now=T0)   # 40 SOL * 150 = $6,000, inside the 5-20k window
+    dec = None
+    for i in range(14):
+        dec = t.on_trade(buy("G1", f"w{i}", 1.0, 40.0), now=T0 + 6.0 * i) or dec
+    assert dec is None
+
+
+def test_mcap_and_conf_count_gate_passes_exactly_three_confirmations():
+    t = EarlyTracker(smart_fn=lambda: {"w3"})
+    t.on_create(create("G2", mc=40.0), now=T0)   # $6,000 mcap, inside 5-20k
+    dec = None
+    for i in range(14):
+        dec = t.on_trade(buy("G2", f"w{i}" if i != 3 else "w3", 1.0, 40.0), now=T0 + 6.0 * i) or dec
+    assert dec and len(dec["confirmations"]) == 3
+    assert set(dec["confirmations"]) == {"smart_wallet", "velocity", "pressure"}
+
+
+def test_mcap_and_conf_count_gate_blocks_outside_mcap_window():
+    t = EarlyTracker(smart_fn=lambda: {"w3"})
+    t.on_create(create("G3", mc=10.0), now=T0)   # 10 SOL * 150 = $1,500, below the $5k floor
+    dec = None
+    for i in range(14):
+        dec = t.on_trade(buy("G3", f"w{i}" if i != 3 else "w3", 1.0, 10.0), now=T0 + 6.0 * i) or dec
+    assert dec is None
+
+
+def test_mcap_and_conf_count_gate_env_override():
+    t = EarlyTracker(smart_fn=lambda: {"w3"})
+    import os
+    os.environ["EARLY_GATE_MIN_MCAP_USD"] = "1000"
+    try:
+        t.on_create(create("G4", mc=10.0), now=T0)   # $1,500, below default $5k floor, within overridden $1k floor
+        dec = None
+        for i in range(14):
+            dec = t.on_trade(buy("G4", f"w{i}" if i != 3 else "w3", 1.0, 10.0), now=T0 + 6.0 * i) or dec
+        assert dec and len(dec["confirmations"]) == 3
+    finally:
+        del os.environ["EARLY_GATE_MIN_MCAP_USD"]
 
 
 def test_free_data_blocks_without_liquidity():

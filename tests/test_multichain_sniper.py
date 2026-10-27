@@ -80,6 +80,26 @@ def test_robinhood_chain_mcap_floor_env_override(monkeypatch):
     assert d and d["chain"] == "robinhood_chain"
 
 
+def test_robinhood_chain_requires_2min_age_within_mcap_floor():
+    """28 Oct 2026 (Ali): asked for an additional confident signal on robinhood_chain beyond
+    the mcap floor. Within the >=$50k bucket, age_min shows a real gradual effect: age>=2.0min
+    lifts win rate to 56.3% (n=16, +$238.40 net) vs the 1-2min sub-bucket alone (45.5% win,
+    only +$8.08 net). Specific to this mcap bucket -- across all robinhood_chain trades, age
+    shows the OPPOSITE shape, so this isn't a blanket 'wait longer' rule."""
+    sc = m.Scanner()
+    # created_ago=90s (1.5min) is below the 2min floor, even though mcap clears $50k.
+    assert sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=60_000.0, created_ago=90), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=60_000.0, created_ago=130), 10_000.0)
+    assert d and d["chain"] == "robinhood_chain"
+
+
+def test_robinhood_chain_age_floor_env_override(monkeypatch):
+    monkeypatch.setenv("MC_RHC_MIN_AGE_MIN", "0.5")
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=60_000.0, created_ago=45), 10_000.0)
+    assert d and d["chain"] == "robinhood_chain"
+
+
 def test_stonkfun_needs_two_confirmations():
     sc = m.Scanner()
     p = {"chain": "solana", "addr": "MintStonk", "name": "S", "src": "stonkfun", "mcap": 20_000.0, "liq": 5000.0,

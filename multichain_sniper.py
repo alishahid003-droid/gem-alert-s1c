@@ -179,6 +179,17 @@ class Scanner:
         age_min = max(0.0, (now - created) / 60.0)
         if age_min > _f("MC_MAX_AGE_MIN", 60):
             return None
+        # 28 Oct 2026 (Ali): asked to find an additional confident signal for robinhood_chain
+        # on top of the existing >=$50k mcap floor. Within that bucket (n=27, excluding
+        # biglaunch), age_min shows a real, gradual (not cliff-shaped) effect:
+        #   age>=1.5min: 53.8% win/+$247.76  age>=1.75min: 55.6%/+$238.29  age>=2.0min: 56.3%/+$238.40
+        # vs the 1-2min bucket alone (45.5% win, only +$8.08 net). This is specific to the
+        # >=$50k bucket -- across ALL robinhood_chain trades (any mcap), age shows the OPPOSITE
+        # shape (1-2min is best, >5min is worst), so this is a real interaction, not a general
+        # "wait longer" rule. age_min>=2.25 looked even better (100% win) but n=4 is too thin to
+        # trust; 2.0 is the last point before the sample gets unreliably small.
+        if rhc and age_min < _f("MC_RHC_MIN_AGE_MIN", 2.0):
+            return None
         conf = []
         b, s = p.get("buys5"), p.get("sells5")
         if b is not None and s is not None and b >= _f("MC_MIN_BUYS5", 12) and b >= 1.3 * max(s, 1):

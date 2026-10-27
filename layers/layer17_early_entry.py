@@ -318,6 +318,29 @@ class EarlyTracker:
         copyish = any(c in conf for c in ("kol_buy", "kol_converge", "fomo_new_wallet"))   # copy-trading needs no trade feed
         if thin and not ((devish and len(r.buyers) >= dev_min) or copyish):
             return None                      # a few independent buyers first: cheap rug filter
+        # 28 Oct 2026 (Ali): full pre-entry audit of this chain's own 417 all-time early-origin
+        # trades (the layer17/PumpPortal pipeline, separate from multichain_sniper.py's). No
+        # single confirmation tag or raw-count rule was clean, but a three-way intersection is:
+        # entry mcap $5-20k (USD; this chain's closed records use a fixed 150 SOL/USD, matching
+        # EARLY_SOL_USD_FOR_GATE below), EXACTLY 3 confirmations (not more, not fewer -- more
+        # was NOT better here, unlike the intuition that more signals = safer), and no hot_meta
+        # (already down-weighted in fast_lane.py the same day for the same reason: net-negative).
+        #   mcap 5-20k + conf==3 + no hot_meta: n=29, win_rate=34.5%, net=+$10.43
+        #   everything else:                   n=388, win_rate=14.9%, net=-$438.82
+        # Scoped to the standard path only (not devish/copyish, which have their own, separate
+        # evidence and bypass rules above) -- only 2/29 of the winning slice overlapped devish,
+        # 0/29 overlapped copyish. Also exempts the smart_wallet-only leaderboard fallback
+        # (conf == ["smart_wallet"], a single-confirmation copy-trade lane with its own,
+        # separate evidence -- this gate's len(conf)==3 requirement would always reject it,
+        # which isn't what this finding is about.
+        leaderboard_only = conf == ["smart_wallet"]
+        if not devish and not copyish and not leaderboard_only:
+            sol_usd_for_gate = _f("EARLY_SOL_USD_FOR_GATE", 150.0)
+            mcap_usd = r.mcap_sol * sol_usd_for_gate
+            mcap_lo = _f("EARLY_GATE_MIN_MCAP_USD", 5000.0)
+            mcap_hi = _f("EARLY_GATE_MAX_MCAP_USD", 20000.0)
+            if not (mcap_lo <= mcap_usd < mcap_hi and len(conf) == 3 and "hot_meta" not in conf):
+                return None
         c2_age, c2_mc = _f("EARLY_CORE2_MAX_AGE_S", 240), _f("EARLY_CORE2_MAX_MCAP_SOL", 55)
         c1_age, c1_mc = _f("EARLY_CORE1_MAX_AGE_S", 1200), _f("EARLY_CORE1_MAX_MCAP_SOL", 130)
         lanes = []

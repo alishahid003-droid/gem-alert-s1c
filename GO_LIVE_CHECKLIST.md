@@ -957,3 +957,60 @@ after the existing `MC_RHC_MIN_MCAP_USD` check.
 Full test suite (1,036 tests, both halves) passing.
 
 **Needs a restart** to apply, same as every prior fix this run.
+
+## §0P — 28 Oct 2026: solana pre-entry edge found (layer17 pipeline); robinhood_chain age floor added
+
+**Solana: a real, profitable pattern found, on the layer17/PumpPortal pipeline specifically.**
+§0N's negative result was scoped to `multichain_sniper.py`'s GeckoTerminal-origin solana
+trades (n=356 all-time, -$11,000.86). Ali pushed back on leaving solana unresolved, so this
+re-ran the same style of audit against this chain's OTHER pipeline:
+`layers/layer17_early_entry.py` (PumpPortal-fed, 417 all-time early-origin trades,
+-$428.39 -- already far less bad than the multichain path). Testing entry_mcap buckets,
+confirmation count, and tag combinations found a three-way intersection:
+
+| filter | n | win rate | net pnl |
+|---|---|---|---|
+| entry mcap $5-10k alone | 146 | 21.9% | -$140.95 |
+| + confirmations == 3 | 27 | 22.2% | -$14.54 |
+| + no hot_meta | 18 | 33.3% | **+$11.73** |
+| widened to mcap $5-20k | 29 | **34.5%** | **+$10.43** |
+| everything else (n=388) | -- | 14.9% | -$438.82 |
+
+Key, counter-intuitive finding: EXACTLY 3 confirmations beats both fewer (2, n=318,
+15.7% win) and more (4, n=16, 0% win) -- more signals is not simply better here. Dominant
+confirmation set inside the winning slice: `narrative + pressure_free + velocity_free`
+(15/29 trades). Implemented in `layer17_early_entry.py`'s `EarlyTracker.evaluate()`, right
+after `conf = self.confirmations(r, now)`: entries must have entry mcap $5,000-$20,000 (USD,
+converted from `r.mcap_sol` at a fixed 150 SOL/USD to match how the historical USD figures
+were computed -- `EARLY_SOL_USD_FOR_GATE`, `EARLY_GATE_MIN_MCAP_USD`,
+`EARLY_GATE_MAX_MCAP_USD`), exactly 3 confirmations, and no `hot_meta`. Scoped to the
+standard path only -- exempts `devish`/`copyish` lanes and the `smart_wallet`-only
+leaderboard fallback, which have their own, separate evidence (only 2/29 of the winning
+slice overlapped devish, 0/29 overlapped copyish).
+
+Note: `multichain_sniper.py`'s solana path (the one §0N found no edge for) is untouched --
+this fix is specific to the layer17 pipeline, which is a structurally different, already
+fast_lane-gated entry path with its own confirmation vocabulary.
+
+**Robinhood_chain: a second confident signal added on top of the mcap floor.** Within the
+existing >=$50k, no-biglaunch bucket (n=27, §0O), `age_min` at entry shows a real, gradual
+(not cliff-shaped) effect:
+
+| age_min floor | n | win rate | net pnl |
+|---|---|---|---|
+| >=1.5min | 26 | 53.8% | +$247.76 |
+| >=1.75min | 18 | 55.6% | +$238.29 |
+| **>=2.0min** | **16** | **56.3%** | **+$238.40** |
+| >=2.25min | 4 (too thin) | 100% | +$25.08 |
+
+This is specific to the >=$50k bucket -- across ALL robinhood_chain trades (any mcap), age
+shows the OPPOSITE shape (1-2min is the best window, >5min is the worst), so this is a real
+interaction effect, not a general "wait longer" rule being misapplied. Implemented as
+`MC_RHC_MIN_AGE_MIN` (default 2.0) in `multichain_sniper.py`'s `Scanner.evaluate()`, right
+after `age_min` is computed. Combined result for robinhood_chain: mcap>=$50k + no biglaunch +
+age>=2min = **56.3% win rate, +$238.40 net on n=16** -- up from the chain's unfiltered
+baseline of 23.9% win rate / -$2,912.81 net.
+
+Full test suite (1,042 tests, both halves) passing.
+
+**Needs a restart** to apply, same as every prior fix this run.
