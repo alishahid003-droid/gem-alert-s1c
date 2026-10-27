@@ -96,3 +96,55 @@ def test_scalper_paper_trade_take_profit_then_trail():
     pl.manage(snap(100_000 * (tp + 0.1) * (1 - trail - 0.05)), now=T0 + 120)
     r = pl.scoreboard()["recent"][0]
     assert r["exit_type"] == "trail_stop" and r["pnl_usd"] > 0
+
+
+def test_dexscreener_batch_falls_back_to_geckoterminal_for_robinhood_chain(monkeypatch):
+    """28 Oct 2026 (Ali): robinhood_chain paper trades were dying at a 59% dead-on-arrival rate --
+    not a bad strategy, DexScreener simply has no indexed pool yet for many fresh robinhood_chain
+    launches (confirmed live: a direct query for one of these exact tokens returned [] while the
+    SAME token queried against GeckoTerminal came back with real price/fdv/liquidity data). A token
+    DexScreener's batch call doesn't return now gets one GeckoTerminal fallback lookup, ONLY on
+    robinhood_chain."""
+    addr = "0xdead"
+
+    def fake_get_json(url):
+        if "dexscreener.com" in url:
+            return {"ok": True, "json": []}          # DexScreener has nothing for this token
+        if "geckoterminal.com" in url:
+            assert f"/networks/robinhood/tokens/{addr}" in url
+            return {"ok": True, "json": {"data": {"attributes": {
+                "fdv_usd": "3999.335646672", "market_cap_usd": None,
+                "total_reserve_in_usd": "3926.3385037310956626409481"}}}}
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr(l14, "get_json", fake_get_json)
+    out = l14.fetch_dexscreener_batch("robinhood_chain", [addr])
+    assert addr in out
+    assert float(out[addr]["fdv"]) == pytest.approx(3999.335646672)
+    assert float(out[addr]["liquidity"]["usd"]) == pytest.approx(3926.3385037310956626409481)
+
+
+def test_dexscreener_batch_no_fallback_for_other_chains(monkeypatch):
+    """Contrast: the GeckoTerminal fallback is scoped to robinhood_chain only -- a missing solana
+    token stays missing, same as before this fix."""
+    addr = "SolMissing"
+
+    def fake_get_json(url):
+        assert "geckoterminal.com" not in url, "fallback must not fire for non-robinhood_chain"
+        return {"ok": True, "json": []}
+
+    monkeypatch.setattr(l14, "get_json", fake_get_json)
+    out = l14.fetch_dexscreener_batch("solana", [addr])
+    assert addr not in out
+
+
+def test_geckoterminal_fallback_returns_none_on_no_data(monkeypatch):
+    """A token missing from both sources stays unpriced -- the fallback never fabricates a value."""
+    def fake_get_json(url):
+        if "dexscreener.com" in url:
+            return {"ok": True, "json": []}
+        return {"ok": False, "json": None}
+
+    monkeypatch.setattr(l14, "get_json", fake_get_json)
+    out = l14.fetch_dexscreener_batch("robinhood_chain", ["0xnowhere"])
+    assert "0xnowhere" not in out

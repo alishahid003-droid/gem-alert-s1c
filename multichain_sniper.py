@@ -29,7 +29,12 @@ RHC_CANDIDATES = ("robinhood-chain", "robinhood", "robinhood_chain")
 # (-$11,047, 15.5% win rate) but that is a strategy-tuning problem, not "this chain cannot work at
 # all" the way bsc/base/robinhood_chain's numbers show. Disabled by default; re-enable one chain by
 # removing it from DISABLED_CHAINS (env override) if/when its numbers improve enough to justify it.
-DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc,base,robinhood_chain").split(",") if c.strip()}
+# 28 Oct 2026: robinhood_chain re-enabled -- layers/layer14_revival.fetch_dexscreener_batch now
+# falls back to GeckoTerminal per-token when DexScreener has no pool indexed yet (the actual cause
+# of its 59% dead-on-arrival rate, not a strategy problem -- see that module's GT_FALLBACK_CHAINS
+# comment). bsc/base remain disabled on their own merits (bsc: 0% win rate flat; base: still losing
+# overall even accounting for its dead-on-arrival rate).
+DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc,base").split(",") if c.strip()}
 
 
 def _f(name, default):

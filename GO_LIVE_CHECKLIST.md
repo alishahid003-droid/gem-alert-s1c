@@ -787,3 +787,58 @@ now, not as a future option. solana remains live and paper-tracked; its own losi
 themselves, not the data/pricing-source failures found in §0K.
 
 **Needs a restart** to apply, same as every prior fix this run.
+
+---
+
+## §0M — 28 Oct 2026: robinhood_chain re-enabled (GeckoTerminal fallback); solana "no pop" fast exit
+
+Two fixes requested together after Ali pushed back on §0L leaving robinhood_chain disabled
+without a real fix, and asked directly why the solana win/loss pattern hadn't been mined
+sooner. Both answered with full-history data, not guesses.
+
+**robinhood_chain re-enabled.** §0L's chain analysis showed robinhood_chain's headline loss
+number was misleading: of the 66/161 trades that actually got priced by DexScreener, 57.6%
+won and the chain was net profitable (+$898.24) -- BETTER than solana's own 15.5% win rate.
+The other 59% died unpriced (§0K), and the real cause (confirmed via a direct curl Ali ran
+against both APIs for the same exact dead token) is that DexScreener simply has no indexed
+pool yet for many fresh robinhood_chain launches, while GeckoTerminal -- which already
+successfully resolves the robinhood_chain network slug at entry time -- had real, current
+price/fdv/liquidity data for that same token. `layers/layer14_revival.fetch_dexscreener_batch`
+now falls back to a per-token GeckoTerminal lookup (`_gt_token_fallback`), ONLY for tokens
+DexScreener's batch call didn't return, and ONLY on `robinhood_chain` (every other chain's
+pricing path is untouched). `multichain_sniper.DISABLED_CHAINS` default changed from
+`bsc,base,robinhood_chain` to `bsc,base` -- robinhood_chain scanning resumes.
+
+**solana "no pop" fast exit.** Direct answer to "why can't you find the pattern": pulled all
+754 solana early-sniper trades, broken down by exit_type. `stop_loss` is the single biggest
+loss category (305 trades, -$5,924.39). Of those, 77.2% never even reached 1.2x peak before
+eventually hitting the -65% hard stop, and within that, 55.1% ($3,829.03 of the $5,924.39)
+never moved above 1.05x even ONCE in their entire life -- median time from entry to hard stop
+was 89 seconds. Contrast: every trailing_stop WINNER had already reached >=1.43x peak by the
+time its exit fired. Confirmation signals (buyers/pressure/velocity/volume/fresh) are nearly
+identical between winners and losers -- they don't separate the two populations at all; what
+does is whether the coin shows ANY real upward movement shortly after entry.
+
+`executor/paper_ledger.py`'s `_manage_early()`: new `EARLY_NO_POP_MIN`/`EARLY_NO_POP_MULT`
+(env-overridable, default 1.5 min / 1.05x) check runs before the existing hard stop -- a
+position that has shown zero upward movement (peak and current mult both still under 1.05x)
+past 1.5 minutes is closed as `stop_loss` with reason "no pop after N min", instead of
+waiting the full distance to the -65% hard stop. On paper this doesn't change the final P&L
+number much (the hard stop already books the loss), but once PumpPortal funds real capital
+this is the difference between exiting a dead coin in ~90 seconds vs. riding it all the way
+down -- and it frees the book's open-position slot for the next signal sooner either way.
+
+5 new tests: 2 in `tests/test_layer14_revival.py` (GeckoTerminal fallback fires for
+robinhood_chain only, returns the right normalized shape, never fabricates a value when both
+sources have nothing), 3 in `tests/test_paper_ledger.py` (no-pop exits fast, a real early
+mover is untouched, a coin still within the judging window isn't cut prematurely). 1 existing
+test in `tests/test_multichain_sniper.py` updated to match robinhood_chain's re-enablement.
+Full suite: 1,031/1,031 passed.
+
+**Still open, not claimed fixed here:** solana's own entry filter still can't distinguish a
+future winner from a future "never pops" loser BEFORE entry -- this fix only cuts the loss
+faster once it's already clear the coin isn't moving. Whether a pre-entry filter (e.g.
+requiring some minimum post-launch price action before the signal even fires) would reduce
+how many of these trades happen at all is a separate, still-open question.
+
+**Needs a restart** to apply, same as every prior fix this run.

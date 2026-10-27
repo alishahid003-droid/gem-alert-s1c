@@ -78,12 +78,15 @@ def test_tier_of():
     assert m.tier_of(["a", "b", "c", "d", "e", "f"]) == "standard"
 
 
-def test_disabled_chains_default_excludes_bsc_base_robinhood():
+def test_disabled_chains_default_excludes_bsc_base():
     """28 Oct 2026 (Ali): full-history data (1,023 early-sniper trades) showed bsc at a flat 0%
-    win rate (37/37 losses, -$1,073), and base/robinhood_chain both losing money overall with
-    >55% of trades dying unpriced before ever getting a chance to win. Only solana has real
-    volume and no single-chain catastrophe. These three chains are disabled by default."""
-    assert m.DISABLED_CHAINS == {"bsc", "base", "robinhood_chain"}
+    win rate (37/37 losses, -$1,073), and base losing money overall despite a higher win rate
+    than solana because >55% of its trades die unpriced before ever getting a chance to win.
+    robinhood_chain had the SAME dead-on-arrival problem but was re-enabled once the actual
+    cause was fixed (layers/layer14_revival's GeckoTerminal fallback, same day) -- of the
+    robinhood_chain trades that DID get priced, 57.6% won and the chain was net profitable. Only
+    bsc/base remain disabled on their own merits."""
+    assert m.DISABLED_CHAINS == {"bsc", "base"}
     slugs = {c: s for c, s in m.GT_SLUGS.items() if c not in m.DISABLED_CHAINS}
     assert slugs == {"solana": "solana"}
 

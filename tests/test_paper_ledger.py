@@ -222,3 +222,42 @@ def test_legacy_paper_traders_retired_by_default(monkeypatch):
     assert pl.open_paper("solana", "TOKL", "stage1", "score_band_A", 25.0, 50_000, strategy="scalper") is None
     assert pl.open_paper("solana", "TOKE", "early_sprint", "early_sprint", 25.0, 50_000, strategy="early",
                          exit_profile="sprint", module="sprint") is not None
+
+
+def test_early_no_pop_exits_fast_before_hard_stop():
+    """28 Oct 2026 (Ali): full-history solana analysis -- 55.1% of stop_loss losses ($3,829 of
+    $5,924 total) never moved above 1.05x even once before eventually crashing to the -65% hard
+    stop at a median 89 seconds. A coin showing zero upward movement past EARLY_NO_POP_MIN minutes
+    should be cut there instead of riding the full distance to the hard stop."""
+    T0 = 1_790_700_000.0
+    pl.open_paper("solana", "NOPOP", "early_sprint", "early_sprint", 30, 100_000,
+                  now=T0, strategy="early", exit_profile="sprint", module="sprint")
+    # flat at 1.02x, past the default 1.5-minute no-pop window
+    pl.manage(snap(102_000), now=T0 + 100)
+    rows = [r for r in pl._closed_raw() if r["id"] == "early_sprint:solana:NOPOP"]
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["exit_type"] == "stop_loss"
+    assert "no pop" in r["close_reason"]
+    # cut at ~1.02x, not ridden down to the -65% hard stop
+    assert r["pnl_pct"] > -50.0
+
+
+def test_early_no_pop_does_not_fire_on_a_real_early_mover():
+    """Contrast: a coin that DOES pop above the no-pop threshold early must not be cut by this
+    rule -- it should keep riding per the normal ladder/trailing-stop logic."""
+    T0 = 1_790_700_000.0
+    pl.open_paper("solana", "POPPED", "early_sprint", "early_sprint", 30, 100_000,
+                  now=T0, strategy="early", exit_profile="sprint", module="sprint")
+    pl.manage(snap(150_000), now=T0 + 100)
+    assert "early_sprint:solana:POPPED" in pl._open()
+
+
+def test_early_no_pop_does_not_fire_before_the_window_elapses():
+    """Contrast: a coin still flat but UNDER the no-pop minutes threshold hasn't had enough time
+    to judge yet -- must not be cut prematurely."""
+    T0 = 1_790_700_000.0
+    pl.open_paper("solana", "TOOSOON", "early_sprint", "early_sprint", 30, 100_000,
+                  now=T0, strategy="early", exit_profile="sprint", module="sprint")
+    pl.manage(snap(100_500), now=T0 + 30)   # only 30s in, well under the 1.5-min window
+    assert "early_sprint:solana:TOOSOON" in pl._open()

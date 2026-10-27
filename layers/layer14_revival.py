@@ -33,6 +33,20 @@ from utils.http import get_json
 from links import DEXSCREENER_CHAIN_SLUG
 
 BATCH_SIZE = 30
+# 28 Oct 2026 (Ali): robinhood_chain paper trades were dying at a 59% dead-on-arrival rate (see
+# GO_LIVE_CHECKLIST SS0K/0L) -- not because the coins were bad, but because DexScreener simply has
+# no indexed pool yet for many very-new robinhood_chain launches (confirmed: a direct DexScreener
+# query for one of these exact dead tokens returned [] -- empty, not an error -- while the SAME
+# token queried against GeckoTerminal's /networks/robinhood/tokens/{address} endpoint came back
+# with real, current price/fdv/liquidity data). Of the 66/161 robinhood_chain trades that DID get
+# priced by DexScreener, 57.6% won and the chain was net profitable (+$898.24) -- the strategy is
+# fine, the single price source just can't see pools this fresh fast enough. GeckoTerminal already
+# successfully resolves the robinhood_chain network slug at entry time (multichain_sniper.resolve_rhc),
+# so it is used here as a second, per-token fallback price source -- ONLY for tokens DexScreener's
+# batch call did not return anything for, and ONLY on robinhood_chain (every other chain's pricing
+# is untouched).
+GT_FALLBACK_CHAINS = {"robinhood_chain"}
+GT_NETWORK_SLUG = {"robinhood_chain": "robinhood"}
 REVIVAL_MIN_LIQ_USD = 10_000.0
 REVIVAL_LIQ_GROWTH = 1.5
 MOMENTUM_H1_CHANGE_PCT = 30.0
@@ -41,10 +55,39 @@ MOMENTUM_MIN_H1_VOLUME_USD = 5_000.0
 MOMENTUM_M5_FLOOR_PCT = -10.0
 
 
+def _gt_token_fallback(chain: str, address: str) -> Optional[dict]:
+    """GeckoTerminal /networks/{slug}/tokens/{address} -- a single-token lookup used only as a
+    fallback when DexScreener's batch call returned nothing for this token (see GT_FALLBACK_CHAINS
+    comment above). Normalizes into the same shape callers already unpack from a DexScreener pair
+    (marketCap/fdv, liquidity.usd) so no downstream code needs to know which source it came from.
+    Never a hard dependency: any failure (unsupported chain, no data, network error) just returns
+    None, same degrade-gracefully convention as the rest of this module."""
+    gt_slug = GT_NETWORK_SLUG.get(chain)
+    if not gt_slug or not address:
+        return None
+    try:
+        from config import CONFIG
+        base = CONFIG.geckoterminal_base_url
+    except Exception:  # noqa: BLE001
+        base = "https://api.geckoterminal.com/api/v2"
+    r = get_json(f"{base}/networks/{gt_slug}/tokens/{address}")
+    if not r.get("ok"):
+        return None
+    attrs = ((r.get("json") or {}).get("data") or {}).get("attributes") or {}
+    fdv = attrs.get("fdv_usd")
+    mcap = attrs.get("market_cap_usd")
+    liq = attrs.get("total_reserve_in_usd")
+    if fdv is None and mcap is None:
+        return None            # nothing usable -- let the caller treat this token as still unpriced
+    return {"marketCap": mcap, "fdv": fdv, "liquidity": {"usd": liq}}
+
+
 def fetch_dexscreener_batch(chain: str, addresses: List[str]) -> Dict[str, dict]:
     """{address: deepest-liquidity pair} for up to BATCH_SIZE tokens in ONE
     call (DexScreener /tokens/v1/{chain}/{a,b,...}). Missing tokens are
-    simply absent from the result."""
+    simply absent from the result, EXCEPT on GT_FALLBACK_CHAINS, where each
+    still-missing token gets one extra GeckoTerminal lookup before giving up
+    (see GT_FALLBACK_CHAINS comment above)."""
     slug = DEXSCREENER_CHAIN_SLUG.get(chain)
     if not slug or not addresses:
         return {}
@@ -64,6 +107,13 @@ def fetch_dexscreener_batch(chain: str, addresses: List[str]) -> Dict[str, dict]
             liq = (p.get("liquidity") or {}).get("usd") or 0
             if addr not in out or liq > ((out[addr].get("liquidity") or {}).get("usd") or 0):
                 out[addr] = p
+    if chain in GT_FALLBACK_CHAINS:
+        for addr in addresses:
+            if addr in out:
+                continue
+            gt = _gt_token_fallback(chain, addr)
+            if gt is not None:
+                out[addr] = gt
     return out
 
 

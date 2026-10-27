@@ -322,7 +322,22 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
         _close(pos, "fully_sold", "every slice sold", now)
         return True
     why = None
-    if peak < ta and mult <= stop:
+    # 28 Oct 2026 (Ali): full-history solana pattern analysis -- 305 stop_loss trades, $5,924.39
+    # lost, 55.1% of them ($3,829.03) NEVER moved above 1.05x even once in their entire life before
+    # eventually crashing to the -65% hard stop at a median 89 seconds after entry. These coins show
+    # no real buying pressure materializing at all post-entry -- the entry signal fired on a coin
+    # that was already fading, not building momentum. Waiting the full distance to the hard stop
+    # only matters on paper; with real capital it means riding a coin that was never going anywhere
+    # all the way down instead of cutting it fast and freeing the slot/capital. EARLY_NO_POP_* lets
+    # a coin that has shown zero upward movement within a short early window get cut well before the
+    # hard stop would fire -- the data says these coins essentially never recover from "hasn't moved
+    # yet" into a winner (every trailing_stop winner had already reached >=1.43x peak by the time its
+    # exit fired, vs 1.05x median peak on the never-moved stop_loss population).
+    no_pop_min = float(os.environ.get("EARLY_NO_POP_MIN", "1.5"))
+    no_pop_mult = float(os.environ.get("EARLY_NO_POP_MULT", "1.05"))
+    if why is None and age_min >= no_pop_min and peak < no_pop_mult and mult < no_pop_mult:
+        why = ("stop_loss", f"no pop after {age_min:.1f} min ({mult:.2f}x, never reached {no_pop_mult}x)")
+    if why is None and peak < ta and mult <= stop:
         why = ("stop_loss", f"hard stop at {mult:.2f}x")
     elif peak >= ta and mult <= peak * trail:
         why = ("trailing_stop", f"{mult:.1f}x is {int((1 - trail) * 100)}% below the {peak:.1f}x peak")
