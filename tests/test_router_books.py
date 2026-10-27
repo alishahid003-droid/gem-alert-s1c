@@ -195,6 +195,37 @@ def test_bust_waits_for_fresh_open_position_but_not_forever(monkeypatch):
     assert books.total_value("sprint") == 100.0        # reseeded despite the still-open old position
 
 
+def test_bust_offset_uses_latest_snapshot_not_sum(monkeypatch):
+    """27 Oct 2026 fix: a book that busts more than once (compound busted 3x in under 3 minutes in
+    production) was having every past bust's cumulative "realized_at_bust" snapshot SUMMED in
+    bust_offset(), double/triple-counting the same historical losses. Subtracted from realized_pnl,
+    that oversized negative offset added thousands of dollars of phantom balance back onto the book
+    (confirmed live: equity=$1,309.74 on a $100-seed book that was actually bleeding money), which is
+    what fed paper stakes far beyond any tier cap. Only the LATEST bust's snapshot should be used --
+    each new bust already captures all losses since the book began, superseding every prior one."""
+    from executor import books
+    monkeypatch.setattr(books, "open_count", lambda b: 0)
+    store = {}
+    monkeypatch.setattr(books.state, "get_value", lambda k, d=None: store.get(k, d))
+    monkeypatch.setattr(books.state, "set_value", lambda k, v: store.__setitem__(k, v))
+
+    rows = [{"pnl_usd": -95.0}]
+    monkeypatch.setattr(books, "_rows", lambda b: rows)
+    assert books.total_value("compound") == 5.0
+    books.can_open("compound")                       # first bust: reseeds to $100
+    assert len(books.busts("compound")) == 1
+    assert books.total_value("compound") == 100.0
+
+    # More losses happen post-reseed, busting a second time within the same test's rows list
+    # (gross pnl sum must again fall below the bust floor relative to the NEW offset).
+    rows.append({"pnl_usd": -95.0})
+    assert books.total_value("compound") == 5.0
+    books.can_open("compound")                        # second bust: must reseed to $100 again,
+    assert len(books.busts("compound")) == 2           # not leave a huge phantom positive balance
+    assert books.total_value("compound") == 100.0
+    assert books.equity("compound") == 100.0
+
+
 def test_tier_stakes_cap_and_loss_brake():
     eq = books.equity("sprint")
     pr = books.tier_stake_usd("sprint", "probe")

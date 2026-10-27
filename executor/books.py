@@ -102,8 +102,21 @@ def busts(book_id: str) -> list:
 
 
 def bust_offset(book_id: str) -> float:
-    """Realized P&L the book had when it was reseeded after a bust (those losses are history now)."""
-    return round(sum(float(b.get("realized_at_bust") or 0.0) for b in busts(book_id)), 2)
+    """Realized P&L the book had when it was reseeded after its MOST RECENT bust (those losses are
+    history now, wiped by the reseed). 27 Oct 2026 fix: each bust's "realized_at_bust" snapshot is
+    already the full cumulative gross-minus-withdrawn total at that instant, not a delta -- a book
+    that busts more than once (compound busted 3x in under 3 minutes tonight) was having every past
+    snapshot SUMMED together here, double- and triple-counting the same historical losses. Subtracted
+    from realized_pnl below, that oversized negative offset ADDED thousands of dollars of phantom
+    balance back onto the book (confirmed live: compound showed equity=$1,309.74 on a $100 seed that
+    was actually bleeding money), which is what fed the $1,000+ paper stakes far beyond any tier cap.
+    Only the latest bust's snapshot should ever be subtracted -- each new bust already captures all
+    losses since the book began, superseding every prior snapshot, not adding to them."""
+    bs = busts(book_id)
+    if not bs:
+        return 0.0
+    latest = max(bs, key=lambda b: b.get("ts") or 0)
+    return round(float(latest.get("realized_at_bust") or 0.0), 2)
 
 
 def check_bust(book_id: str, now: Optional[float] = None) -> Optional[dict]:

@@ -527,3 +527,62 @@ regardless of entry quality -- arguably a bigger deal, because it means the syst
 look broken from the balance number alone even when the entry-side fixes are working
 correctly. Worth watching closely post-restart: does the balance actually start moving
 again, not just whether new trades open.
+
+## §0H -- Phantom balance bug: compound book showed $1,309 equity on a bleeding $100 book,
+## feeding paper stakes 21x beyond any tier cap (27 Oct 2026)
+
+**What triggered this:** Ali asked for a status check ~5.5 hours after the previous
+restart. Live state showed `compound` with `equity=$1,309.74` and `realized_pnl=$1,599.63`
+-- looked like a huge win, but it had actually busted (hit the $10 floor) THREE times in
+under 3 minutes (20:42:29-20:44:32 UTC) the same night, and one currently-open position
+("PJAM / CARDS", Solana, multichain/GeckoTerminal source) had `usd=$1,289.59` -- more than
+21x the mathematically-possible maximum stake for a $100-seed book (tier cap: 0.60 x equity,
+further capped at 0.80 x equity -> $60 max, right after a reseed).
+
+**Root cause, confirmed by replaying the real closed-trade history, not guessed:**
+`realized_pnl(book) = gross_pnl - withdrawn - bust_offset(book)`. `bust_offset()` was
+summing EVERY past bust's `realized_at_bust` snapshot together. But each snapshot is
+already the full cumulative gross-minus-withdrawn total at that instant, not a delta --
+so a book that busts more than once was having the same historical losses double- and
+triple-counted. compound's three same-night busts produced snapshots of `0`, `-3413.10`,
+`-3645.17`; summed, `bust_offset = -7058.27`. Subtracted (as a negative) from realized_pnl,
+that doesn't cancel out old losses -- it ADDS thousands of dollars of phantom balance back
+onto the book. Confirmed live: `gross=-3653.86` (book was genuinely down ~$3,654) but
+`total_value` computed to `$3,504.41` instead of `$0`.
+
+This phantom equity is exactly what fed the oversized stake: `tier_stake_usd()` sizes off
+real `equity()`, so an inflated equity reading produces an inflated (but internally
+"correctly capped relative to the wrong number") stake. The cap logic itself was never
+broken -- the balance it was capping against was wrong. Traced and ruled out as the cause
+first: `ladder_scale` (only scales partial sells of already-open positions, not initial
+sizing), the tier/cap formulas themselves (verified mathematically sound), and a
+concurrency race in `act()` (plausible contributor to stacking but not the primary cause
+once the balance corruption was confirmed directly from real numbers).
+
+**Fixed (this commit):** `bust_offset()` now returns only the MOST RECENT bust's snapshot,
+not a sum across all of them -- each new bust already captures all losses since the book
+began, superseding every prior one rather than adding to it. Verified immediately:
+`compound` now correctly reads `equity=$0.00` (a genuinely busted book), down from the
+phantom `$1,309.74`. sprint/core1/core2 numbers are unchanged (each has only busted once
+so far, so this bug hadn't bitten them yet -- but it would have, identically, the next time
+any of them busts a second time).
+
+**Also corrected:** the one currently-open position sized off the phantom balance
+("PJAM/CARDS", `usd=1289.59`) had its `usd` field rescaled down to $40 (tier=standard x the
+$100 seed equity it should have been sized against) directly in state, rather than force-
+closed -- the position itself is real, legitimately confirmed, and currently up about +22%,
+so it's left open and managed by the normal exit rules; only its distorted stake size was
+corrected so its eventual P&L is realistic instead of a four-figure distortion.
+
+New regression test (`test_bust_offset_uses_latest_snapshot_not_sum`) replays a book busting
+twice in a row and asserts it reseeds to exactly $100 both times, never a stacked phantom
+balance. Full suite 1016/1016 passed (1015 + this new test; run in two halves due to a tool
+time limit, not a shortcut -- both halves clean).
+
+**Honest framing:** this is a different root cause than every other fix tonight. It wasn't
+about which coins get let in or how long a book waits to reseed -- it was simple accounting
+math being wrong once a book busted more than once in the same run. compound is the only
+book that happened to bust 3x in 3 minutes tonight, which is what exposed it; the other
+three books are carrying the identical latent bug and will hit it the first time any of
+them busts twice. **Needs a restart to take effect for new trades; the state correction to
+the one mis-sized position is already applied directly and doesn't need a restart.**
