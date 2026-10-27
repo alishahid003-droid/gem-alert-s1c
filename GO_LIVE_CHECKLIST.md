@@ -1014,3 +1014,49 @@ baseline of 23.9% win rate / -$2,912.81 net.
 Full test suite (1,042 tests, both halves) passing.
 
 **Needs a restart** to apply, same as every prior fix this run.
+
+## §0Q — 28 Oct 2026: IMPORTANT CORRECTION on data window + retroactive simulation + TOP PRIORITY pending item
+
+**Correction: "all-time"/"full-history" in §0K-§0P means ~33 hours, not 3-4 weeks.**
+`executor/paper_ledger.py`'s `_closed()` filters by `STATS_SINCE_TS`, and the earliest closed
+trade on file is Mon Oct 26 ~13:00 UTC; the latest is Tue Oct 27 ~21:30 UTC -- a 1.36-day
+span, 1,054 closed trades total. Every win-rate/pnl number cited in §0K through §0P as
+"all-time" or "full-history" was computed from this same ~33-hour window, not a longer one.
+This should have been flagged explicitly when first establishing those numbers; noting it
+here so nobody mistakes "all-time" for "weeks of data" later. The filters themselves remain
+evidenced and real within that window -- the correction is about the window's LENGTH, not
+about whether the findings hold within it.
+
+**Retroactive simulation, all 3 evidenced filters combined, actual ~33hr window, $100 start,
+fixed $5/trade stake (chosen so concurrent trades -- peak 8 open at once -- don't distort a
+percent-of-equity model):**
+
+| | n | win rate | net pnl (fixed $5 stake) |
+|---|---|---|---|
+| base (growth+volume) | 24 | 91.7% | +$37.42 |
+| robinhood_chain (mcap>=50k, no biglaunch, age>=2min) | 16 | 56.2% | +$25.55 |
+| solana layer17 (mcap $5-20k, conf==3, no hot_meta) | 29 | 34.5% | +$6.64 |
+| **combined** | **69** | **59.4%** | **+$69.61** |
+
+$100 -> $169.61 over 69 trades in ~33 hours, min bank touched $69.79 along the way (a real
+drawdown, not a straight line up). n=69 is a thin sample for a long-run edge claim -- this is
+a real result on the data that exists, not a validated long-run return rate. Needs more time
+running to become trustworthy at the scale Ali is asking about (3-4 weeks of real data).
+
+**TOP PRIORITY, pending, to revisit once more data accumulates (Ali: "wait a day or 2"):
+module bifurcation.** Currently, confirmed by checking: none of the three evidenced filters
+(base/robinhood/solana) feed into sprint/core1/core2/compound routing AT ALL -- a coin that
+passes its chain's filter still gets routed by the same pre-existing, unrelated lane-cascade
+logic (`len(conf)>=4 and age<=15` for core2/sprint eligibility, etc.) as before any of today's
+work. Checking current (unintentional) module outcomes for the 3 filtered groups shows this is
+costing real money: robinhood_chain's PASS trades split by module were core1 (n=6, 50% win,
+-$243.52) and sprint (n=5, 20% win, -$27.91) -- a combined -$271.43 -- even though the
+OVERALL filtered robinhood slice is +$238.40 net. The filter is right; blind routing inside it
+is actively working against it. Per-module samples are currently far too thin (n=2 to 13 per
+module per chain) to safely build a confidence-tiered routing rule today. Once more trade
+volume accumulates (Ali's estimate: a day or two), build: a 0-N confidence score per coin
+(how many sub-conditions of its chain's evidenced filter it clears, e.g. robinhood age>=2min
+vs age>=3min, or solana exactly-3-confirmations vs a stronger combination not yet found),
+routing higher-confidence coins to bigger-stake modules (core2/compound) and lower-confidence
+passes to probe-sized sprint entries -- rather than the current situation where passing the
+filter at all is necessary but not sufficient, and then routing is a coin flip.
