@@ -1123,3 +1123,59 @@ build order should be:
    `hot_meta`'s reversal is a direct precedent for why this step can't be skipped.
 4. Only then combine (chain filter pass/fail) + (dev score) + (virality score, once audited)
    into one 0-N composite, and route sprint/core1/core2/compound by score tier.
+
+## §0S — 28 Oct 2026: Deep dig on robinhood_chain/solana, continued -- no new filter found, full audit trail
+
+Per Ali's explicit push ("dig more deep... we need to really work hard on this"), ran every
+remaining angle against the stored data before concluding nothing further can be safely
+extracted right now:
+
+**1. Unique-coin-count check (confirms, doesn't change, the earlier finding).** robinhood_chain's
+PASS slice (16 trades) is 8 unique coins, 62.5% coin-level win rate -- but is dominated by ONE
+big winner (+$512.30 across its 4 lane-duplicated trades) and ONE big loser (-$290.15), with the
+other 6 coins all small near-breakeven amounts. This is not 8 independently-profitable bets --
+it's 1 jackpot + 1 disaster + 6 roughly-flat. solana's PASS slice (29 trades) is 13 unique coins,
+38.5% coin-level win rate, consistent with the trade-level 34.5%.
+
+**2. Module win-rate pattern is real but already explained by the system's own design, not a
+new filter.** compound has the best win rate on EVERY chain, unfiltered (solana 17.8% vs
+10.7-16.0% other modules; robinhood 38.5% vs 16-25%; base 43.8% vs 32-35%) -- but this is
+because `layers/router.py` deliberately routes compound as the LATER/more-confirmed "2x-13x
+swing" lane, while core1/core2 are the EARLIEST-entry, highest-risk "10x-50x" and "100x+"
+moonshot lanes by design (see router.py lines 54-75). Higher hit rate with smaller lane
+multiples is the system working as intended, not a hidden edge to extract. This DOES support
+Ali's composite-score bifurcation idea directionally (route high-confidence passes toward
+compound-like sizing, reserve core1/core2 moonshot sizing for the strongest signals only) --
+logged as supporting evidence for SQ0/SR0's pending design, not implemented.
+
+**3. multichain_sniper.py's own `tier_of()` (probe/standard/conviction, confirmation-count
+based) does NOT predict win rate on robinhood_chain or solana -- tested directly:**
+
+| chain | probe | standard | conviction |
+|---|---|---|---|
+| solana | n=15, 13.3% win | n=338, 12.7% win | n=9, 11.1% win |
+| robinhood_chain | n=1 | n=143, 24.5% win | n=22, 18.2% win |
+| base | n=2 | n=63, 30.2% win | n=8, **87.5% win, +$437.07** |
+
+Confirmation-count "conviction" tier is flat-to-worse on robinhood/solana (confirms the
+existing finding that mechanical-activity-count isn't a quality signal on these two chains).
+Base's conviction tier looks exceptional but n=8 is far too thin to add as a new rule, and base
+isn't the chain needing work right now -- noted, not acted on.
+
+**4. `smart_wallet` isolated per chain (not blended) -- the one genuine non-mechanical signal
+multichain_sniper.py has:** never fires at all on solana or base in the stored data (n=0 either
+way); on robinhood_chain, 33.3% win WITH (n=6) vs 23.1% WITHOUT (n=160) -- directionally
+positive but n=6 is not usable as a standalone filter.
+
+**Conclusion: every remaining field actually stored on these trades (confirmation tags, tier,
+mcap, age, module/lane, unique-coin dedup, smart_wallet isolation) has now been tested on
+robinhood_chain and solana. Nothing further survives both "shows a real effect" and "has
+enough sample to trust" on top of the gates already shipped in SQ0. Manufacturing a finer slice
+on 8-13 unique coins would be fitting noise, not finding a pattern -- flagged explicitly rather
+than presented as progress.**
+
+Honest path forward, unchanged from SQ0/SR0: let more real robinhood_chain/solana launches
+accumulate (system is live and running), then re-run this exact audit on a larger unique-coin
+sample. The three gates already shipped (base growth+volume, robinhood mcap/age/biglaunch,
+solana layer17 mcap/conf/hot_meta) remain the real, evidenced edge found this session -- no
+regressions, no new code this entry.
