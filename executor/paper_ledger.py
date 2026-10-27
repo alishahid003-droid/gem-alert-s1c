@@ -167,6 +167,14 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
            "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
+           # 27 Oct 2026: liquidity_usd was accepted as a parameter and used ONCE internally to compute
+           # cost_pct, then thrown away -- never saved on the position record itself. Result: every single
+           # closed trade in the whole history (253/253 sampled on core1) shows liquidity_usd as missing,
+           # even on trades that died as rug_liquidity/written_off moments after entry. There was no way
+           # to tell, after the fact, whether a losing trade had thin liquidity at entry or not -- which
+           # defeats the actual point of paper testing (find the pattern that predicts losers). Now stored
+           # so every future trade carries its real entry liquidity for analysis.
+           "liquidity_usd": liquidity_usd,
            "unpriced_cycles": 0, "events": [], "strategy": strategy, "tp_done": False,
            "guard": guard or "n/a", "exit_profile": exit_profile, "live": bool(live)}
     if strategy == "early":
