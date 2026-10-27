@@ -63,8 +63,15 @@ def assign(decision: dict) -> Optional[str]:
     return r[0]["profile"] if r else None
 
 
+# 28 Oct 2026 (Ali): hot_meta's weight was set to 2 on 15 Oct based on a 2-day sample claiming a
+# 6.5% vs 2.0% 10x rate. Full-history solana results (754 trades) now show the opposite: coins
+# tagged hot_meta won 6.7% of the time vs 16.3% for coins without it (n=60, -$90.30 net) -- a
+# "name shares a word with a recent >=5x runner" match is overwhelmingly catching copycat tickers
+# riding a dead meta, not genuine momentum. Weight dropped to 0 -- the tag itself is kept (still
+# recorded on every trade) so this can be re-measured if the pattern changes, but it no longer
+# pushes a trade toward a higher confidence tier or bigger stake.
 _WEIGHTS = (("famous_name", 3), ("smart_wallet", 3), ("good_dev", 3), ("whale_buy", 2), ("kol_buy", 3), ("kol_converge", 3),
-            ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("hot_meta", 2), ("dev_list", 0), ("repeat_grad", 2))
+            ("fomo_new_wallet", 3), ("narrative", 2), ("narrative_first", 2), ("hot_meta", 0), ("dev_list", 0), ("repeat_grad", 2))
 
 
 def score_parts(d) -> List[Tuple[str, int]]:

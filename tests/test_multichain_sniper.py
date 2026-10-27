@@ -34,6 +34,28 @@ def test_strong_pool_enters_all_lanes_and_weak_does_not():
     assert sc.evaluate(_pool(addr="0xdump", buys5=10, sells5=40), 10_000.0) is None
 
 
+def test_robinhood_chain_requires_50k_entry_mcap():
+    """28 Oct 2026 (Ali): full systematic audit (every confirmation tag, every pairwise
+    combination, bucketed per chain) of robinhood_chain's 163 all-time multichain-origin
+    trades, by entry_mcap bucket:
+      <5k: 0.0% win  5-10k: 5.6%  10-20k: 14.8%  20-50k: 39.1%  >=50k: 48.3% win, net +$230.87
+    >=50k is the ONLY profitable filtered slice found anywhere in this audit for this chain
+    (every confirmation-tag-based filter tried first turned out to be a base-chain effect with
+    no edge on robinhood_chain once isolated -- see multichain_sniper.py's retired-gate
+    comment). Below 50k entry mcap, robinhood_chain trades are refused outright."""
+    sc = m.Scanner()
+    assert sc.evaluate(_pool(addr="0xrh49k", chain="robinhood_chain", mcap=49_999.0), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrh50k", chain="robinhood_chain", mcap=50_000.0), 10_000.0)
+    assert d and d["chain"] == "robinhood_chain"
+
+
+def test_robinhood_chain_mcap_floor_env_override(monkeypatch):
+    monkeypatch.setenv("MC_RHC_MIN_MCAP_USD", "10000")
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh12k", chain="robinhood_chain", mcap=12_000.0), 10_000.0)
+    assert d and d["chain"] == "robinhood_chain"
+
+
 def test_stonkfun_needs_two_confirmations():
     sc = m.Scanner()
     p = {"chain": "solana", "addr": "MintStonk", "name": "S", "src": "stonkfun", "mcap": 20_000.0, "liq": 5000.0,
@@ -48,6 +70,22 @@ def test_act_opens_paper_positions_on_non_solana_chain():
     r = m.act(d, 10_000.0)
     assert r.get("opened"), r
     assert m.act(d, 10_001.0) == {"skipped": "already acted"}
+
+
+def test_act_records_raw_numeric_snapshot_on_the_position(monkeypatch, tmp_path):
+    """28 Oct 2026 (Ali): today's full pattern audit hit a wall because the raw numeric fields
+    (buys5/sells5/buyers5/vol5/chg5) that feed the entry decision never survived onto the
+    closed trade record -- only the boolean confirmation tags did. act() now threads a 'raw'
+    snapshot through tags so a future audit can test continuous values, not just booleans."""
+    import executor.paper_ledger as pl
+    monkeypatch.setattr(pl.state, "LOCAL_STATE_FILE", str(tmp_path / "pl.json"), raising=False)
+    d = m.Scanner().evaluate(_pool(), 10_000.0)
+    r = m.act(d, 10_000.0)
+    assert r.get("opened"), r
+    open_book = pl._open()
+    pos = next(iter(open_book.values()))
+    assert pos["tags"]["raw"] == {"buys5": 30, "sells5": 10, "buyers5": 20, "vol5": 6000.0,
+                                   "vol24": None, "chg5": 40.0, "chg1h": 60.0}
 
 
 def test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf():

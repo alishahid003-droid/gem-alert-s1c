@@ -578,15 +578,16 @@ def test_hot_words_from_logs_and_score(tmp_path):
     (tmp_path / "x.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
     hw = dev_rank.hot_words(str(tmp_path / "*.jsonl"), now)
     assert "veil" in hw and "wojak" in hw and "randomcoin" not in hw and "fresh" not in hw
-    assert fast_lane.score({"confirmations": ["hot_meta"]}) == 2
+    assert fast_lane.score({"confirmations": ["hot_meta"]}) == 0  # hot_meta weight cut 2->0 Oct 28 2026 (full-history data showed -9.6pp win-rate gap, not a boost)
 
 
 def test_score_breakdown_text_matches_score():
     from layers import fast_lane
     d = {"confirmations": ["good_dev", "pressure_free", "velocity_free", "hot_meta"], "fb": 50, "fs": 10, "entry_mcap_sol": 32}
-    assert fast_lane.score(d) == sum(p for _, p in fast_lane.score_parts(d)) == 3 + 1 + 1 + 2 + 2 + 1 + 1
+    assert fast_lane.score(d) == sum(p for _, p in fast_lane.score_parts(d)) == 3 + 1 + 1 + 0 + 2 + 1 + 1
     t = fast_lane.score_text(d)
-    assert t.startswith("11 = ") and "good_dev +3" in t and "hot_meta +2" in t and "sell/buy ratio 0.20 +2" in t
+    # hot_meta weight cut 2->0 Oct 28 2026; total score 9 not 11, and hot_meta no longer shows a +2 line.
+    assert t.startswith("9 = ") and "good_dev +3" in t and "sell/buy ratio 0.20 +2" in t
 
 
 def test_serial_launcher_penalty_unless_proven_dev():

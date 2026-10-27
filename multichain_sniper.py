@@ -132,6 +132,19 @@ class Scanner:
                         and mcap <= _f("MC_MOMENTUM_MAX_MCAP_USD", 250_000))
         if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or (mcap > cap and not momentum and not big):
             return None
+        # 28 Oct 2026 (Ali): systematic audit of every confirmation tag, tag combination, and
+        # numeric field survivable on closed trade records (mechanical tags turned out to carry
+        # almost no edge once isolated per chain -- the earlier 'growth' finding was a base-chain
+        # effect, not solana/robinhood_chain; see git history for the full reversal). The one
+        # clean, chain-specific, real-sample-size signal that DID hold up: robinhood_chain entry
+        # mcap bucketed by size (n=163 all-time):
+        #   <5k: 0.0% win  5-10k: 5.6%  10-20k: 14.8%  20-50k: 39.1%  >=50k: 48.3% win, net +$230.87
+        # >=50k is the ONLY profitable filtered slice found anywhere in this audit for this chain.
+        # Solana showed the opposite shape (worst at both extremes, best at 10-20k, but even
+        # that best bucket stays net-negative at -$3,461.63/113 trades) -- no mcap or tag filter
+        # found makes solana profitable; this is a genuine negative result, not an oversight.
+        if rhc and mcap < _f("MC_RHC_MIN_MCAP_USD", 50_000):
+            return None
         # 26 Oct 2026: of tonight's catastrophic (<-75%) losses, 14 were real liquidity
         # drains (rug_liquidity/stop_loss, some within 40s of entry) that got through the
         # old $2500 floor -- too low for how fast a thin Base/BSC/Solana pool can empty.
@@ -181,15 +194,36 @@ class Scanner:
         need = int(_f("MC_MIN_CONF_STONK" if p["src"] == "stonkfun" else "MC_MIN_CONF", 2 if p["src"] == "stonkfun" else 3))
         if len(conf) < need or (momentum and len(conf) < 4) or (big and len(conf) < 5):
             return None
+        # --- Quality gate: RETIRED (Oct 28 2026, same day as v1/v2) ---
+        # v1 (smart_wallet-only) and v2 (growth + conviction-tier) were both tried and both
+        # retired the same day after a full systematic audit (every confirmation tag, every
+        # pairwise combination, bucketed by chain) showed neither held up as a real,
+        # chain-specific, pre-entry signal once isolated from the blended (all-chain) numbers.
+        # v2's "growth" edge turned out to be almost entirely a base-chain effect; on solana and
+        # robinhood_chain specifically, growth showed NO edge (solana: 12.5% win WITH growth vs
+        # 12.6% WITHOUT; robinhood_chain: 14.8% WITH vs 25.7% WITHOUT -- growth was actively
+        # worse on robinhood_chain). No confirmation tag or tag combination was found that
+        # makes solana profitable in the recorded data -- that is a real negative result, not
+        # an oversight (see GO_LIVE_CHECKLIST.md for the full audit). The one real, chain-
+        # specific, pre-entry signal the audit DID find was continuous (entry_mcap for
+        # robinhood_chain, implemented a few lines above as MC_RHC_MIN_MCAP_USD), not a
+        # confirmation tag -- which is why this boolean-tag gate is retired rather than kept.
+        # 28 Oct 2026 (Ali): raw numeric snapshot at decision time, so future pattern audits
+        # can test continuous values (actual buy/sell magnitude, actual $ volume, actual %
+        # change) instead of only the boolean confirmation tags -- today's audit hit a wall
+        # because these never survived onto the closed trade record. Carried through act()
+        # into paper_ledger's tags dict below; harmless if unused.
+        raw_snapshot = {"buys5": p.get("buys5"), "sells5": p.get("sells5"), "buyers5": p.get("buyers5"),
+                        "vol5": p.get("vol5"), "vol24": p.get("vol24"), "chg5": p.get("chg5"), "chg1h": p.get("chg1h")}
         if big:
             return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["biglaunch"],
-                    "lanes": ["core1"], "lane": "core1", "potential": "biglaunch", "tier": "probe"}
+                    "lanes": ["core1"], "lane": "core1", "potential": "biglaunch", "tier": "probe", "raw": raw_snapshot}
         if momentum:
             return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
                     "lanes": ["core1"], "lane": "core1", "potential": "momentum",
-                    "tier": "standard" if len(conf) >= 5 else "probe"}
+                    "tier": "standard" if len(conf) >= 5 else "probe", "raw": raw_snapshot}
         lanes = ["core1"]
         if len(conf) >= 4 and age_min <= 15:
             lanes.append("core2")
@@ -199,7 +233,7 @@ class Scanner:
             lanes.append("compound")
         return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                 "liq": liq, "age_min": round(age_min, 1), "confirmations": conf, "lanes": lanes, "lane": lanes[0],
-                "potential": "100x+" if "core2" in lanes else "10x-50x", "tier": tier_of(conf)}
+                "potential": "100x+" if "core2" in lanes else "10x-50x", "tier": tier_of(conf), "raw": raw_snapshot}
 
 
 def evm_safe(chain: str, addr: str) -> tuple:
@@ -259,7 +293,8 @@ def act(d: dict, now: Optional[float] = None) -> dict:
         pos = paper_ledger.open_paper(d["chain"], d["addr"], f"early_{lane}", f"early_{lane}", stake, d["mcap"],
                                       strategy="early", exit_profile=lane, liquidity_usd=d.get("liq"),
                                       tags={"origin": "multichain", "name": str(d["name"])[:24], "src": d["src"], "age_min": d["age_min"],
-                                            "confirmations": d["confirmations"], "tier": d.get("tier", "probe"), "safety": why}, module=lane)
+                                            "confirmations": d["confirmations"], "tier": d.get("tier", "probe"), "safety": why,
+                                            "raw": d.get("raw")}, module=lane)
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
     try:
         state.log_full_alert("early_" + d["lane"], d["chain"], d["name"], d["addr"],

@@ -842,3 +842,86 @@ requiring some minimum post-launch price action before the signal even fires) wo
 how many of these trades happen at all is a separate, still-open question.
 
 **Needs a restart** to apply, same as every prior fix this run.
+
+## §0N — 28 Oct 2026: pre-entry predictive filter audit -- two failed gates retired same day, one real fix found
+
+**The question Ali asked:** "Solana's entry filter still can tell a future winner from an ever
+popular user before it enters... That needs to be identified on Solana and Robinhood chain
+both. That's the main core of the system." Then, after an initial attempt: "if the system is
+just going to trade on the basis of the smart wallet... what is the point of the system?...
+There has to be something hidden in this paper testing data." Then, after a second attempt:
+"Identify and analyze the filters which can derive or identify rugs or identify moonshots by
+testing out every single filter across the data... mix it up with growth or the filter which
+you identified."
+
+**v1 (retired same day): require `smart_wallet` before any standard-path trade.**
+Reasoning at the time: solana trades with zero fast_lane-style quality signal accounted for
+~all of solana's net loss. Checked against the real winner population before shipping and
+found it was wrong: of the top-25 real moonshots (last 3 weeks, ranked by pnl%), **zero** had
+`smart_wallet`. It's a wallet-history signal, and real smart money launders through fresh
+burner wallets specifically to dodge copy-trade tracking (Ali's point, confirmed by the data:
+`smart_wallet` fired on only 5 of 616 multichain-origin trades all-time, 0.8%, and even those
+5 lost money overall, -$155.38). Gating on it would have blocked nearly the whole pipeline
+while ALSO blocking every real winner. Retired before being committed.
+
+**v2 (retired same day): require `growth` AND conviction tier (>=6 confirmations incl
+buyers+pressure).** Reasoning: blended (all-chain) multichain-origin data showed growth
+present = 26.9% win rate / -$2,167.84 net vs growth absent = 16.0% / -$13,778.37; growth +
+conviction tier was close to break-even (41.4% win, -$5.99 net, n=29). Ali then asked for a
+**full systematic audit**: every confirmation tag, every pairwise combination, tested against
+losses/moonshots, bucketed by chain, not blended. That audit found growth's apparent edge was
+almost entirely a **base-chain effect**:
+  - growth + volume, all-time, by chain: base n=24 91.7% win +$493.02 | bsc n=10 0.0% -$177.47
+    | robinhood_chain n=18 22.2% -$436.50 | solana n=4 (too small to read)
+  - **Isolated on solana specifically** (n=356 all-time multichain-origin): growth WITH =
+    12.5% win (n=8) vs WITHOUT = 12.6% (n=348) -- no edge, consistent with noise.
+  - **Isolated on robinhood_chain specifically** (n=163): growth WITH = 14.8% win (n=27) vs
+    WITHOUT = 25.7% (n=136) -- growth was actively WORSE.
+  - No single confirmation tag, and no tag combination tested, showed a real edge on solana or
+    robinhood_chain once isolated by chain. Every tag's with/without split for solana sits in
+    a narrow 8-19% win-rate band regardless of which tag -- this is the honest, negative
+    finding: the current confirmation vocabulary carries essentially no pre-entry signal for
+    solana in the recorded data. Retired before being committed.
+
+**The real finding (shipped): robinhood_chain entry_mcap floor of $50,000.** Bucketing
+robinhood_chain's 163 all-time multichain-origin trades by entry_mcap (a continuous field that
+*does* survive to the closed record, unlike the raw buys5/sells5/vol5/chg5 numbers):
+
+| entry_mcap bucket | n | win rate | net pnl |
+|---|---|---|---|
+| <$5k | 7 | 0.0% | -$134.09 |
+| $5-10k | 54 | 5.6% | -$1,034.15 |
+| $10-20k | 27 | 14.8% | -$1,139.13 |
+| $20-50k | 46 | 39.1% | -$836.32 |
+| **>=$50k** | **29** | **48.3%** | **+$230.87** |
+
+`>=$50k` is the only profitable filtered slice found anywhere in this audit, for either chain,
+and it's a clean monotonic relationship (not noisy like the tag-based attempts), confirmed
+stable whether measured all-time or restricted to just the last 3 weeks (all 29 trades fall
+within the last 3 weeks anyway). Implemented as `MC_RHC_MIN_MCAP_USD` (default 50,000) in
+`multichain_sniper.py`'s `Scanner.evaluate()`, right after the existing mcap-range gate --
+robinhood_chain pools under $50k entry mcap are now refused outright.
+
+**Solana's mirror-image result, also checked, also negative:** bucketing solana's 356
+all-time multichain-origin trades the same way shows the opposite shape (worst at both
+extremes: <$5k = 3.6% win, >$50k = 0.0% win/30 trades, best in the $10-20k middle at 19.5%) --
+but even that best bucket stays net-negative (-$3,461.63 on 113 trades), and stacking it with
+`volume` doesn't help (-$3,457.20). **No mcap range, confirmation tag, or tag combination
+tested makes solana's multichain-origin path profitable in the recorded data.** This is logged
+as a genuine negative result, not left open: the honest conclusion is that this scanner's
+current inputs (pressure/buyers/velocity/volume/fresh/growth/smart_wallet/graduating) do not
+contain a solana pre-entry edge, and finding one would need either new input data (e.g. actual
+holder concentration, dev wallet history, or something from outside GeckoTerminal's feed) or
+testing on the raw continuous values that were never recorded historically (see next item).
+
+**Structural fix: raw numeric snapshot now recorded.** The audit above was blocked for a while
+by a real data gap: `Scanner.evaluate()`'s raw inputs (buys5, sells5, buyers5, vol5, vol24,
+chg5, chg1h) never survived past the function's local scope -- only the derived boolean
+confirmation tags made it onto the closed trade record. Added a `raw` dict to all three
+`evaluate()` return paths (big/momentum/standard) carrying these fields, threaded through
+`act()`'s `tags` dict into `paper_ledger.open_paper()`. This doesn't change any trading
+behavior -- it just means the NEXT audit can test continuous buy/sell ratios, actual dollar
+volume, and actual % change directly instead of only boolean flags, which is what this one
+had to do without.
+
+**Needs a restart** to apply, same as every prior fix this run.
