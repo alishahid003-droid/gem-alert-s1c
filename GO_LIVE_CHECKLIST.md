@@ -688,3 +688,63 @@ paper and real-money code paths, and the floor's boundary is tested directly. Fu
 
 **Needs a restart** both to apply the code fix going forward AND to clear the one
 fabricated historical trade record from core1's displayed balance.
+
+---
+
+## §0K — 28 Oct 2026: liquidity_usd recorded on every paper position; fast write-off for never-priced-since-entry trades
+
+Two findings from Ali's demand for actual pattern analysis on paper-trading losses, not
+just plumbing status checks.
+
+**Finding 1 — liquidity_usd was never stored.** `paper_ledger.open_paper()` accepted
+`liquidity_usd` as a parameter and used it exactly once, internally, to compute `cost_pct`
+via `_cost_pct()`, then discarded it. It was never written onto the position dict. Result:
+every single closed trade in the whole history (253/253 sampled on core1 alone) showed
+`liquidity_usd` as missing -- including every `rug_liquidity`/`written_off` loss. There was
+no way to tell, after the fact, whether a losing trade had thin liquidity at entry, which
+defeats the actual point of paper testing. Fixed: `liquidity_usd` is now stored on the
+position record at open and flows through to the closed record automatically (`_close()`
+mutates the same dict in place). Commit `629e35a`.
+
+**Finding 2 — robinhood_chain trades were dying at 96% (23/24 post-restart), and it isn't a
+rug-liquidity problem.** With liquidity now recorded, the data showed average liquidity at
+entry on DEAD trades ($15,047) was actually *higher* than on normally-exited trades
+($8,922) -- ruling out thin liquidity as the cause. The real pattern: every dead robinhood_chain
+trade had `last_mcap: None` -- not one single price update landed after entry, ever -- and
+all wrote off at the uniform ~8-minute/3-cycle `UNPRICEABLE_*` threshold. A live, currently-open
+robinhood_chain position was confirmed pricing normally via the same DexScreener path
+(`last_mcap: $12,105`), and a direct `curl` of DexScreener's API for one of the dead tokens'
+exact address returned `[]` -- an empty, successful response, not an error. Conclusion:
+DexScreener genuinely has no indexed pool for these specific (very new/thin) launches, not a
+code or network bug. A position that has NEVER been priced even once since entry is in a
+fundamentally different, worse situation than one that was priced fine and then temporarily
+lost its feed -- the uniform grace period treated both the same, tying up capital against a
+coin with zero price visibility for the full original window before giving up.
+
+Fixed in `executor/paper_ledger.py`: a new, much shorter grace period
+(`NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF=3`, `NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF=2.0`,
+both env-overridable) applies specifically when `pos.get("last_mcap") is None` (never priced
+since entry). A position with a real `last_mcap` that later goes dark still uses the original,
+longer `UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF`/`UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF` window.
+This lives inside the single shared `manage()` function every book's sniper entries route
+through (`source_prefix="early_"` matches `early_sprint`/`early_core1`/`early_core2`/`early_compound`
+alike), so the fix is already system-wide across all four books with no per-module wiring.
+
+2 new tests added to `tests/test_paper_ledger.py`:
+`test_never_priced_since_entry_writes_off_fast` (never-priced position writes off inside the
+new short window, with the right `close_reason`), and
+`test_priced_then_goes_dark_keeps_the_longer_grace_period` (a position that WAS priced once
+and then goes dark is NOT subject to the short window -- it correctly keeps the original
+longer one). The pre-existing `test_rug_written_off_as_full_loss` (itself a never-priced-since-entry
+case) was updated to assert against the new, correct short timing instead of the old one.
+Full suite: 1025/1025 passed (1021 prior + 2 new paper_ledger tests + the 2 modified-count
+delta from editing the existing test).
+
+**What this does NOT claim to fix:** this doesn't stop robinhood_chain/thin-launch entries
+from being risky -- it stops the book from sitting on committed capital for ~8 minutes
+against a coin that was never going to be priceable, freeing the slot and booking the loss
+in ~2 minutes instead. Whether robinhood_chain entries should be filtered out earlier
+(before entry, not after) is a separate, open question -- not addressed here.
+
+**Needs a restart** to apply, same as every prior fix this run -- the running process does
+not pick up code changes until it reloads.

@@ -55,13 +55,65 @@ def test_breakeven_lock_then_stop_is_a_win():
 
 
 def test_rug_written_off_as_full_loss():
+    """28 Oct 2026: a position that is NEVER priced from entry now uses the short never-priced
+    window (see test_never_priced_since_entry_writes_off_fast), not the long original one --
+    this test moved to using that short window for its timing to stay correct."""
     pl.open_paper("solana", "M", "stage1", "score_band_A", 30, 100_000, now=T0)
-    for i in range(pl.UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF):
-        pl.manage(lambda c, t: None, now=T0 + 60 * (i + 1))
-    assert pl.scoreboard()["open_count"] == 1          # 3 misses in 3 min is a hiccup, not a rug
-    pl.manage(lambda c, t: None, now=T0 + 60 + 31 * 60)
+    for i in range(int(pl.NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF)):
+        pl.manage(lambda c, t: None, now=T0 + 20 * (i + 1))
+    assert pl.scoreboard()["open_count"] == 1          # a few misses in under 2 min is a hiccup, not a rug
+    pl.manage(lambda c, t: None, now=T0 + 20 + pl.NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF * 60 + 1)
     r = pl.scoreboard()["recent"][0]
     assert r["exit_type"] == "written_off" and r["pnl_pct"] == -100.0
+
+
+def test_never_priced_since_entry_writes_off_fast(monkeypatch):
+    """28 Oct 2026 (Ali): robinhood_chain trades were dying at 96% post-restart, ALL with
+    last_mcap=None -- never priced even once, yet held for the full 8-min grace period meant
+    for a position that WAS pricing fine and then had a brief hiccup. A pool the price source
+    never indexes at all is a different, worse situation and should give up far sooner."""
+    monkeypatch.setattr(pl, "STATS_SINCE_TS", T0 - 1)
+    pl.open_paper("robinhood_chain", "NEW", "early_sprint", "early_sprint", 30, 100_000,
+                  now=T0, strategy="early", exit_profile="sprint", module="sprint")
+    for i in range(int(pl.NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF)):
+        pl.manage(lambda c, t: None, now=T0 + 20 * (i + 1))
+    # still within the short never-priced cycle count but not yet the short minute threshold
+    assert pl.scoreboard()["open_count"] == 1
+    pl.manage(lambda c, t: None,
+              now=T0 + 20 + pl.NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF * 60 + 1)
+    rows = [r for r in pl._closed() if r["id"] == "early_sprint:robinhood_chain:NEW"]
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["exit_type"] == "written_off"
+    assert "never priceable" in r["close_reason"]
+    assert r["pnl_pct"] == -100.0
+
+
+def test_priced_then_goes_dark_keeps_the_longer_grace_period(monkeypatch):
+    """Contrast case: a position that DID get priced at least once, then loses its feed, is a
+    data hiccup, not dead-on-arrival -- it must keep the full (longer) original grace period,
+    not the new short never-priced one."""
+    monkeypatch.setattr(pl, "STATS_SINCE_TS", T0 - 1)
+    pl.open_paper("robinhood_chain", "WAS_LIVE", "early_sprint", "early_sprint", 30, 100_000,
+                  now=T0, strategy="early", exit_profile="sprint", module="sprint")
+    pl.manage(snap(100_000), now=T0 + 60)       # priced successfully once
+    assert pl.scoreboard()["open_count"] == 1
+    # now the feed goes dark -- tick through several cycles past the SHORT never-priced window;
+    # must still be open because this position has a real last_mcap and should use the longer
+    # grace period, not the short one
+    base = T0 + 60
+    for i in range(int(pl.UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF)):
+        pl.manage(lambda c, t: None, now=base + (pl.NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF * 60) + i + 1)
+    assert pl.scoreboard()["open_count"] == 1          # not written off yet -- longer grace applies
+    # now wait past the full original long grace period, measured from when it actually went
+    # dark (unpriced_since), not from the last successful price -- should finally write off
+    unpriced_since = pl._open()["early_sprint:robinhood_chain:WAS_LIVE"]["unpriced_since"]
+    pl.manage(lambda c, t: None, now=unpriced_since + pl.UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF * 60 + 30)
+    rows = [r for r in pl._closed() if r["id"] == "early_sprint:robinhood_chain:WAS_LIVE"]
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["exit_type"] == "written_off"
+    assert "delisted/rugged" in r["close_reason"]
 
 
 def test_moonbag_rung_and_trailing():

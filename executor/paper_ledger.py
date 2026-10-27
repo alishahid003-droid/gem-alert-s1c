@@ -50,6 +50,18 @@ UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF = 3      # AND at least UNPRICEABLE_MINUTES_
 # up an open-position slot a live signal could have used. Cut to 8 min -- still generous
 # against a brief data-provider hiccup, no longer generous against an actually-dead pool.
 UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = _f_env("UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF", 8.0)
+# 28 Oct 2026 (Ali): robinhood_chain paper trades were dying at a 96% rate (23/24 post-restart) --
+# ALL of them with last_mcap=None, meaning not one single price update ever landed, not even once,
+# the entire 8 minutes before write-off. A position that was priced fine for an hour and then briefly
+# loses its feed is a totally different situation from one that NEVER got priced even a single time
+# since entry -- the first is a data hiccup worth waiting out, the second means the entry signal fired
+# on a pool thin/new enough that no price source (DexScreener here) had indexed it yet, which is itself
+# the risk signal. The uniform 8-min/3-cycle grace period treated both the same, tying up a book's
+# capital against a coin with zero price visibility for the full 8 minutes before finally giving up.
+# Never-priced-since-entry now gets a much shorter leash -- still enough cycles to rule out a one-tick
+# indexing lag, nowhere near enough to hold a slot hostage on a pool that was never going to resolve.
+NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF = _f_env("NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF", 3.0)
+NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF = _f_env("NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF", 2.0)
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
 # Base is paper-tracked too (no buy path yet -- checklist 7.3): the alert
@@ -380,9 +392,14 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         if mcap is None:
             pos["unpriced_cycles"] = pos.get("unpriced_cycles", 0) + 1
             pos.setdefault("unpriced_since", now)
-            if (pos["unpriced_cycles"] >= UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF
-                    and now - pos["unpriced_since"] >= UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF * 60):
-                closed_now.append(_close(pos, "written_off", "no longer priceable (delisted/rugged)", now))
+            never_priced = pos.get("last_mcap") is None
+            cycles_needed = NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF if never_priced else UNPRICEABLE_CYCLES_BEFORE_WRITE_OFF
+            minutes_needed = NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF if never_priced else UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF
+            if (pos["unpriced_cycles"] >= cycles_needed
+                    and now - pos["unpriced_since"] >= minutes_needed * 60):
+                reason = ("never priceable since entry (pool not indexed / dead on arrival)" if never_priced
+                          else "no longer priceable (delisted/rugged)")
+                closed_now.append(_close(pos, "written_off", reason, now))
                 del book[pid]
             continue
         pos["unpriced_cycles"] = 0
