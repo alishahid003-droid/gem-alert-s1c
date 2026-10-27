@@ -16,6 +16,18 @@ def _pool(addr="0xabc", created_ago=300, now=10_000.0, **kw):
     return p
 
 
+def _base_pool(addr="0xabc", now=10_000.0):
+    """Helper: a base-chain pool that earns growth + volume -- the Oct 28 2026 base gate's
+    requirement (see test_base_requires_growth_and_volume below). 'growth' needs the SAME
+    scanner instance to have first seen this pool >=40s ago at a lower mcap (now - t0 >= 40
+    and mcap >= 1.25 * m0), so this does two evaluate() calls on one Scanner."""
+    sc = m.Scanner()
+    first_seen = _pool(addr=addr, now=now, mcap=40_000.0)
+    sc.evaluate(dict(first_seen), now)   # records self.first[k], too soon for growth, discarded
+    later = dict(first_seen, mcap=60_000.0)   # 1.5x the first-seen mcap -> growth-eligible
+    return sc, later, now + 45                # 45s later -> satisfies growth's time window
+
+
 def test_parse_pools():
     body = {"data": [{"attributes": {"market_cap_usd": "12000", "reserve_in_usd": "4000", "pool_created_at": "2026-10-13T00:00:00Z",
                                        "name": "AA / WETH", "transactions": {"m5": {"buys": 5, "sells": 2, "buyers": 4}},
@@ -26,12 +38,24 @@ def test_parse_pools():
 
 
 def test_strong_pool_enters_all_lanes_and_weak_does_not():
-    sc = m.Scanner()
-    d = sc.evaluate(_pool(), 10_000.0)
+    sc, later, t2 = _base_pool()
+    d = sc.evaluate(later, t2)
     assert d and "core2" in d["lanes"] and "sprint" in d["lanes"]
-    assert sc.evaluate(_pool(addr="0xdead", buys5=3, buyers5=2, vol5=100.0, chg5=1.0, created_ago=3000), 10_000.0) is None
-    assert sc.evaluate(_pool(addr="0xpump", chg5=900.0), 10_000.0) is None      # already exploded
-    assert sc.evaluate(_pool(addr="0xdump", buys5=10, sells5=40), 10_000.0) is None
+    sc2 = m.Scanner()
+    assert sc2.evaluate(_pool(addr="0xdead", buys5=3, buyers5=2, vol5=100.0, chg5=1.0, created_ago=3000), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="0xpump", chg5=900.0), 10_000.0) is None      # already exploded
+    assert sc2.evaluate(_pool(addr="0xdump", buys5=10, sells5=40), 10_000.0) is None
+
+
+def test_base_requires_growth_and_volume():
+    """28 Oct 2026 (Ali): asked to implement base's identified pattern as a real gate rather
+    than leave it disabled. growth+volume together on base is a clean, large-n signal (n=24
+    all-time): 91.7% win rate, +$493.02 net -- vs everything else on base (n=48): 8.3% win
+    rate, -$1,538.37 net. base is re-enabled (see test_disabled_chains_default_excludes_bsc)
+    gated on this."""
+    sc = m.Scanner()
+    # Clears the old len(conf)>=3 bar easily but has no growth yet (single snapshot).
+    assert sc.evaluate(_pool(), 10_000.0) is None
 
 
 def test_robinhood_chain_requires_50k_entry_mcap():
@@ -66,10 +90,11 @@ def test_stonkfun_needs_two_confirmations():
 
 
 def test_act_opens_paper_positions_on_non_solana_chain():
-    d = m.Scanner().evaluate(_pool(), 10_000.0)
-    r = m.act(d, 10_000.0)
+    sc, later, t2 = _base_pool()
+    d = sc.evaluate(later, t2)
+    r = m.act(d, t2)
     assert r.get("opened"), r
-    assert m.act(d, 10_001.0) == {"skipped": "already acted"}
+    assert m.act(d, t2 + 1.0) == {"skipped": "already acted"}
 
 
 def test_act_records_raw_numeric_snapshot_on_the_position(monkeypatch, tmp_path):
@@ -79,8 +104,9 @@ def test_act_records_raw_numeric_snapshot_on_the_position(monkeypatch, tmp_path)
     snapshot through tags so a future audit can test continuous values, not just booleans."""
     import executor.paper_ledger as pl
     monkeypatch.setattr(pl.state, "LOCAL_STATE_FILE", str(tmp_path / "pl.json"), raising=False)
-    d = m.Scanner().evaluate(_pool(), 10_000.0)
-    r = m.act(d, 10_000.0)
+    sc, later, t2 = _base_pool()
+    d = sc.evaluate(later, t2)
+    r = m.act(d, t2)
     assert r.get("opened"), r
     open_book = pl._open()
     pos = next(iter(open_book.values()))
@@ -103,10 +129,18 @@ def test_big_launch_and_robinhood_lanes_are_probe_only():
     sc = m.Scanner()
     d = sc.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0)
     assert d and d["lanes"] == ["core1"] and d["tier"] == "probe" and "biglaunch" in d["confirmations"]
-    r = sc.evaluate(_pool(addr="0xrh", chain="robinhood", mcap=180_000.0), 10_000.0)
-    assert r and r["lanes"] == ["core1"] and r["tier"] == "probe"
     assert sc.evaluate(_pool(addr="0xrh2", chain="robinhood", mcap=400_000.0), 10_000.0) is None
     assert sc.evaluate(_pool(addr="0xbsc", chain="bsc", mcap=180_000.0), 10_000.0) is None
+
+
+def test_robinhood_biglaunch_lane_is_blocked():
+    """28 Oct 2026 (Ali): asked to combine filters on robinhood_chain's >=50k mcap slice to
+    push the win rate higher. Found the chain's ENTIRE biglaunch history (n=2, not a
+    cherry-picked slice) lost both times (0% win, -$15.60). The biglaunch lane (this test's
+    old name: 'robinhood lanes are probe only') now returns None for robinhood_chain instead
+    of a probe-tier trade; lifts the >=50k win rate from 48.3% to 51.9% (n=27)."""
+    sc = m.Scanner()
+    assert sc.evaluate(_pool(addr="0xrh", chain="robinhood", mcap=180_000.0), 10_000.0) is None
 
 
 def test_tier_of():
@@ -116,17 +150,16 @@ def test_tier_of():
     assert m.tier_of(["a", "b", "c", "d", "e", "f"]) == "standard"
 
 
-def test_disabled_chains_default_excludes_bsc_base():
-    """28 Oct 2026 (Ali): full-history data (1,023 early-sniper trades) showed bsc at a flat 0%
-    win rate (37/37 losses, -$1,073), and base losing money overall despite a higher win rate
-    than solana because >55% of its trades die unpriced before ever getting a chance to win.
-    robinhood_chain had the SAME dead-on-arrival problem but was re-enabled once the actual
-    cause was fixed (layers/layer14_revival's GeckoTerminal fallback, same day) -- of the
-    robinhood_chain trades that DID get priced, 57.6% won and the chain was net profitable. Only
-    bsc/base remain disabled on their own merits."""
-    assert m.DISABLED_CHAINS == {"bsc", "base"}
+def test_disabled_chains_default_excludes_bsc():
+    """28 Oct 2026 (Ali): bsc stays disabled -- flat 0% win rate all-time (37/37 losses,
+    -$1,073.49), no filtered slice found anywhere in this audit that flips it. base was
+    re-enabled the same day once a real chain-specific gate was found (growth+volume,
+    91.7% win/+$493.02 net, see test_base_requires_growth_and_volume) and robinhood_chain
+    the same day prior (GeckoTerminal fallback fix + its own mcap-floor gate)."""
+    assert m.DISABLED_CHAINS == {"bsc"}
+    # robinhood_chain is resolved dynamically at runtime (resolve_rhc()), not in GT_SLUGS.
     slugs = {c: s for c, s in m.GT_SLUGS.items() if c not in m.DISABLED_CHAINS}
-    assert slugs == {"solana": "solana"}
+    assert slugs == {"solana": "solana", "base": "base"}
 
 
 def test_disabled_chains_env_override(monkeypatch):

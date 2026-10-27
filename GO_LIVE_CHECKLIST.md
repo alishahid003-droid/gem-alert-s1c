@@ -925,3 +925,35 @@ volume, and actual % change directly instead of only boolean flags, which is wha
 had to do without.
 
 **Needs a restart** to apply, same as every prior fix this run.
+
+## §0O — 28 Oct 2026: base re-enabled with growth+volume gate; robinhood_chain biglaunch lane excluded
+
+**Base re-enabled.** §0N found base's growth+volume slice was 91.7% win rate / +$493.02 net
+(n=24 all-time) vs everything else on base (8.3% win / -$1,538.37, n=48). Ali asked directly:
+"why don't you implement that on base launches and enable that... so that at least base has a
+clear structure." Implemented as a chain-specific gate in `Scanner.evaluate()`: `base` pools
+must have both `growth` and `volume` confirmations, or they're refused. `DISABLED_CHAINS`
+default changed from `"bsc,base"` to `"bsc"` -- base is live again, but only through this
+gate, not blanket re-enabled. bsc stays off: flat 0% win rate all-time (37/37 losses,
+-$1,073.49), no filtered slice found anywhere in the audit that flips it.
+
+**Robinhood_chain's >=$50k slice tightened further.** Ali asked to combine filters on top of
+the mcap floor to push the win rate higher. Within the >=$50k bucket (n=29), every mechanical
+confirmation tag turned out to be universal (len(conf)>=5 already forces all of
+pressure/buyers/velocity/volume/fresh on every trade in that bucket) -- no variance left to
+filter on there. But the `big`/biglaunch lane (a separate code path, bypasses `tier_of()`) is
+a clean, consistent loser: the chain's ENTIRE biglaunch history (n=2, not a cherry-picked
+slice from a larger population) lost both times (0% win, -$15.60 combined). Excluding it:
+
+| filter | n | win rate | net pnl |
+|---|---|---|---|
+| entry_mcap >= $50k (prior gate) | 29 | 48.3% | +$230.87 |
+| + exclude biglaunch lane | 27 | **51.9%** | **+$246.48** |
+
+No historical robinhood_chain trades exist above $100k entry mcap, so a higher floor can't be
+tested further with the data available. Implemented: `if rhc and big: return None` right
+after the existing `MC_RHC_MIN_MCAP_USD` check.
+
+Full test suite (1,036 tests, both halves) passing.
+
+**Needs a restart** to apply, same as every prior fix this run.

@@ -478,16 +478,22 @@ def test_evm_wallet_scoreboard_learns_and_flags():
 
 
 def test_evm_scanner_gets_smart_wallet_confirmation():
+    # Oct 28 2026: base now also requires growth + volume (see multichain_sniper.py's
+    # base-chain gate comment), so this needs one Scanner instance primed with a first-seen
+    # snapshot >=40s and >=1.25x mcap before smart_wallet alone can be observed in the result.
     import time, multichain_sniper as mc, evm_wallets as ev
     st = mc.state
     now = time.time()
     st.set_value(ev.KEY_HITS, {"base|poolX": {"n": 1, "ts": now}})
+    sc = mc.Scanner()
     p = {"chain": "base", "addr": "0xtok", "name": "T", "src": "gt", "pool": "poolX", "mcap": 20000, "liq": 8000,
          "created": now - 300, "buys5": 5, "sells5": 1, "buyers5": 3, "vol5": 500, "chg5": 5}
-    d = mc.Scanner().evaluate(p, now)
+    d = sc.evaluate(p, now)
     assert d is None or "smart_wallet" in d["confirmations"]
     p["buys5"], p["buyers5"], p["vol5"], p["chg5"] = 20, 12, 5000, 30
-    d = mc.Scanner().evaluate(p, now)
+    sc.evaluate(dict(p, mcap=20000), now)        # prime self.first[k], too soon for growth
+    p["mcap"] = 26000                            # 1.3x the primed mcap -> growth-eligible
+    d = sc.evaluate(p, now + 45)                 # 45s later -> satisfies growth's time window
     assert d and "smart_wallet" in d["confirmations"]
     st.set_value(ev.KEY_HITS, {})
 

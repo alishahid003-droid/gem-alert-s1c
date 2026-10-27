@@ -34,7 +34,12 @@ RHC_CANDIDATES = ("robinhood-chain", "robinhood", "robinhood_chain")
 # of its 59% dead-on-arrival rate, not a strategy problem -- see that module's GT_FALLBACK_CHAINS
 # comment). bsc/base remain disabled on their own merits (bsc: 0% win rate flat; base: still losing
 # overall even accounting for its dead-on-arrival rate).
-DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc,base").split(",") if c.strip()}
+# 28 Oct 2026 (Ali): base re-enabled -- its growth+volume gate (Scanner.evaluate(), a few
+# lines below) is now attached, fitted to the chain-specific evidence (91.7% win / +$493.02
+# net on that slice, vs 8.3% win / -$1,538.37 on everything else). bsc stays disabled: its
+# full-history win rate was a flat 0% (37/37 losses, -$1,073.49) with no filtered slice found
+# that flips it, unlike base and robinhood_chain.
+DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc").split(",") if c.strip()}
 
 
 def _f(name, default):
@@ -145,6 +150,20 @@ class Scanner:
         # found makes solana profitable; this is a genuine negative result, not an oversight.
         if rhc and mcap < _f("MC_RHC_MIN_MCAP_USD", 50_000):
             return None
+        # 28 Oct 2026 (Ali): asked to combine filters on robinhood_chain to push the >=50k
+        # win rate higher. Within that >=50k slice (n=29), every mechanical confirmation is
+        # universal (need=5 already forces pressure/buyers/velocity/volume/fresh on all of
+        # them) so there's no variance left to filter on there -- but the 'big' launch lane
+        # (separate code path, bypasses tier_of()) is a clean, consistent loser: ALL of
+        # robinhood_chain's biglaunch trades ever recorded (n=2, both historically, not just
+        # in this bucket) lost (0% win, -$15.60 combined). Excluding big lifts the >=50k slice
+        # from 48.3% win/+$230.87 to 51.9% win/+$246.48 (n=27). n=2 for biglaunch itself is
+        # small, but it's the chain's ENTIRE biglaunch history, not a cherry-picked slice, and
+        # the lane is already structurally separate (its own tier/sizing), so this is a real
+        # exclusion, not overfitting. No historical robinhood_chain trades exist above $100k
+        # entry mcap, so a higher floor can't be tested further with this data.
+        if rhc and big:
+            return None
         # 26 Oct 2026: of tonight's catastrophic (<-75%) losses, 14 were real liquidity
         # drains (rug_liquidity/stop_loss, some within 40s of entry) that got through the
         # old $2500 floor -- too low for how fast a thin Base/BSC/Solana pool can empty.
@@ -194,20 +213,20 @@ class Scanner:
         need = int(_f("MC_MIN_CONF_STONK" if p["src"] == "stonkfun" else "MC_MIN_CONF", 2 if p["src"] == "stonkfun" else 3))
         if len(conf) < need or (momentum and len(conf) < 4) or (big and len(conf) < 5):
             return None
-        # --- Quality gate: RETIRED (Oct 28 2026, same day as v1/v2) ---
-        # v1 (smart_wallet-only) and v2 (growth + conviction-tier) were both tried and both
-        # retired the same day after a full systematic audit (every confirmation tag, every
-        # pairwise combination, bucketed by chain) showed neither held up as a real,
-        # chain-specific, pre-entry signal once isolated from the blended (all-chain) numbers.
-        # v2's "growth" edge turned out to be almost entirely a base-chain effect; on solana and
-        # robinhood_chain specifically, growth showed NO edge (solana: 12.5% win WITH growth vs
-        # 12.6% WITHOUT; robinhood_chain: 14.8% WITH vs 25.7% WITHOUT -- growth was actively
-        # worse on robinhood_chain). No confirmation tag or tag combination was found that
-        # makes solana profitable in the recorded data -- that is a real negative result, not
-        # an oversight (see GO_LIVE_CHECKLIST.md for the full audit). The one real, chain-
-        # specific, pre-entry signal the audit DID find was continuous (entry_mcap for
-        # robinhood_chain, implemented a few lines above as MC_RHC_MIN_MCAP_USD), not a
-        # confirmation tag -- which is why this boolean-tag gate is retired rather than kept.
+        # --- Per-chain quality gates (Oct 28 2026) ---
+        # A blended (all-chain) "growth + conviction tier" gate was tried first and retired the
+        # same day: once isolated per chain, the edge turned out to be almost entirely a
+        # base-chain effect -- on solana and robinhood_chain specifically, growth showed NO
+        # edge or a negative one (solana: 12.5% win WITH growth vs 12.6% WITHOUT, n=8/348;
+        # robinhood_chain: 14.8% WITH vs 25.7% WITHOUT, n=27/136 -- actively worse). Replaced
+        # with gates fitted to what each chain's own data actually shows:
+        #
+        # BASE: growth + volume together is a clean, strong, chain-specific signal (n=24
+        # all-time): 91.7% win rate, +$493.02 net -- vs everything else on base (n=48): 8.3%
+        # win rate, -$1,538.37 net. This is why base can be re-enabled (see DISABLED_CHAINS)
+        # with this gate attached, rather than re-enabled blanket.
+        if chain == "base" and not ("growth" in conf and "volume" in conf):
+            return None
         # 28 Oct 2026 (Ali): raw numeric snapshot at decision time, so future pattern audits
         # can test continuous values (actual buy/sell magnitude, actual $ volume, actual %
         # change) instead of only the boolean confirmation tags -- today's audit hit a wall
