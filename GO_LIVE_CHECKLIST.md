@@ -1060,3 +1060,66 @@ vs age>=3min, or solana exactly-3-confirmations vs a stronger combination not ye
 routing higher-confidence coins to bigger-stake modules (core2/compound) and lower-confidence
 passes to probe-sized sprint entries -- rather than the current situation where passing the
 filter at all is necessary but not sufficient, and then routing is a coin flip.
+
+## §0R — 28 Oct 2026: Ali's 6-module architecture + composite confidence score design, PENDING (not built yet)
+
+**Ali's target architecture, stated explicitly tonight:** 6 modules total --
+1. FOMO copy-trade (copies Ali's own followed-trader list manually, via the Fomo app)
+2. Smart-wallet copy-trade (copies wallets OUR system identifies as smart -- separate from #1)
+3. Sprint
+4. Core 1
+5. Core 2
+6. Compound aggregator
+
+For modules 3-6, Ali wants routing driven by ONE composite confidence score per coin launch,
+built from: (a) the chain-specific evidenced pattern (base: growth+volume; robinhood: mcap
+floor + no biglaunch + age>=2min; solana: layer17 mcap$5-20k + conf==3 + no hot_meta) PLUS
+(b) score boosts for: a known-successful dev launching the coin, virality/trending detection,
+celebrity/influencer ("famous name") association, known-utility/narrative. Higher composite
+score -> routed to higher-conviction module (core2/compound); lower score -> sprint-sized
+probe. This is the same bifurcation idea logged as TOP PRIORITY pending in SQ0, now with the
+scoring inputs specified.
+
+**Honest audit of what already exists vs. what Ali is asking for, done before building
+anything (per his "wait a day or 2" instruction -- still not built):**
+
+- Dev reputation, celebrity/"famous name", and influencer-convergence signals ALREADY EXIST
+  as confirmation tags in `layers/layer17_early_entry.py`: `good_dev`, `famous_name`,
+  `hot_meta`, `kol_buy`, `kol_converge` (lines ~202-250). This is exactly the kind of signal
+  Ali is describing -- it was built earlier in the project, not something new to invent.
+- BUT three real gaps, found just now:
+  1. **`good_dev_fn` is a stub**: `self.good_dev_fn = lambda c: False` (line 118) -- dev
+     reputation tracking ("dev_rank.py scoreboard") was planned but never wired up. It always
+     returns False, so `good_dev` never actually fires today. This needs real implementation
+     (tracking creator wallets across launches, win-rate per creator) before it can contribute
+     to any score.
+  2. **Scope gap: these tags only exist on the layer17/pump.fun-via-PumpPortal pipeline**,
+     i.e. solana only. `multichain_sniper.py` (which covers base, robinhood_chain, and
+     non-pump-fun solana) has NO dev-reputation, celebrity, or virality scoring of any kind
+     today. If base/robinhood_chain are to get the same score boosts Ali wants, this needs
+     building there from scratch -- there's no existing code to extend on those two chains.
+  3. **`hot_meta` (the celebrity/trending-name signal) tested NEGATIVE in real data this
+     session**: 6.7% win WITH it vs 16.3% WITHOUT (n=60, -$90.30 net) -- already found and its
+     weight zeroed out in `fast_lane.py` earlier tonight (see SQ0's prior sections). So
+     "virality/trending name" as Ali describes it is not simply a free win boost to re-enable
+     -- the one version of it already tested came out backwards. Whatever virality signal is
+     built for the new composite score needs its own real audit against outcomes before it's
+     trusted, same as every other filter this session -- it cannot be assumed to help just
+     because it sounds like it should.
+  4. None of these tags, even where they do exist and fire, currently feed any NUMERIC
+     composite score, and none feed module routing at all (confirmed in SQ0) -- they are
+     binary confirmation tags only.
+
+**Still correctly deferred per Ali's "wait a day or 2" instruction.** Nothing built this
+entry -- this is the accurate state of what exists vs. what's needed, recorded so the design
+in SQ0 is built on real code, not assumed capability. When enough trade volume has
+accumulated to safely design the composite score (Ali's own estimate: a day or two), the
+build order should be:
+1. Wire up real `good_dev_fn` (creator-wallet win-rate tracking) -- currently a stub.
+2. Build an equivalent lightweight scoring layer for `multichain_sniper.py` (base/robinhood/
+   non-pump solana) since none exists there today -- cannot reuse layer17's tags directly,
+   they're pump.fun/PumpPortal-specific.
+3. Audit any new virality/trending-name signal against real outcomes before trusting it --
+   `hot_meta`'s reversal is a direct precedent for why this step can't be skipped.
+4. Only then combine (chain filter pass/fail) + (dev score) + (virality score, once audited)
+   into one 0-N composite, and route sprint/core1/core2/compound by score tier.
