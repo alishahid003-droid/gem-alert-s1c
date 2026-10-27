@@ -635,3 +635,56 @@ New test (`test_absolute_stake_ceiling_survives_any_equity_bug`) locks in the ce
 directly. Full suite 1017/1017 passed. Committed.
 
 **Needs a restart** for the ceiling to govern new trades.
+
+## §0J -- A real $10.1 MILLION fabricated "win" found live: entry-price rebase trusted a
+## garbled near-zero read with no sanity floor on it (27 Oct 2026, found via routine "status" check)
+
+**What triggered this:** a routine status check ~4 hours after the night's restart.
+`core1` ("Core 2" display name) showed total value of **$10,150,771.34** on a $100 book.
+
+**Root cause, confirmed from the actual corrupted trade record:** an existing safety
+mechanism -- the "entry sanity rebase" (`paper_ledger.py` and the real-money equivalent,
+`position_state.sanity_rebase_entry`) -- exists to catch cases where a position's entry
+price came from a different/mismatched data source than the one pricing it later (a real,
+previously-fixed Sept 30 issue). When the first live read is >5x away from the recorded
+entry, the entry gets REBASED onto that live read, trusting the new number over the old one.
+
+**The flaw: there was no check that the NEW read being rebased onto was itself sane.** One
+core1 trade's real entry (~$59,303 mcap) got a first live read back as a garbled **$0.04**
+-- the code accepted this as the new "true" entry, rebasing onto it. From that point, ANY
+real price against a near-zero base produces an astronomical multiple: this token's price
+later read normally, computed as a 2,329,725x "gain", fired every take-profit rung, and
+booked a $10.76 paper stake as a **$10,152,470.17 profit**. Two smaller, less dramatic
+instances of the identical bug were found in the same trade history (both losses, both
+exits that happened to still be directionally correct by coincidence -- not corrected,
+since there's no way to know a better number and the real-world outcome, a near-total loss,
+was plausible either way).
+
+**Fixed in both places this exists:** `executor/position_state.py` (the real-money path --
+this would have hit real capital once PumpPortal goes live) and `executor/paper_ledger.py`
+(the paper path that actually produced this incident). Added `ENTRY_SANITY_MIN_MCAP_USD`
+($50 floor): a proposed rebase target below this is refused -- the position keeps its
+original (real) entry instead of trusting an implausible new read. A bad read is worse than
+no correction at all.
+
+**Historical data correction attempted, could not be completed safely:** the live process
+was actively running throughout and re-writing `paper_closed_positions` on every management
+cycle faster than a direct on-disk correction could persist -- confirmed by watching a
+manual correction get silently discarded within ~1 second, repeatedly, and by core1's own
+balance changing between two checks seconds apart. Editing a running process's state file
+out from under it risks worse corruption than leaving one bad historical number in place.
+**This one $10.15M fabricated trade record will still show in core1's balance and trade
+history until the next restart**, at which point the fix (already committed) prevents any
+NEW occurrence, but does not retroactively clean the one historical record already written
+to disk before the fix existed. Ali needs to be told this plainly: the number he sees in
+core1 right now is known-fake, already explained, not evidence of a new problem, and will
+not resolve itself without a restart.
+
+4 new tests (2 in `tests/test_paper_ledger.py`, 3 in the new
+`tests/test_position_state_entry_sanity.py`) lock in: a legitimate large rebase still works
+(the original Sept 30 fix is unharmed), a garbled near-zero read is refused on both the
+paper and real-money code paths, and the floor's boundary is tested directly. Full suite
+1021/1021 passed.
+
+**Needs a restart** both to apply the code fix going forward AND to clear the one
+fabricated historical trade record from core1's displayed balance.

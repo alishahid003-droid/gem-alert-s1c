@@ -384,10 +384,17 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         # sanity_rebase_entry): an entry >5x away from the first live read
         # within 20 min is a data-source mismatch, not a trade -- otherwise it
         # books fake 1000x wins (or fake -99% losses) into the win rate.
+        # 27 Oct 2026: REAL incident -- this used to rebase onto "mcap" unconditionally, with no check
+        # that the new read itself was sane. One core1 trade got entry_mcap rebased from a real
+        # ~$59,303 down to $0.04 (a garbled/near-zero read), turning a $10.76 stake into a fictional
+        # $10,152,470 "win" the moment any real price came back in against that near-zero base. A bad
+        # read is worse than keeping the original -- only rebase onto a plausible new read
+        # (position_state.ENTRY_SANITY_MIN_MCAP_USD, same floor as the real-money path).
         if not pos.get("entry_checked"):
             pos["entry_checked"] = True
             r = mcap / pos["entry_mcap"]
-            if now - pos["opened_ts"] <= 20 * 60 and (r > 5.0 or r < 0.2):
+            from executor.position_state import ENTRY_SANITY_MIN_MCAP_USD
+            if now - pos["opened_ts"] <= 20 * 60 and (r > 5.0 or r < 0.2) and mcap >= ENTRY_SANITY_MIN_MCAP_USD:
                 pos["entry_mcap_original"] = pos["entry_mcap"]
                 pos["entry_mcap"] = mcap
                 pos["peak_mcap"] = mcap

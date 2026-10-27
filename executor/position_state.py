@@ -405,6 +405,13 @@ def set_exit_profile(chain: str, token: str, profile: str):
 
 ENTRY_SANITY_MAX_RATIO = 5.0
 ENTRY_SANITY_WINDOW_SECONDS = 20 * 60
+# 27 Oct 2026: a REAL incident, found live -- this rebase unconditionally trusted whatever the new
+# "current_mcap" read was, with no check that the NEW read itself was sane. One paper trade got its
+# entry_mcap rebased from a real ~$59,303 down to $0.04 (a garbled/near-zero read), which turned a
+# $10.76 stake into a fictional $10,152,470 "win" once any real price came back in against that near-
+# zero base. A bad read replacing a good one is worse than keeping the original: skip the rebase
+# entirely if the proposed new entry_mcap is implausibly small to be a real token's market cap.
+ENTRY_SANITY_MIN_MCAP_USD = 50.0
 
 
 def sanity_rebase_entry(chain: str, token: str, current_mcap: Optional[float],
@@ -415,14 +422,18 @@ def sanity_rebase_entry(chain: str, token: str, current_mcap: Optional[float],
     (DexScreener). A real memecoin doesn't move >5x either way inside 20
     minutes of our entry often enough to trust such a number, so on the
     FIRST priced management read within that window, an entry more than 5x
-    away from the live mcap is re-based to the live mcap. Checked once."""
+    away from the live mcap is re-based to the live mcap. Checked once.
+
+    27 Oct 2026: only rebase onto a new read that is itself plausible (>= ENTRY_SANITY_MIN_MCAP_USD).
+    A near-zero/garbled read is a worse number than the original entry, not a better one -- see the
+    constant's comment for the real incident this closes."""
     pos = get_position(chain, token)
     if not pos or pos.get("entry_checked") or not current_mcap:
         return False
     now = now if now is not None else time.time()
     pos["entry_checked"] = True
     rebased = False
-    if now - (pos.get("opened_ts") or now) <= ENTRY_SANITY_WINDOW_SECONDS:
+    if now - (pos.get("opened_ts") or now) <= ENTRY_SANITY_WINDOW_SECONDS and current_mcap >= ENTRY_SANITY_MIN_MCAP_USD:
         for st in (pos.get("stages") or {}).values():
             em = st.get("entry_mcap")
             if em and (current_mcap / em > ENTRY_SANITY_MAX_RATIO or em / current_mcap > ENTRY_SANITY_MAX_RATIO):

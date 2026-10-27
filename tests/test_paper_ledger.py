@@ -128,6 +128,25 @@ def test_paper_entry_sanity_rebase():
     assert pl.scoreboard()["overall"]["n"] == 0       # no fake win booked
 
 
+def test_entry_rebase_rejects_near_zero_garbled_read():
+    """27 Oct 2026 fix: a REAL incident -- the entry-sanity rebase used to trust whatever the new
+    live read was, with no floor on it being plausible. One core1 trade had its real ~$59,303 entry
+    rebased onto a garbled $0.04 read, turning a $10.76 stake into a fictional $10,152,470 'win' once
+    any real price came back in against that near-zero base. A bad read is worse than keeping the
+    original entry -- the rebase must now refuse an implausibly-tiny proposed entry_mcap, so the
+    position is priced/exited against its REAL entry instead (here: correctly stopped out for a
+    bounded, real loss of the stake -- not a fabricated multi-million-dollar 'win')."""
+    pl.open_paper("solana", "GARBLE", "early_core1", "early_core1", 10.76, 59_303.35,
+                  strategy="early", exit_profile="core1", module="core1", now=T0)
+    pl.manage(snap(0.04), now=T0 + 60)          # the garbled near-zero read
+    rows = pl.module_rows("core1", include_runners=True)
+    assert rows, "position should have closed (correctly stopped out against its real entry)"
+    # the bug produced pnl_usd = +10,152,470.17 on a $10.76 stake -- any bounded, real-scale
+    # loss or win here proves the rebase guard held; a multi-digit-thousand swing proves it didn't.
+    assert -10.76 <= rows[0]["pnl_usd"] <= 100, f"pnl_usd={rows[0]['pnl_usd']} -- rebase guard failed"
+    assert rows[0]["pnl_usd"] < 0 and rows[0]["win"] is False
+
+
 def test_pre_fix_trades_excluded_from_stats(monkeypatch):
     pl.open_paper("solana", "OLD", "stage1", "score_band_B", 30, 100_000, now=T0)
     pl.manage(snap(40_000), now=T0 + 60)                    # a loss, opened "before the fix"
