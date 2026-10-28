@@ -1179,3 +1179,55 @@ accumulate (system is live and running), then re-run this exact audit on a large
 sample. The three gates already shipped (base growth+volume, robinhood mcap/age/biglaunch,
 solana layer17 mcap/conf/hot_meta) remain the real, evidenced edge found this session -- no
 regressions, no new code this entry.
+
+## §0T — 28 Oct 2026 (same day, later): robinhood_chain mcap floor corrected; solana `repeat_grad` found but not yet shippable
+
+**Ali called out that robinhood's win rate was eroding (56.3%->54.5%->40.0% across three
+checkpoints over ~50hrs) and demanded a real investigation, not a status report.** Re-bucketed
+the now-much-larger sample (185 trades/130 unique coins, up from 24 at first measurement) and
+found the >=$50k mcap floor was cutting out a BETTER band: unique-coin win rate by mcap,
+no-biglaunch, any age -- $0-30k: 11.2% (correctly excluded), $30-50k: 55.0%, $50-70k: 39.3%.
+**Floor lowered from $50k to $30k.** New filter (mcap>=30k, no biglaunch) on the full dataset:
+n=71 trades / 48 unique coins, 45.1% win trade-level / 45.8% coin-level, net +$220.82 -- a
+bigger, more trustworthy sample than the eroded >=$50k slice (n=35/21 coins, 40.0% win,
++$279.91), similar dollar performance. Fail side unchanged at ~10.5% win / -$3,109 net.
+
+**Also retired the age>=2min gate** (`MC_RHC_MIN_AGE_MIN` default changed from 2.0 to 0.0,
+disabled) -- re-tested on the new $30k+ bucket and it no longer helps: age>=0 gives 45.8%
+win/+$220.82 on n=48 coins, age>=2min shrinks to n=34 for a WORSE 44.1%/+$163.06. The age
+effect found this morning was real but specific to the old $50k-only bucket; it didn't survive
+the floor correction. Left as a disabled env override, not deleted, in case a future sample
+finds a real age effect again.
+
+Full test suite re-run after these changes (1,042 tests, both halves): PASS. Two tests that
+hardcoded the old $50k/2min thresholds were updated to the new $30k floor and the
+now-disabled-by-default age gate, with the new numbers in their docstrings.
+
+**Needs a restart to apply, same as every prior fix.**
+
+**Solana: dug into the FULL unique-coin dataset (749 coins total, up from checking only the
+narrow existing filter's frozen n=29) per Ali's demand that "frozen at n=29" was not an
+acceptable answer given how many solana launches happen daily.** Correct framing: the EXISTING
+layer17 filter (mcap$5-20k+conf==3+no hot_meta) genuinely hasn't matched a new trade in ~18hrs
+-- that's real, not a bug -- but that filter is only one narrow slice of a much larger dataset
+I had not re-mined. Split solana's 749 unique coins by origin (early/layer17: 217 coins, 21.2%
+win baseline; multichain: 532 coins, 13.3% win baseline) and tested every confirmation tag and
+confirmation-count bucket again on the full early-origin set.
+
+**Found a real, mechanistic signal: `repeat_grad`** (creator already graduated a coin before,
+AND went quiet >=1 day before this new launch -- confirmed wired to a real implementation in
+`worker_early_watch.py`/`early_creators.py`, not a stub, despite the class-level default being
+one) -- 40.5% win WITH (n=37 coins) vs 17.2% WITHOUT (n=180), nearly 2.5x the baseline. Stripped
+to "clean" form (repeat_grad + only mechanical confirmations, excluding hot_meta/famous_name/
+narrative noise): 47.1% win on n=17, reported net +$35.45.
+
+**Honest catch before shipping anything: that +$35.45 net is NOT real edge -- it's one single
++$63.00 trade.** Remove that one outlier and the remaining 16 trades are 43.75% win but net
+-$27.55. This is exactly the single-lucky-trade trap flagged as a risk in SQ0/SR0's audit
+methodology. The win-RATE lift (40-47% vs 17-21% baseline) is real and worth tracking --
+`repeat_grad` is a genuine, non-overfit mechanism (verified against `early_creators.py`'s actual
+logic, not just a tag name) -- but net profitability on this slice is not yet proven; it is
+currently riding on one outlier. NOT implemented as a gate this entry. Needs more trades
+accumulating on `repeat_grad` specifically (currently only 37 coins ever recorded with this tag)
+before it can be trusted as profitable, not just higher-win-rate. Flagged as the single most
+promising solana lead found so far, to re-check as more repeat_grad-tagged trades land.

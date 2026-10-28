@@ -58,18 +58,18 @@ def test_base_requires_growth_and_volume():
     assert sc.evaluate(_pool(), 10_000.0) is None
 
 
-def test_robinhood_chain_requires_50k_entry_mcap():
-    """28 Oct 2026 (Ali): full systematic audit (every confirmation tag, every pairwise
-    combination, bucketed per chain) of robinhood_chain's 163 all-time multichain-origin
-    trades, by entry_mcap bucket:
-      <5k: 0.0% win  5-10k: 5.6%  10-20k: 14.8%  20-50k: 39.1%  >=50k: 48.3% win, net +$230.87
-    >=50k is the ONLY profitable filtered slice found anywhere in this audit for this chain
-    (every confirmation-tag-based filter tried first turned out to be a base-chain effect with
-    no edge on robinhood_chain once isolated -- see multichain_sniper.py's retired-gate
-    comment). Below 50k entry mcap, robinhood_chain trades are refused outright."""
+def test_robinhood_chain_requires_30k_entry_mcap():
+    """28 Oct 2026 (Ali): re-audited after ~50hrs/185 trades/130 unique coins accumulated,
+    because the original >=$50k floor's win rate was visibly eroding as more trades came in
+    (56.3% -> 54.5% -> 40.0% across three checkpoints). Re-bucketing on the larger sample found
+    the >=50k floor was cutting out a BETTER-performing band -- unique-coin win rate by mcap
+    band, no-biglaunch, any age: $0-30k: 11.2% win (bad)  $30-50k: 55.0% win  $50-70k: 39.3% win.
+    Floor lowered to $30k: n=71 trades/48 coins, 45.1% win trade-level, net +$220.82 -- bigger
+    and more trustworthy than the eroded >=50k slice. Below 30k entry mcap, robinhood_chain
+    trades are refused outright."""
     sc = m.Scanner()
-    assert sc.evaluate(_pool(addr="0xrh49k", chain="robinhood_chain", mcap=49_999.0), 10_000.0) is None
-    d = sc.evaluate(_pool(addr="0xrh50k", chain="robinhood_chain", mcap=50_000.0), 10_000.0)
+    assert sc.evaluate(_pool(addr="0xrh29k", chain="robinhood_chain", mcap=29_999.0), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrh30k", chain="robinhood_chain", mcap=30_000.0), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
@@ -80,23 +80,25 @@ def test_robinhood_chain_mcap_floor_env_override(monkeypatch):
     assert d and d["chain"] == "robinhood_chain"
 
 
-def test_robinhood_chain_requires_2min_age_within_mcap_floor():
-    """28 Oct 2026 (Ali): asked for an additional confident signal on robinhood_chain beyond
-    the mcap floor. Within the >=$50k bucket, age_min shows a real gradual effect: age>=2.0min
-    lifts win rate to 56.3% (n=16, +$238.40 net) vs the 1-2min sub-bucket alone (45.5% win,
-    only +$8.08 net). Specific to this mcap bucket -- across all robinhood_chain trades, age
-    shows the OPPOSITE shape, so this isn't a blanket 'wait longer' rule."""
+def test_robinhood_chain_age_floor_disabled_by_default():
+    """28 Oct 2026 (Ali, later same day): the age>=2min gate found earlier today was specific
+    to the old $50k-only bucket and did NOT generalize once the mcap floor was corrected to
+    $30k -- re-tested on the larger $30k+ bucket (n=48 coins): age>=0min (no gate) gives 45.8%
+    win/+$220.82, age>=2min shrinks to n=34 coins for a lower 44.1% win/+$163.06. Age gating
+    retired (default floor is now 0.0 = disabled) rather than deleted, since the mechanism
+    (MC_RHC_MIN_AGE_MIN) stays available if a future, larger sample finds a real effect again.
+    A very young robinhood_chain trade at the new $30k floor should pass through."""
     sc = m.Scanner()
-    # created_ago=90s (1.5min) is below the 2min floor, even though mcap clears $50k.
-    assert sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=60_000.0, created_ago=90), 10_000.0) is None
-    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=60_000.0, created_ago=130), 10_000.0)
+    d = sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=60_000.0, created_ago=90), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
 def test_robinhood_chain_age_floor_env_override(monkeypatch):
-    monkeypatch.setenv("MC_RHC_MIN_AGE_MIN", "0.5")
+    monkeypatch.setenv("MC_RHC_MIN_AGE_MIN", "2.0")
     sc = m.Scanner()
-    d = sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=60_000.0, created_ago=45), 10_000.0)
+    # With the override restoring a 2min floor, a 90s-old (1.5min) trade is refused again.
+    assert sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=60_000.0, created_ago=90), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=60_000.0, created_ago=130), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 

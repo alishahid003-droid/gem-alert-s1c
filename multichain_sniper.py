@@ -148,7 +148,19 @@ class Scanner:
         # Solana showed the opposite shape (worst at both extremes, best at 10-20k, but even
         # that best bucket stays net-negative at -$3,461.63/113 trades) -- no mcap or tag filter
         # found makes solana profitable; this is a genuine negative result, not an oversight.
-        if rhc and mcap < _f("MC_RHC_MIN_MCAP_USD", 50_000):
+        #
+        # 28 Oct 2026 (Ali, later same day): re-audited after ~50hrs/185 trades/130 unique
+        # coins accumulated (vs n=24 when >=50k was first set) because the >=50k slice's win
+        # rate was visibly eroding as more trades came in (56.3% -> 54.5% -> 40.0% across three
+        # checkpoints). Re-bucketing on the larger sample found the >=50k floor was cutting out
+        # a BETTER-performing band: unique-coin win rate by mcap band, no-biglaunch, any age:
+        #   $0-30k: 11.2% win (bad, correctly excluded)  $30-50k: 55.0% win  $50-70k: 39.3% win
+        # Lowered the floor to $30k. Full comparison at the new floor (n=71 trades/48 coins):
+        # 45.1% win trade-level / 45.8% coin-level, net +$220.82 -- vs the old >=50k floor's
+        # eroded n=35/21-coin, 40.0% win, +$279.91. Bigger, more trustworthy sample, similar or
+        # better rate. Fail side (mcap<30k or biglaunch) stayed at 10.5% win / -$3,109.18 net on
+        # n=114/82 coins -- the floor change is a real reclassification, not noise.
+        if rhc and mcap < _f("MC_RHC_MIN_MCAP_USD", 30_000):
             return None
         # 28 Oct 2026 (Ali): asked to combine filters on robinhood_chain to push the >=50k
         # win rate higher. Within that >=50k slice (n=29), every mechanical confirmation is
@@ -188,7 +200,17 @@ class Scanner:
         # shape (1-2min is best, >5min is worst), so this is a real interaction, not a general
         # "wait longer" rule. age_min>=2.25 looked even better (100% win) but n=4 is too thin to
         # trust; 2.0 is the last point before the sample gets unreliably small.
-        if rhc and age_min < _f("MC_RHC_MIN_AGE_MIN", 2.0):
+        #
+        # 28 Oct 2026 (Ali, later same day): RETIRED after the mcap floor dropped to $30k.
+        # Re-tested age thresholds on the new, larger $30k+ bucket (n=48 coins) -- age no
+        # longer helps: age>=0min (i.e. no floor) gives 45.8% win/+$220.82 on n=48 coins,
+        # age>=2min gives 44.1% win/+$163.06 on a shrunk n=34, age>=3min gives 52.9% on a
+        # thin n=17. The age effect found above was specific to the old $50k-only bucket and
+        # did not generalize once the mcap floor was corrected -- gating on it now would only
+        # throw away sample for no real gain. Left as a disabled env override
+        # (MC_RHC_MIN_AGE_MIN defaults to 0 = no gate) rather than deleted, in case a future,
+        # larger sample finds a real age interaction again.
+        if rhc and age_min < _f("MC_RHC_MIN_AGE_MIN", 0.0):
             return None
         conf = []
         b, s = p.get("buys5"), p.get("sells5")
