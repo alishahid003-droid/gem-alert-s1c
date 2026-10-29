@@ -1469,3 +1469,48 @@ verified live, not just tested in isolation. Composite confidence-score routing 
 instruction (the AskUserQuestion exchange that produced §0W) explicitly resolved that design
 question in favor of a standalone bypass module instead of score-boosting the existing chain
 routing. That is what shipped; §0R's older framing is superseded, not still pending.
+
+## §0Z — 30 Oct 2026, 7.8h post-restart snapshot (Ali's machine on low battery, grid outage — captured before possible shutdown)
+
+Emergency snapshot requested by Ali as his machine may lose power (no electricity, low
+battery). State file verified intact (`json.load` succeeds) before and after this check.
+
+**Overall since restart (13:14 UTC 29 Oct, 7.8h of clean post-fix runtime):**
+21 closed trades, 9 wins (42.9%), net **+$76.53**. Small sample -- this is a first real look,
+not a verdict, consistent with what was flagged last check.
+
+**By chain:**
+- base: n=4, 4/4 = 100% win, +$76.31 net (small n, but zero losses so far on the fixed gate)
+- robinhood_chain: n=14, 5/14 = 35.7% win, +$5.32 net (roughly flat -- down from the earlier
+  52.6%/38-trade read; normal variance at this sample size, not a reversal yet)
+- solana (layer17, $3k floor): n=3, 0/3 = 0% win, -$5.10 net (too small to read anything into)
+
+**By book:**
+- sprint: n=6, 33.3% win, -$20.46 net
+- core1: n=8, 50.0% win, +$11.28 net (cleaning up: balance now $79.54, climbing from the
+  $13.30 low recorded a few hours ago)
+- core2: n=0 this window; balance flat at $100.00 (reseeded, no new trades yet)
+- compound: n=6, 50.0% win, **+$89.08 net** (today_pnl matches realized_pnl exactly --
+  confirms this is genuinely the post-restart number, not inherited from before)
+- dev_list: n=1 -- **first quality-signal trade fired**: solana, `repeat_grad` (dev-reputation
+  signal, layer17's existing bypass), lost (-$3.36, stopped out at 0.36x). One trade, a loss --
+  expected variance, not a verdict on the signal.
+
+**Correction on the earlier $966 compound balance reported same day, before restart:** that
+figure was accumulated P&L from BEFORE the restart. A process restart re-evaluates each
+book's "today" window from its current saved equity -- the $966/+$456.92-today numbers
+reported earlier were real at the time but predate this restart and are not comparable to the
+numbers in this section. Current compound equity is genuinely $189.08 (+$89.08 realized since
+restart, confirmed via `books.status('compound')`: `today_pnl` and `realized_pnl` both equal
+$89.08, 0 busts). This is the correct, clean, fully-post-fix number going forward.
+
+**No busts recorded on any book since the restart timestamp** (checked all four moonshot
+books directly against `books_busts_v1`).
+
+**Honest read:** 7.8 hours and this sample size (n=21 overall, n=3-14 per chain) is still too
+small to confirm or rule out anything definitively. Nothing here contradicts the fixes;
+nothing here proves them either yet. The 24h mark Ali and Claude agreed on (~13:14 UTC 30 Oct
+/ 18:14 PKT) remains the point a real read becomes possible. This snapshot exists because
+Ali's machine may lose power before then (grid outage, low battery) -- if that happens, the
+next restart becomes a new baseline, and this section is the last clean data point before
+the gap.
