@@ -1231,3 +1231,48 @@ currently riding on one outlier. NOT implemented as a gate this entry. Needs mor
 accumulating on `repeat_grad` specifically (currently only 37 coins ever recorded with this tag)
 before it can be trusted as profitable, not just higher-win-rate. Flagged as the single most
 promising solana lead found so far, to re-check as more repeat_grad-tagged trades land.
+
+## §0U — 29 Oct 2026: solana blocked from books in multichain_sniper.py (no proven pattern there)
+
+**Ali's direct question: "why is it being shipped to any of the modules?" when a coin doesn't
+pass the chain's own filter.** Audited whether every chain reaching Scanner.evaluate() actually
+gets thrown away on a failing gate before module/lane assignment, or silently trades anyway.
+
+**base and robinhood_chain: confirmed airtight.** A non-passing coin on either chain returns
+None before lane assignment -- verified directly against live trade data (zero post-restart
+leaks on either chain; all pre-fix "failing" trades on file predate the gates' deployment).
+
+**solana: confirmed NOT gated at all in this file.** Unlike the separate
+layers/layer17_early_entry.py pipeline (different feed, which DOES gate solana on mcap$5-20k+
+conf==3+no hot_meta), multichain_sniper.py's own solana path only ever required the generic
+3-confirmation mechanical floor (pressure/buyers/velocity/volume/fresh -- already proven to
+carry almost no predictive power on this chain in the 28 Oct audit) before sailing straight
+into core1/core2/sprint/compound at full stake. Checked the real damage: **972 solana
+multichain-origin trades, all-time, 12.1% win rate, net -$17,404.56** -- the single largest
+money-loser anywhere in the system, and the real explanation for sprint/core1/core2/compound's
+chronic busts (14/5/3/20 recorded busts respectively) -- not a stake-sizing problem as first
+suspected, a pure unfiltered-volume problem.
+
+**Fix: solana is now refused in Scanner.evaluate() by default** (`MC_SOLANA_ENABLED`, default
+0/off), the same treatment bsc already has, applied the moment chain is known (right after the
+base gate) -- before confirmations are even built. The scanner still POLLS solana (so there's
+still data to mine a future pattern from), it just refuses every solana coin before lane
+assignment rather than trading it unfiltered. No multichain-origin solana pattern has been found
+and evidenced to the same bar as base/robinhood (the repeat_grad lead from 28 Oct is on the
+SEPARATE layer17 pipeline and is itself not yet proven profitable -- see ST0). Until one is
+found, solana trades zero capital through this file.
+
+Updated/added tests: test_stonkfun_needs_two_confirmations -> renamed
+test_stonkfun_blocked_by_default_solana_gate (now asserts blocked by default, passes under
+MC_SOLANA_ENABLED=1); test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf and
+test_big_launch_and_robinhood_lanes_are_probe_only both updated to assert solana refused by
+default, with the override restoring original behavior; added
+test_solana_blocked_by_default_in_multichain_sniper and
+test_solana_enabled_env_override_restores_old_behavior as direct, explicit coverage of the new
+gate. Full suite re-run (1,044 tests, both halves): PASS.
+
+**Needs a restart to apply.** This is a large behavior change -- it will immediately and
+sharply reduce the trade volume flowing into sprint/core1/core2/compound (solana was the large
+majority of each book's trade count), which is the intended effect, not a bug: those trades
+were the thing losing the money. layers/layer17_early_entry.py's solana pipeline is untouched
+and keeps trading normally, since it already has its own real, evidenced gate.

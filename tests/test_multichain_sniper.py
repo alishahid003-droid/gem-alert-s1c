@@ -102,12 +102,20 @@ def test_robinhood_chain_age_floor_env_override(monkeypatch):
     assert d and d["chain"] == "robinhood_chain"
 
 
-def test_stonkfun_needs_two_confirmations():
+def test_stonkfun_blocked_by_default_solana_gate(monkeypatch):
+    """29 Oct 2026 (Ali): StonkFun is solana-sourced, so it's covered by the same blanket
+    solana-off-by-default gate as every other solana source here -- it has never actually
+    closed a trade through this file (0 ever recorded), so there's no evidence to exempt it.
+    Confirms it clears its own 2-confirmation bar but is still refused by the chain gate; the
+    env override test below confirms it WOULD pass if solana were re-enabled."""
     sc = m.Scanner()
     p = {"chain": "solana", "addr": "MintStonk", "name": "S", "src": "stonkfun", "mcap": 20_000.0, "liq": 5000.0,
          "created": 9_900.0, "vol24": 5000.0, "grad": 0.4, "buys5": None, "sells5": None, "buyers5": None,
          "vol5": None, "chg5": None, "chg1h": None}
-    d = sc.evaluate(p, 10_000.0)
+    assert sc.evaluate(p, 10_000.0) is None
+    monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
+    sc2 = m.Scanner()
+    d = sc2.evaluate(p, 10_000.0)
     assert d and d["src"] == "stonkfun"
 
 
@@ -136,23 +144,61 @@ def test_act_records_raw_numeric_snapshot_on_the_position(monkeypatch, tmp_path)
                                    "vol24": None, "chg5": 40.0, "chg1h": 60.0}
 
 
-def test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf():
+def test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf(monkeypatch):
+    """29 Oct 2026 (Ali): solana is now blocked by default in this file (see the chain gate's
+    own comment), so the momentum-bucket lane logic below only runs under the explicit env
+    override -- this test now proves both: (1) solana is refused by default even in this
+    bucket, (2) the override restores the original momentum-lane behavior unchanged."""
     sc = m.Scanner()
     big = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0)
-    d = sc.evaluate(big, 10_000.0)
+    assert sc.evaluate(big, 10_000.0) is None
+    monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
+    sc2 = m.Scanner()
+    big2 = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0)
+    d = sc2.evaluate(big2, 10_000.0)
     assert d and d["lanes"] == ["core1"] and "momentum" in d["confirmations"]
-    # EVM above the cap is still refused
-    assert sc.evaluate(_pool(addr="0xbig", chain="bsc", mcap=150_000.0), 10_000.0) is None
+    # EVM above the cap is still refused regardless
+    assert sc2.evaluate(_pool(addr="0xbig", chain="bsc", mcap=150_000.0), 10_000.0) is None
     # above the momentum ceiling is refused too
-    assert sc.evaluate(_pool(addr="SolHuge", chain="solana", mcap=1_500_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="SolHuge", chain="solana", mcap=1_500_000.0), 10_000.0) is None
 
 
-def test_big_launch_and_robinhood_lanes_are_probe_only():
+def test_big_launch_and_robinhood_lanes_are_probe_only(monkeypatch):
+    """29 Oct 2026 (Ali): same as above -- solana's biglaunch lane is only reachable with the
+    gate's env override now; robinhood/bsc above-cap refusals are unaffected (their own gates,
+    not the solana one)."""
     sc = m.Scanner()
-    d = sc.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0)
+    assert sc.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0) is None
+    monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
+    sc2 = m.Scanner()
+    d = sc2.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0)
     assert d and d["lanes"] == ["core1"] and d["tier"] == "probe" and "biglaunch" in d["confirmations"]
-    assert sc.evaluate(_pool(addr="0xrh2", chain="robinhood", mcap=400_000.0), 10_000.0) is None
-    assert sc.evaluate(_pool(addr="0xbsc", chain="bsc", mcap=180_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="0xrh2", chain="robinhood", mcap=400_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="0xbsc", chain="bsc", mcap=180_000.0), 10_000.0) is None
+
+
+def test_solana_blocked_by_default_in_multichain_sniper():
+    """29 Oct 2026 (Ali): "every other coin which does not even fulfill the criteria should be
+    thrown away ... why is it being shipped to any of the modules?" Audited and found solana
+    had NO chain-level quality gate in this file at all (unlike base/robinhood_chain, which both
+    return None before lane assignment when their gate fails) -- every solana coin clearing the
+    generic 3-confirmation mechanical floor was trading into core1/core2/sprint/compound
+    unfiltered. Real damage: 972 solana multichain-origin trades, all-time, 12.1% win rate, net
+    -$17,404.56 -- the single largest money-loser in the system, and the real driver of sprint/
+    core1/core2/compound's chronic busts. No profitable multichain-origin solana pattern has been
+    found and evidenced (the separate layers/layer17_early_entry.py pipeline's repeat_grad lead
+    is a different feed and not yet proven either). Blocked the same way bsc already is -- every
+    solana coin refused before lane assignment, by default, until a real pattern is found."""
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="SolAny", chain="solana", mcap=15_000.0), 10_000.0)
+    assert d is None
+
+
+def test_solana_enabled_env_override_restores_old_behavior(monkeypatch):
+    monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="SolAny2", chain="solana", mcap=15_000.0), 10_000.0)
+    assert d and d["chain"] == "solana"
 
 
 def test_robinhood_biglaunch_lane_is_blocked():

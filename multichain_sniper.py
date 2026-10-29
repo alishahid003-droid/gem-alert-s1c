@@ -39,6 +39,14 @@ RHC_CANDIDATES = ("robinhood-chain", "robinhood", "robinhood_chain")
 # net on that slice, vs 8.3% win / -$1,538.37 on everything else). bsc stays disabled: its
 # full-history win rate was a flat 0% (37/37 losses, -$1,073.49) with no filtered slice found
 # that flips it, unlike base and robinhood_chain.
+#
+# 29 Oct 2026 (Ali): solana stays in this set's POLLING (slugs), but is now separately gated
+# OFF from the books inside Scanner.evaluate() (MC_SOLANA_ENABLED, default 0) -- it was never
+# chain-disabled like bsc because the separate layers/layer17_early_entry.py pipeline (a
+# different solana feed) DOES have a real, evidenced gate and must keep trading. This file's
+# OWN solana path never had an equivalent gate and was costing -$17,404.56 (972 trades, 12.1%
+# win) unfiltered into every module. See the gate's own comment a few lines below for the full
+# audit.
 DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc").split(",") if c.strip()}
 
 
@@ -259,6 +267,28 @@ class Scanner:
         # win rate, -$1,538.37 net. This is why base can be re-enabled (see DISABLED_CHAINS)
         # with this gate attached, rather than re-enabled blanket.
         if chain == "base" and not ("growth" in conf and "volume" in conf):
+            return None
+        # 29 Oct 2026 (Ali): "every other coin which does not even fulfill the criteria should be
+        # thrown away ... why is it being shipped to any of the modules?" -- audited whether that
+        # rule actually holds for every chain reaching this point. base and robinhood_chain do: a
+        # non-passing coin on either chain returns None above and never reaches module/lane
+        # assignment below (confirmed against live trade data: zero post-restart leaks on either
+        # chain). solana does NOT -- this file has never had a chain-level quality gate for solana
+        # at all, unlike the separate layers/layer17_early_entry.py pipeline (a different feed,
+        # different trades, which DOES gate solana on mcap$5-20k+conf==3+no hot_meta). Every solana
+        # coin landing in THIS file's generic len(conf)>=3 mechanical floor was sailing straight
+        # into core1/core2/sprint/compound at full stake, filter or no filter. Checked the actual
+        # damage: 972 solana multichain-origin trades, all-time, 12.1% win rate, net -$17,404.56 --
+        # the single largest money-loser anywhere in the system, confirmed to be the real cause of
+        # sprint/core1/core2/compound's chronic busts (14/5/3/20 busts respectively), not stake
+        # sizing. No multichain-origin solana pattern has been found and proven profitable (the
+        # repeat_grad lead found 28 Oct is on the SEPARATE layer17 pipeline, not this one, and is
+        # itself not yet proven -- see GO_LIVE_CHECKLIST.md SQ0/ST0). Until one is found and
+        # evidenced the same way base/robinhood were, solana gets the same treatment bsc already
+        # has: blocked from the books entirely. The scanner keeps POLLING solana (so a future audit
+        # still has data to mine a pattern from) but every solana coin is refused here, before lane
+        # assignment, rather than silently trading unfiltered.
+        if chain == "solana" and not _f("MC_SOLANA_ENABLED", 0.0):
             return None
         # 28 Oct 2026 (Ali): raw numeric snapshot at decision time, so future pattern audits
         # can test continuous values (actual buy/sell magnitude, actual $ volume, actual %
