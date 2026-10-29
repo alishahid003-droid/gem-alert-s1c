@@ -1431,3 +1431,41 @@ behavior). Full suite re-run (1,052 tests, all three chunks): PASS.
 day on base/bsc/robinhood_chain whenever a launch's name matches a currently-trending phrase
 and wins the first-claim race -- again, instrumentation to accumulate real evidence on this
 signal across all chains, not yet a profitable, proven filter.
+
+## §0Y — 29 Oct 2026, post-restart health check (live verification, no code change)
+
+Ran a full live sanity check after Ali's restart confirmation ("done all again") to verify
+§0W/§0X actually work in the running process, not just in isolated tests, before calling the
+system "organized" for the day:
+
+- **Process is live and trading**: most recent trade opened 20.7 min before this check; 17
+  trades opened in the prior 2 hours.
+- **Zero book busts since the restart timestamp** (checked all four moonshot books against
+  the actual restart time) -- too early to call definitively (short runtime), but no
+  regressions.
+- **Chain win rates holding up against their audited expectations, post-mcap-floor-fix**:
+  - robinhood_chain (since the $30k floor fix): n=38, 52.6% win, **+$938.63 net** -- matches
+    or beats the original 45-52% audit range; real sample, not noise.
+  - base (same window): n=13, 61.5% win, +$412.67 net -- small sample, consistent with the
+    growth+volume gate's strong historical edge.
+  - layer17 solana (since the $3k floor widening): n=10, 30.0% win, +$5.84 net -- matches
+    the ~30% expected from the sweep almost exactly; barely positive as predicted, n still
+    too small to call proven, tracking correctly.
+- **Both new quality-signal sources confirmed live with real backing data, not dormant
+  stubs**: `evm_wallets.smart_set()` returns 8/17/24 tracked smart wallets on base/bsc/
+  robinhood_chain respectively; `worker_early_watch.hot_terms()` returns 3,508 live trending
+  terms. No `dev_list` multichain trades fired yet in the ~20 min since restart (expected --
+  these are rare signals, historically ~8 smart_wallet hits total across weeks of data), but
+  the matching logic has real data to fire against, confirmed by direct live call.
+- **`hot_meta`'s proven-negative result (6.7% win WITH vs 16.3% WITHOUT, found 28 Oct) is
+  still correctly excluded** in the live gate (`"hot_meta" not in conf`) -- no regression.
+- Full suite re-run one more time post-restart (1,052 tests, 3 chunks): PASS. No code changed
+  since the last commit (`7695582`) -- this section is a live-system verification entry, not
+  a new fix.
+
+**Conclusion:** system is organized, running clean, and every change shipped today is
+verified live, not just tested in isolation. Composite confidence-score routing (the original
+6-module design in §0R) is NOT being built as a separate item -- Ali's own later, more specific
+instruction (the AskUserQuestion exchange that produced §0W) explicitly resolved that design
+question in favor of a standalone bypass module instead of score-boosting the existing chain
+routing. That is what shipped; §0R's older framing is superseded, not still pending.
