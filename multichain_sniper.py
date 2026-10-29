@@ -145,6 +145,40 @@ class Scanner:
                         and mcap <= _f("MC_MOMENTUM_MAX_MCAP_USD", 250_000))
         if not mcap or mcap < _f("MC_MIN_MCAP_USD", 3000) or (mcap > cap and not momentum and not big):
             return None
+        # 29 Oct 2026 (Ali): "if any of these [smart wallet, dev reputation, verified virality]
+        # should highlight for that particular coin ... that module should be working on this,
+        # on that coin specifically, not bifurcating it to any other module" -- the chain-specific
+        # gates below (base growth+volume, robinhood_chain mcap floor, solana blocked) are a
+        # DIFFERENT decision from the quality-signal check here and must stay untouched; this is
+        # the one required override path, placed before any of those gates so a real smart-wallet
+        # hit is never thrown away by a chain filter it happens to fail.
+        #
+        # evm_wallets.hit_n is the free, keyless, already-built base/bsc/robinhood_chain analogue
+        # of layer17's smart-wallet signal (GeckoTerminal pool trades, wallet early in >=3 winning
+        # pools -> "smart"). Checked the real evidence before wiring this in: 8 smart_wallet-tagged
+        # multichain trades exist all-time (all robinhood_chain; 0 base/bsc/solana hits so far),
+        # 37.5% win / -$124.24 net -- thin and not yet profitable, same shape as layer17's own
+        # smart_wallet result (also thin, also net-negative). CRITICALLY, 6 of those 8 (75%) sit
+        # BELOW the robinhood_chain $30k mcap floor and were being thrown away by that gate before
+        # ever reaching a book -- no evidence was accumulating on them at all. Routing smart_wallet
+        # hits into the dev_list book (shared with layer17's own quality-signal routing) regardless
+        # of chain-gate outcome fixes that: the coin trades on this signal alone, specifically, and
+        # real evidence keeps accumulating the way Ali asked for ("should also start working and
+        # giving some analysis on the paper testing at least"), without touching core1/core2/sprint/
+        # compound's existing filtered routing for anything else.
+        if p.get("pool"):
+            try:
+                import evm_wallets
+                if evm_wallets.hit_n(state, chain, p["pool"], now) >= 1:
+                    age_min_sw = max(0.0, (now - (p.get("created") or self.first[k][0])) / 60.0)
+                    raw_snapshot_sw = {"buys5": p.get("buys5"), "sells5": p.get("sells5"), "buyers5": p.get("buyers5"),
+                                        "vol5": p.get("vol5"), "vol24": p.get("vol24"), "chg5": p.get("chg5"), "chg1h": p.get("chg1h")}
+                    return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
+                            "liq": liq, "age_min": round(age_min_sw, 1), "confirmations": ["smart_wallet"],
+                            "lanes": ["dev_list"], "lane": "dev_list", "potential": "smart_wallet_signal",
+                            "tier": "probe", "raw": raw_snapshot_sw}
+            except Exception:  # noqa: BLE001
+                pass
         # 28 Oct 2026 (Ali): systematic audit of every confirmation tag, tag combination, and
         # numeric field survivable on closed trade records (mechanical tags turned out to carry
         # almost no edge once isolated per chain -- the earlier 'growth' finding was a base-chain
@@ -240,13 +274,11 @@ class Scanner:
         t0, m0 = self.first[k]
         if now - t0 >= 40 and mcap >= 1.25 * m0:
             conf.append("growth")
-        if p.get("pool"):
-            try:
-                import evm_wallets
-                if evm_wallets.hit_n(state, chain, p["pool"], now) >= 1:
-                    conf.append("smart_wallet")           # a wallet that was early in >=3 winning pools is buying
-            except Exception:  # noqa: BLE001
-                pass
+        # 29 Oct 2026: smart_wallet is no longer added to conf here -- any hit_n>=1 coin already
+        # returned early above (its own dev_list-routed quality-signal result), so this branch
+        # was unreachable dead code. Removed rather than left in place to avoid implying
+        # smart_wallet can still reach core1/core2/sprint/compound's conf-based tiering, which
+        # it can't anymore by design.
         if p["src"] == "stonkfun" and (p.get("grad") or 0) >= 0.3:
             conf.append("graduating")
         if b is not None and s is not None and s > 1.5 * max(b, 1):

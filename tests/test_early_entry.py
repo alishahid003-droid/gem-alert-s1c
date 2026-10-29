@@ -257,9 +257,11 @@ def test_mcap_and_conf_count_gate_blocks_two_confirmations():
     trades found entry mcap $5-20k + EXACTLY 3 confirmations + no hot_meta: n=29, win_rate=
     34.5%, net=+$10.43, vs everything else: n=388, win_rate=14.9%, net=-$438.82. A 2-
     confirmation entry (pressure+velocity, no smart_wallet) at a good mcap is exactly the
-    losing shape found at scale (n=194, win_rate=20.1%, net=-$224.67) and this excludes."""
+    losing shape found at scale (n=194, win_rate=20.1%, net=-$224.67) and this excludes.
+    29 Oct 2026: floor later widened to $3k (see test_mcap_and_conf_count_gate_passes_at_3k_floor
+    below) -- this test's $6,000 mcap sits inside both the old and new window so it's unaffected."""
     t = EarlyTracker(smart_fn=lambda: set())   # no tracked smart wallets -> smart_wallet can never fire
-    t.on_create(create("G1", mc=40.0), now=T0)   # 40 SOL * 150 = $6,000, inside the 5-20k window
+    t.on_create(create("G1", mc=40.0), now=T0)   # 40 SOL * 150 = $6,000, inside the 3-20k window
     dec = None
     for i in range(14):
         dec = t.on_trade(buy("G1", f"w{i}", 1.0, 40.0), now=T0 + 6.0 * i) or dec
@@ -268,7 +270,7 @@ def test_mcap_and_conf_count_gate_blocks_two_confirmations():
 
 def test_mcap_and_conf_count_gate_passes_exactly_three_confirmations():
     t = EarlyTracker(smart_fn=lambda: {"w3"})
-    t.on_create(create("G2", mc=40.0), now=T0)   # $6,000 mcap, inside 5-20k
+    t.on_create(create("G2", mc=40.0), now=T0)   # $6,000 mcap, inside 3-20k window
     dec = None
     for i in range(14):
         dec = t.on_trade(buy("G2", f"w{i}" if i != 3 else "w3", 1.0, 40.0), now=T0 + 6.0 * i) or dec
@@ -278,10 +280,39 @@ def test_mcap_and_conf_count_gate_passes_exactly_three_confirmations():
 
 def test_mcap_and_conf_count_gate_blocks_outside_mcap_window():
     t = EarlyTracker(smart_fn=lambda: {"w3"})
-    t.on_create(create("G3", mc=10.0), now=T0)   # 10 SOL * 150 = $1,500, below the $5k floor
+    t.on_create(create("G3", mc=10.0), now=T0)   # 10 SOL * 150 = $1,500, below the $3k floor too
     dec = None
     for i in range(14):
         dec = t.on_trade(buy("G3", f"w{i}" if i != 3 else "w3", 1.0, 10.0), now=T0 + 6.0 * i) or dec
+    assert dec is None
+
+
+def test_mcap_and_conf_count_gate_passes_at_3k_floor():
+    """29 Oct 2026 (Ali): "run multiple tests, multiple filters, multiple combinations" --
+    full combination sweep across every mcap band at conf==3+no hot_meta found conf==3 holds
+    up as a clean structural rule at EVERY band tested ($0-5k: 25.6% win, $5-8k: 41.7%, $8-12k:
+    30.0%, $12-20k: 37.5% -- conf==2 is bad at every one of the same bands). Widening the floor
+    to mcap $3-20k (from $5-20k) nearly doubles the unique-coin sample (29 vs 13 unique coins)
+    and raises net profit (+$51.13 vs +$10.43) at a slightly lower but still-strong win rate
+    (30.4% vs 34.5%). This is the new floor's own in-window boundary case: $3,300 mcap (22 SOL
+    * $150) passes; the prior test above ($1,500) still correctly fails below even this lower
+    floor."""
+    t = EarlyTracker(smart_fn=lambda: {"w3"})
+    t.on_create(create("G5", mc=22.0), now=T0)   # 22 SOL * 150 = $3,300, inside the new $3-20k floor
+    dec = None
+    for i in range(14):
+        dec = t.on_trade(buy("G5", f"w{i}" if i != 3 else "w3", 1.0, 22.0), now=T0 + 6.0 * i) or dec
+    assert dec and len(dec["confirmations"]) == 3
+
+
+def test_mcap_and_conf_count_gate_blocks_just_below_3k_floor():
+    """Boundary control for the $3k floor: $2,850 mcap (19 SOL * $150) sits just below it and
+    must still be refused, confirming the floor is a hard $3,000 cutoff, not a looser rounding."""
+    t = EarlyTracker(smart_fn=lambda: {"w3"})
+    t.on_create(create("G6", mc=19.0), now=T0)   # 19 SOL * 150 = $2,850, just below the $3k floor
+    dec = None
+    for i in range(14):
+        dec = t.on_trade(buy("G6", f"w{i}" if i != 3 else "w3", 1.0, 19.0), now=T0 + 6.0 * i) or dec
     assert dec is None
 
 
@@ -290,7 +321,7 @@ def test_mcap_and_conf_count_gate_env_override():
     import os
     os.environ["EARLY_GATE_MIN_MCAP_USD"] = "1000"
     try:
-        t.on_create(create("G4", mc=10.0), now=T0)   # $1,500, below default $5k floor, within overridden $1k floor
+        t.on_create(create("G4", mc=10.0), now=T0)   # $1,500, below default $3k floor, within overridden $1k floor
         dec = None
         for i in range(14):
             dec = t.on_trade(buy("G4", f"w{i}" if i != 3 else "w3", 1.0, 10.0), now=T0 + 6.0 * i) or dec

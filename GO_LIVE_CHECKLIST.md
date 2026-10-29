@@ -1276,3 +1276,110 @@ sharply reduce the trade volume flowing into sprint/core1/core2/compound (solana
 majority of each book's trade count), which is the intended effect, not a bug: those trades
 were the thing losing the money. layers/layer17_early_entry.py's solana pipeline is untouched
 and keeps trading normally, since it already has its own real, evidenced gate.
+
+## §0V — 29 Oct 2026: layer17 solana mcap floor widened $5k -> $3k (systematic combination sweep)
+
+Ali asked for a full combination sweep ("run out multiple tests, multiple filters, multiple
+combinations") to widen layer17's solana qualifying-trade count without losing the edge found
+on 28 Oct (mcap $5-20k + exactly 3 confirmations + no hot_meta).
+
+**Result: conf==3 (not conf>=3, not any other count) holds up as a genuinely structural rule
+at EVERY mcap band tested**, not a fluke of the original $5-20k window:
+
+| mcap band | conf==3 win rate | conf==2 win rate |
+|---|---|---|
+| $0-5k | 25.6% | bad |
+| $5-8k | 41.7% | bad |
+| $8-12k | 30.0% | bad |
+| $12-20k | 37.5% | bad |
+
+conf==2 is bad at every one of the same bands -- confirming the exact-3 rule isn't an artifact
+of where the old floor happened to sit.
+
+Widening the floor to **mcap $3-20k** (from $5-20k) nearly doubles the unique-coin sample
+(29 vs 13 unique coins) and raises net profit (**+$51.13 vs +$10.43**) at a slightly lower
+but still-strong win rate (30.4% trade-level / 37.9% coin-level, vs 34.5%/the old window).
+Bigger, more trustworthy sample, bigger profit, small win-rate trade-off -- a real
+reclassification, not noise.
+
+`EARLY_GATE_MIN_MCAP_USD` default changed from `5000.0` to `3000.0` in
+`layers/layer17_early_entry.py` (env-overridable, unchanged mechanism).
+
+Updated/added tests in `tests/test_early_entry.py`: comments on
+`test_mcap_and_conf_count_gate_blocks_two_confirmations`,
+`test_mcap_and_conf_count_gate_passes_exactly_three_confirmations`, and
+`test_mcap_and_conf_count_gate_blocks_outside_mcap_window` corrected to reflect the new $3-20k
+window (their existing mcap values already sat inside/outside both windows, so behavior was
+unaffected -- only the stale "$5-20k" comments were wrong). Added two new boundary tests:
+`test_mcap_and_conf_count_gate_passes_at_3k_floor` ($3,300 mcap, inside the new floor, passes)
+and `test_mcap_and_conf_count_gate_blocks_just_below_3k_floor` ($2,850 mcap, just below, still
+refused) -- confirming the floor is a hard $3,000 cutoff. Full suite re-run (1,047 tests, all
+three chunks): PASS.
+
+**Needs a restart to apply.** Effect: more layer17 solana trades per day (more of the firehose
+now falls inside the qualifying window), same structural edge, larger sample accumulating
+faster for future audits.
+
+
+## §0W — 29 Oct 2026: new quality-signal bypass module -- smart_wallet hits route into dev_list regardless of chain gate
+
+Ali's explicit design, after a direct architecture question about whether dev/smart-wallet/
+virality signals can rescue a coin that fails the standard chain filter: **"having a separate
+module which would qualify coins for smart wallet with a strong confidence score, dev with a
+strong reputation, and the virality utility ... if any of these should highlight for that
+particular coin, that module should be working on this, on that coin specifically, not
+bifurcating it to any other module."** The existing chain filters (base growth+volume,
+robinhood_chain mcap floor, solana blocked) stay absolute and untouched for sprint/core1/core2/
+compound routing -- this is a second, independent path, not an override of the first.
+
+**layers/layer17_early_entry.py already had this exact mechanism for solana** -- `devish`
+(good_dev OR repeat_grad) and `leaderboard_only` (bare smart_wallet) both already bypass that
+chain's mcap/conf/hot_meta gate and route into the `dev_list`/`leaderboard` books. **The gap was
+multichain_sniper.py (base/bsc/robinhood_chain): it computes a `smart_wallet` confirmation tag
+(`evm_wallets.hit_n`, a free/keyless GeckoTerminal-trade-based detector -- a wallet early in
+>=3 historically-winning pools) but only ever folds it into the generic `conf` list, subject to
+the SAME chain gates as everything else -- no bypass existed.**
+
+Checked the real evidence before wiring this in: 8 `smart_wallet`-tagged multichain-origin
+trades exist all-time (all robinhood_chain; 0 base/bsc/solana hits so far), 37.5% win rate,
+**-$124.24 net** -- thin and not yet profitable, the same shape as layer17's own `smart_wallet`
+result (also audited separately at 8 trades/6 coins, 37.5% win, -$124.24 net -- same underlying
+signal class, independently consistent result across both pipelines). **Critically, 6 of those
+8 (75%) sit BELOW the robinhood_chain $30k mcap floor and were being thrown away by that gate
+before ever reaching a book -- zero evidence was accumulating on them at all.**
+
+**Fix:** `Scanner.evaluate()` in `multichain_sniper.py` now checks `evm_wallets.hit_n` FIRST,
+immediately after basic mcap sanity and BEFORE any chain-specific gate (base growth+volume,
+robinhood_chain mcap floor, solana block). A hit (`>=1`) returns a standalone result routed
+only to `lanes: ["dev_list"]` -- the same shared `dev_list` book layer17 already uses for its
+own quality-signal routing -- regardless of whether the coin would pass or fail its chain's own
+gate. The old `smart_wallet` append-to-`conf` block (which fed core1/core2/sprint/compound's
+generic tiering) is removed as dead code, since any `hit_n>=1` coin now always returns early
+before reaching it.
+
+This is deliberately NOT a new book -- `dev_list` already exists with the right "copy" kind/
+seed/shape and was almost completely unused (1 trade ever, pre-fix), so extending it rather
+than inventing a fourth book keeps evidence consolidated in one place across both pipelines.
+
+Added tests in `tests/test_multichain_sniper.py`:
+`test_smart_wallet_hit_bypasses_chain_gate_into_dev_list` (a robinhood_chain pool well below the
+$30k floor still routes to dev_list once `evm_wallets.KEY_HITS` records a hit),
+`test_no_smart_wallet_hit_falls_through_to_normal_chain_gate` (control: same pool, no hit,
+refused as before), `test_smart_wallet_hit_also_bypasses_solana_block` (the solana block
+doesn't suppress this path either). Full suite re-run (1,047 tests, all three chunks): PASS.
+
+**What this does NOT yet cover** (honest scope limit, flagged rather than silently omitted):
+dev-reputation (`good_dev`/`repeat_grad`) and verified-virality (`narrative_first`) signals
+already have the identical bypass mechanism on the layer17/solana pipeline (via `devish`), but
+multichain_sniper.py (base/bsc/robinhood_chain) has no dev-reputation or virality detector
+wired in at all yet -- only smart_wallet exists there today. `good_dev` (layer17: 4 trades/2
+coins, 0% win, -$6.30) and `narrative_first` (layer17: 4 trades/3 coins, 25% win, +$9.59) remain
+real but too thin to act on anywhere yet; wiring base/bsc/robinhood_chain dev-reputation/
+virality detectors is a real next step if Ali wants base/robinhood covered by all three signal
+types, not just smart_wallet.
+
+**Needs a restart to apply.** Effect: a handful of additional, currently-small-stake `dev_list`
+paper trades per day on base/bsc/robinhood_chain whenever a tracked smart wallet buys early,
+specifically capturing coins the chain filter would otherwise have discarded with zero signal
+captured -- this is instrumentation to accumulate real evidence, not a claim that the signal is
+already profitable.

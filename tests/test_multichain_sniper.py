@@ -243,3 +243,52 @@ def test_disabled_chains_env_override(monkeypatch):
     finally:
         monkeypatch.delenv("MC_DISABLED_CHAINS", raising=False)
         importlib.reload(m)
+
+
+def test_smart_wallet_hit_bypasses_chain_gate_into_dev_list(monkeypatch):
+    """29 Oct 2026 (Ali): "if any of these [smart wallet, dev reputation, verified virality]
+    should highlight for that particular coin ... that module should be working on this, on
+    that coin specifically, not bifurcating it to any other module." A coin with a confirmed
+    smart_wallet hit (evm_wallets.hit_n>=1) must route into dev_list regardless of whether it
+    would pass/fail the chain's own gate -- here, a robinhood_chain pool well BELOW the $30k
+    mcap floor (which alone would return None) still produces a dev_list-only result once the
+    smart-wallet hit is recorded in state. Mirrors 6 of the real 8 historical smart_wallet hits,
+    which sat below this exact floor and were being discarded with zero evidence captured."""
+    import evm_wallets
+    now = 10_000.0
+    pool_addr = "0xsmart_pool"
+    state.set_value(evm_wallets.KEY_HITS, {f"robinhood_chain|{pool_addr}": {"n": 3, "ts": now}})
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh_below_floor", chain="robinhood_chain", mcap=7_000.0,
+                          pool=pool_addr, created_ago=120), now)
+    assert d is not None
+    assert d["lanes"] == ["dev_list"] and d["lane"] == "dev_list"
+    assert d["confirmations"] == ["smart_wallet"]
+    assert d["tier"] == "probe"
+
+
+def test_no_smart_wallet_hit_falls_through_to_normal_chain_gate():
+    """Control for the above: with no recorded smart_wallet hit, the same below-floor
+    robinhood_chain pool is refused exactly as before (floor still applies to everyone else)."""
+    now = 10_000.0
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh_below_floor2", chain="robinhood_chain", mcap=7_000.0,
+                          pool="0xno_hit_pool", created_ago=120), now)
+    assert d is None
+
+
+def test_smart_wallet_hit_also_bypasses_solana_block(monkeypatch):
+    """The solana chain-level block (MC_SOLANA_ENABLED, default off) is a different decision
+    from the smart_wallet override and must not suppress it either -- a solana coin with a
+    recorded smart-wallet hit still routes to dev_list even though plain solana trades are
+    blocked by default."""
+    import evm_wallets
+    now = 10_000.0
+    pool_addr = "0xsmart_sol_pool"
+    state.set_value(evm_wallets.KEY_HITS, {f"solana|{pool_addr}": {"n": 4, "ts": now}})
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xsol_smart", chain="solana", mcap=12_000.0,
+                          pool=pool_addr, created_ago=60), now)
+    assert d is not None
+    assert d["lanes"] == ["dev_list"]
+    assert d["confirmations"] == ["smart_wallet"]

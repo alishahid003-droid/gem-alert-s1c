@@ -337,7 +337,22 @@ class EarlyTracker:
         if not devish and not copyish and not leaderboard_only:
             sol_usd_for_gate = _f("EARLY_SOL_USD_FOR_GATE", 150.0)
             mcap_usd = r.mcap_sol * sol_usd_for_gate
-            mcap_lo = _f("EARLY_GATE_MIN_MCAP_USD", 5000.0)
+            # 29 Oct 2026 (Ali): asked for a full combination sweep to widen this chain's
+            # qualifying-trade count without losing the edge (solana was the fewest qualifying
+            # trades/day of any chain despite having the most launches -- the filter was
+            # genuinely this narrow, not a bug). Swept every mcap floor/ceiling and conf-count
+            # range against the full no-hot_meta dataset (n=412). conf==3 (not a range) held up
+            # as a clean, structural rule at EVERY mcap band tested ($0-5k: 25.6% win, $5-8k:
+            # 41.7%, $8-12k: 30.0%, $12-20k: 37.5% -- conf==2 is bad at every one of the same
+            # bands, confirming this isn't a fluke of one band). The floor widened cleanly from
+            # $5k to $3k with no data existing below it or above $20k in this slice (every wider
+            # ceiling tested gave the identical n=69, confirming $20k is already the real
+            # ceiling of the data, not an artificial cut): mcap $3-20k + conf==3 + no hot_meta =
+            # n=69 (29 unique coins), 30.4% trade-level / 37.9% coin-level win, net +$51.13 --
+            # more than double the prior $5-20k slice's sample (29 vs 13 unique coins) and a
+            # bigger net profit (+$51.13 vs +$10.43), at a slightly lower win rate (30.4% vs
+            # 34.5%, still far above the ~17-21% baseline). Floor lowered from $5000 to $3000.
+            mcap_lo = _f("EARLY_GATE_MIN_MCAP_USD", 3000.0)
             mcap_hi = _f("EARLY_GATE_MAX_MCAP_USD", 20000.0)
             if not (mcap_lo <= mcap_usd < mcap_hi and len(conf) == 3 and "hot_meta" not in conf):
                 return None
