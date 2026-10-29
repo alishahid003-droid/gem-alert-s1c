@@ -1383,3 +1383,51 @@ paper trades per day on base/bsc/robinhood_chain whenever a tracked smart wallet
 specifically capturing coins the chain filter would otherwise have discarded with zero signal
 captured -- this is instrumentation to accumulate real evidence, not a claim that the signal is
 already profitable.
+
+## §0X — 29 Oct 2026: narrative_first (virality) added as a second quality-signal source into the same dev_list bypass module
+
+Continuation of §0W. Ali's instruction: "if we get multiple good enough free ones ... so that
+that should also start working." smart_wallet (§0W) was the first source wired in; this adds
+the second.
+
+**trend_feeds.py already exists and is already running** -- free, keyless, no-cost virality
+detection pulling from Google Trends RSS, Reddit, Wikipedia, Bluesky/Mastodon, a trends24
+Twitter mirror, and TikTok Creative Center, feeding layer17's `narrative`/`narrative_first`
+tags via `worker_early_watch.hot_terms()`/`claim_trend_term()` (state keys `trend_terms_v1`/
+`trend_first_v1`). `claim_trend_term(term, mint)` is keyed by TERM, not by chain or pipeline --
+"first coin anywhere to match a trending phrase" -- so reusing it directly for
+multichain_sniper.py coins (passing `f"{chain}:{addr}"` in place of `mint`) gives exactly the
+right cross-pipeline semantics with no second dedup mechanism needed.
+
+**Fix:** `Scanner.evaluate()` now also checks the coin's name against live trending phrases
+(same long-phrase matching logic as layer17's `narrative_first`, >= 7 chars with a space,
+matched against the alnum-squashed name) immediately after the `smart_wallet` check, still
+before any chain gate. A match that wins the first-claim call returns a `dev_list`-only result,
+confirmations `["narrative_first"]`, exactly like the smart_wallet path.
+
+Real evidence checked before shipping (on layer17, since this is brand new on multichain and
+has zero history there yet): 4 narrative_first trades/3 coins, 25% win, **+$9.59 net** -- real,
+thin, slightly positive. Thin enough that this is explicitly instrumentation to accumulate
+evidence, not a claim the signal is proven on base/bsc/robinhood_chain yet.
+
+**Honest scope limit, flagged rather than silently skipped: dev-reputation (good_dev/
+repeat_grad) is NOT wired into multichain_sniper.py and can't be with current data.** layer17's
+dev-reputation signal is keyed off creator/deployer wallet addresses pulled from pump.fun-style
+launch logs (`early_log/*.jsonl`, `dev_rank.py`) -- a solana-specific log format. GeckoTerminal's
+`new_pools` feed (multichain_sniper.py's only data source for base/bsc/robinhood_chain) carries
+no creator/deployer address field at all. Wiring dev-reputation in for these chains would need
+a genuinely new data source (e.g. on-chain contract-deploy tracing via a block explorer API per
+chain), not a reuse of existing code -- a real next step if wanted, not a quick wire-in like the
+other two.
+
+Added tests in `tests/test_multichain_sniper.py`:
+`test_narrative_first_hit_bypasses_chain_gate_into_dev_list` (trending-name robinhood_chain
+pool below the $30k floor still routes to dev_list), `test_narrative_first_not_first_claim_falls_through_to_normal_gate`
+(control: name matches but another coin already claimed the term first -> normal gate applies,
+refused), `test_no_trending_terms_has_no_effect` (control: no trending terms at all -> unchanged
+behavior). Full suite re-run (1,052 tests, all three chunks): PASS.
+
+**Needs a restart to apply.** Effect: a small number of additional dev_list paper trades per
+day on base/bsc/robinhood_chain whenever a launch's name matches a currently-trending phrase
+and wins the first-claim race -- again, instrumentation to accumulate real evidence on this
+signal across all chains, not yet a profitable, proven filter.

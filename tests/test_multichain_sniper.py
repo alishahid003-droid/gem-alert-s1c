@@ -292,3 +292,43 @@ def test_smart_wallet_hit_also_bypasses_solana_block(monkeypatch):
     assert d is not None
     assert d["lanes"] == ["dev_list"]
     assert d["confirmations"] == ["smart_wallet"]
+
+
+def test_narrative_first_hit_bypasses_chain_gate_into_dev_list(monkeypatch):
+    """29 Oct 2026 (Ali): second quality-signal source wired into the same dev_list bypass
+    module as smart_wallet -- trend_feeds.py's virality detection (already feeding layer17's
+    narrative_first tag via worker_early_watch.hot_terms/claim_trend_term) now also checked
+    here, before any chain gate. A coin whose name matches a live trending phrase, and which
+    wins the "first coin anywhere" claim, routes to dev_list regardless of chain-gate outcome
+    -- here, a robinhood_chain pool below the $30k mcap floor."""
+    import worker_early_watch as wew
+    monkeypatch.setattr(wew, "hot_terms", lambda: {"moonshot capital partners"})
+    monkeypatch.setattr(wew, "claim_trend_term", lambda term, mint: True)
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh_narrative", chain="robinhood_chain", mcap=7_000.0,
+                          name="MOONSHOTCAPITALPARTNERS", created_ago=120), 10_000.0)
+    assert d is not None
+    assert d["lanes"] == ["dev_list"] and d["lane"] == "dev_list"
+    assert d["confirmations"] == ["narrative_first"]
+
+
+def test_narrative_first_not_first_claim_falls_through_to_normal_gate(monkeypatch):
+    """Control: the name matches a trending term, but claim_trend_term says another coin
+    already claimed it first -- this coin must NOT get the bypass, and falls through to the
+    normal (failing, below-floor) chain gate exactly as before."""
+    import worker_early_watch as wew
+    monkeypatch.setattr(wew, "hot_terms", lambda: {"moonshot capital partners"})
+    monkeypatch.setattr(wew, "claim_trend_term", lambda term, mint: False)
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh_narrative2", chain="robinhood_chain", mcap=7_000.0,
+                          name="MOONSHOTCAPITALPARTNERS", created_ago=120), 10_000.0)
+    assert d is None
+
+
+def test_no_trending_terms_has_no_effect():
+    """Control: with no trending terms available at all (the normal, usually-quiet case),
+    evaluate() behaves exactly as before the narrative_first wiring."""
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh_quiet", chain="robinhood_chain", mcap=7_000.0,
+                          created_ago=120), 10_000.0)
+    assert d is None

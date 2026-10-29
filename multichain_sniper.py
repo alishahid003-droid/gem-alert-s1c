@@ -179,6 +179,49 @@ class Scanner:
                             "tier": "probe", "raw": raw_snapshot_sw}
             except Exception:  # noqa: BLE001
                 pass
+        # 29 Oct 2026 (Ali): second quality-signal source for the same bypass module, per his
+        # instruction to wire in "multiple good enough free ones" once the first (smart_wallet,
+        # above) was live. trend_feeds.py is a free, keyless, already-built virality detector
+        # (Google Trends/Reddit/Wikipedia/Bluesky/Mastodon/trends24-Twitter-mirror/TikTok) that
+        # already feeds layer17's solana pipeline's "narrative_first" tag (worker_early_watch.
+        # claim_trend_term, state key trend_first_v1, keyed by TERM not by chain/pipeline -- so
+        # "first coin anywhere to match a trending phrase" is exactly the right semantics here,
+        # shared cleanly across both pipelines rather than needing a second dedup mechanism).
+        # layer17's own narrative_first evidence: 4 trades/3 coins, 25% win, +$9.59 net -- real
+        # but too thin alone to gate on; same principle as smart_wallet above: wire it in so
+        # evidence accumulates on base/bsc/robinhood_chain too, where it has never run at all
+        # (GeckoTerminal's new_pools feed has a name/symbol field, matched the same way layer17
+        # matches mint/symbol against trending terms).
+        #
+        # Honest scope note: dev-reputation (good_dev/repeat_grad) does NOT get the same
+        # treatment here -- layer17's dev-reputation signals are keyed off creator/deployer
+        # wallet addresses from pump.fun-style launch logs (early_log/*.jsonl, dev_rank.py),
+        # and GeckoTerminal's new_pools feed (this file's only data source) carries no
+        # creator/deployer field at all for base/bsc/robinhood_chain. Wiring dev-reputation in
+        # here would require a genuinely new data source (e.g. on-chain contract-deploy tracing
+        # via a block explorer API), not just reusing existing code -- flagged rather than
+        # silently skipped.
+        try:
+            import worker_early_watch as _wew
+            terms = _wew.hot_terms()
+            if terms:
+                nm = (p.get("name") or "")
+                sq = "".join(ch for ch in nm.lower() if ch.isalnum())
+                hit_term = None
+                for t in terms:
+                    if " " in t and len(t) >= 7 and t.replace(" ", "") in sq:
+                        hit_term = t
+                        break
+                if hit_term and _wew.claim_trend_term(hit_term, f"{chain}:{p['addr']}"):
+                    age_min_nf = max(0.0, (now - (p.get("created") or self.first[k][0])) / 60.0)
+                    raw_snapshot_nf = {"buys5": p.get("buys5"), "sells5": p.get("sells5"), "buyers5": p.get("buyers5"),
+                                        "vol5": p.get("vol5"), "vol24": p.get("vol24"), "chg5": p.get("chg5"), "chg1h": p.get("chg1h")}
+                    return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
+                            "liq": liq, "age_min": round(age_min_nf, 1), "confirmations": ["narrative_first"],
+                            "lanes": ["dev_list"], "lane": "dev_list", "potential": "narrative_first_signal",
+                            "tier": "probe", "raw": raw_snapshot_nf}
+        except Exception:  # noqa: BLE001
+            pass
         # 28 Oct 2026 (Ali): systematic audit of every confirmation tag, tag combination, and
         # numeric field survivable on closed trade records (mechanical tags turned out to carry
         # almost no edge once isolated per chain -- the earlier 'growth' finding was a base-chain
