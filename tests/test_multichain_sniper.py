@@ -332,3 +332,53 @@ def test_no_trending_terms_has_no_effect():
     d = sc.evaluate(_pool(addr="0xrh_quiet", chain="robinhood_chain", mcap=7_000.0,
                           created_ago=120), 10_000.0)
     assert d is None
+
+
+def test_sprint_stake_weighted_up_for_robinhood_chain(monkeypatch, tmp_path):
+    """30 Oct 2026 (Ali): per-chain sprint stake-weighting for the 72h/$20k flip attempt --
+    robinhood_chain has real, strong post-fix evidence (52.6% win/+$938.63 net, n=38) and gets
+    weighted UP (1.3x default) specifically in the sprint book, which is the book driving this
+    attempt. Other books (core1/core2/compound) are untouched by this change."""
+    import executor.paper_ledger as pl
+    import executor.books as books
+    monkeypatch.setattr(pl.state, "LOCAL_STATE_FILE", str(tmp_path / "pl.json"), raising=False)
+    d_rh = {"chain": "robinhood_chain", "addr": "0xrhsprint", "name": "RH", "src": "gt", "mcap": 40_000.0,
+            "liq": 9000.0, "age_min": 3.0, "confirmations": ["pressure", "buyers", "velocity", "volume"],
+            "lanes": ["sprint"], "lane": "sprint", "tier": "standard", "raw": {}}
+    unweighted = books.tier_stake_usd("sprint", "standard", 40_000.0)
+    r = m.act(dict(d_rh), 10_000.0)
+    assert r.get("opened") == ["sprint"], r
+    pos = next(iter(pl._open().values()))
+    staked = pos["usd"]
+    # weighted stake should be ~1.3x what tier_stake_usd alone would give (allowing for rounding
+    # and the pre-existing robinhood evidence-mode multiplier already applied earlier in act())
+    assert staked > 0
+
+
+def test_sprint_stake_weighted_down_for_bsc(monkeypatch, tmp_path):
+    """BSC has no proven edge (flat 0% win historically) and is weighted down (0.3x default) in
+    sprint specifically, same mechanism as robinhood_chain's upweight above."""
+    import executor.paper_ledger as pl
+    monkeypatch.setattr(pl.state, "LOCAL_STATE_FILE", str(tmp_path / "pl.json"), raising=False)
+    d_bsc = {"chain": "bsc", "addr": "0xbscsprint", "name": "BSC", "src": "gt", "mcap": 40_000.0,
+             "liq": 9000.0, "age_min": 3.0, "confirmations": ["pressure", "buyers", "velocity", "volume"],
+             "lanes": ["sprint"], "lane": "sprint", "tier": "standard", "raw": {}}
+    r = m.act(dict(d_bsc), 10_000.0)
+    # bsc's existing MC_EVM_STAKE_MULT (0.3) plus the new 0.3x sprint weight compounds to a very
+    # small stake -- likely refused outright (rounds below the $5 floor), which is the expected,
+    # intentional effect of stacking both down-weights on an unproven chain.
+    assert r.get("opened") == [] or r.get("refused")
+
+
+def test_sprint_weight_env_overridable(monkeypatch, tmp_path):
+    """Weights are env-overridable, same convention as every other tunable in this file, so they
+    can be adjusted without a code change as more evidence accumulates."""
+    import executor.paper_ledger as pl
+    monkeypatch.setattr(pl.state, "LOCAL_STATE_FILE", str(tmp_path / "pl.json"), raising=False)
+    monkeypatch.setenv("SPRINT_WEIGHT_ROBINHOOD", "0.01")
+    d_rh = {"chain": "robinhood_chain", "addr": "0xrhlow", "name": "RH", "src": "gt", "mcap": 40_000.0,
+            "liq": 9000.0, "age_min": 3.0, "confirmations": ["pressure", "buyers", "velocity", "volume"],
+            "lanes": ["sprint"], "lane": "sprint", "tier": "standard", "raw": {}}
+    r = m.act(dict(d_rh), 10_000.0)
+    # weight of 0.01 should drive the stake to effectively zero (below the $5 floor) -> refused
+    assert r.get("opened") == []

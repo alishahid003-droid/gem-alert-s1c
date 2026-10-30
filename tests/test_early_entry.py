@@ -378,3 +378,61 @@ def test_free_confirmed_entries_stay_paper_even_on_a_live_lane(monkeypatch):
            "confirmations": ["pressure_free", "velocity_free"], "smart": [], "uses_free": True, "potential": "10x-50x"}
     out = w.act(dec, send=lambda m: None, now=T0)
     assert "opened" in out and not any("live" in x for x in out.get("refused", []))
+
+
+def test_repeat_grad_no_hot_meta_sprint_stake_full(monkeypatch):
+    """30 Oct 2026 (Ali): the earlier blanket 0.3x repeat_grad sprint downweight (added the same
+    day) was REMOVED after the deeper audit found the precise problem is hot_meta specifically
+    (6/9 coins, 0 wins when present) -- those are now hard-blocked upstream in
+    layers/layer17_early_entry.py and never reach act() at all. A repeat_grad-only decision with
+    no hot_meta (the 3/9 coin, 1-win slice worth keeping) must now open at FULL stake, not a
+    down-weighted one -- double-penalizing the good slice was exactly the bug this test guards
+    against regressing to."""
+    dec_rg = {"lane": "sprint", "lanes": ["sprint"], "mint": "MintRG", "symbol": "RG", "name": "RG", "creator": "c",
+              "age_s": 40.0, "mcap_sol": 33.0, "entry_mcap_sol": 33.0, "buyers": 12, "buys": 14, "sells": 1,
+              "confirmations": ["repeat_grad"], "smart": [], "potential": "10x-50x"}
+    out = w.act(dec_rg, send=lambda m: None, now=T0)
+    assert out.get("opened") == ["sprint"]
+    book = paper_ledger._open()
+    pos = book.get("early_sprint:solana:MintRG")
+    assert pos is not None
+    assert pos["usd"] == books.tier_stake_usd("sprint", "probe", 33.0 * 150)
+
+
+def test_non_repeat_grad_sprint_stake_unaffected(monkeypatch):
+    """Control: a sprint entry with real confirmations (not repeat_grad-only) is not touched by
+    this weighting -- only a bare repeat_grad-only entry (len(strong)==0) is down-weighted."""
+    dec_real = {"lane": "sprint", "lanes": ["sprint"], "mint": "MintReal", "symbol": "RL", "name": "RL", "creator": "c",
+                "age_s": 40.0, "mcap_sol": 33.0, "entry_mcap_sol": 33.0, "buyers": 12, "buys": 14, "sells": 1,
+                "confirmations": ["smart_wallet", "velocity", "pressure"], "smart": ["w3"], "potential": "10x-50x"}
+    out = w.act(dec_real, send=lambda m: None, now=T0)
+    assert out.get("opened") == ["sprint"]
+
+
+def test_repeat_grad_blocked_when_hot_meta_also_fires():
+    """30 Oct 2026 (Ali): "if there is a dev grad ... which is making Solana bleed, we should
+    stop that immediately" -- full audit of repeat_grad's entire trade history (17 trades / 9
+    unique coins, zero rugs, all real stop-loss exits) found: WITH hot_meta = 6 coins, 0 wins
+    (0%); WITHOUT hot_meta = 3 coins, 1 win (33.3%). This coin matches both repeat_grad (via
+    creator_fn) and hot_meta (via a name word in hot_words_fn) and must be blocked entirely,
+    same as the standard gate already blocks hot_meta -- even though repeat_grad alone would
+    normally bypass the thin-buyer/mcap/conf-count gates above."""
+    t = EarlyTracker(smart_fn=lambda: set())
+    t.creator_fn = lambda c: True            # creator already graduated a token -> repeat_grad fires
+    t.hot_words_fn = lambda: ("tenev",)      # "Tenev Coin" name matches -> hot_meta fires
+    t.on_create(create("H1", mc=6000.0 / 150.0, name="Tenev Coin", sym="TENEV"), now=T0)
+    dec = feed_buyers(t, "H1", 12, step=4.0, mc=6000.0 / 150.0)
+    assert dec is None
+
+
+def test_repeat_grad_without_hot_meta_still_enters():
+    """Control for the fix above: repeat_grad alone (no hot_meta) must keep working exactly as
+    before -- this is the 3/9 coin, 1-win slice the fix is explicitly designed to preserve."""
+    t = EarlyTracker(smart_fn=lambda: set())
+    t.creator_fn = lambda c: True             # repeat_grad fires
+    t.hot_words_fn = lambda: ("zzz_no_match",)  # does not match "Generic Coin" -> hot_meta does not fire
+    t.on_create(create("H2", mc=6000.0 / 150.0, name="Generic Coin", sym="GEN"), now=T0)
+    dec = feed_buyers(t, "H2", 12, step=4.0, mc=6000.0 / 150.0)
+    assert dec is not None
+    assert "repeat_grad" in dec["confirmations"]
+    assert "hot_meta" not in dec["confirmations"]

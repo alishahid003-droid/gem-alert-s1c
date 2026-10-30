@@ -242,6 +242,14 @@ def act(decision: dict, send=None, now=None) -> dict:
         else:
             ok, why = books.can_open(lane, strong=len(strong) >= 4)
             stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
+        # 30 Oct 2026 (Ali): REMOVED the blanket repeat_grad sprint downweight added earlier
+        # today. Superseded by a sharper, evidenced fix applied upstream in
+        # layers/layer17_early_entry.py: repeat_grad coins that ALSO carry hot_meta are now
+        # hard-blocked before a decision is ever produced (full audit: 6/9 coins, 0 wins, 0%),
+        # so they never reach this function at all. The remaining repeat_grad coins (no
+        # hot_meta: 3/9 coins, 1 win, 33.3%) are exactly the slice worth keeping at full
+        # strength -- a blanket 0.3x downweight here would now only ever hit that good slice,
+        # double-penalizing the one part of repeat_grad with real evidence of working.
         if ok and not stake and not free_paper_only:          # NIGHT TUNE 14 Oct: paper book stake can round to 0; a live lane still gets its capped live stake
             try:
                 from executor import pumpportal_exec as _px

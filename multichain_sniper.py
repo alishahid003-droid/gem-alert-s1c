@@ -444,6 +444,22 @@ def act(d: dict, now: Optional[float] = None) -> dict:
             mult = _f("MC_RHC_STAKE_MULT", 0.6) if d["chain"] != "bsc" else _f("MC_EVM_STAKE_MULT", 0.3)
             stake = round(stake * (mult or 0.3), 2)
             stake = stake if stake >= 5.0 else 0.0
+        # 30 Oct 2026 (Ali): per-chain sprint stake-weighting for the 72h/$20k flip attempt --
+        # weight stakes toward chains with a REAL, currently-proven edge rather than treat every
+        # qualifying chain equally. Checked live post-restart data before setting these (not a
+        # guess): robinhood_chain 52.6% win/+$938.63 net (n=38) and separately 83.3%/+$432.99
+        # (n=6) on a fresher slice -- genuinely strong, real money-like performance; base 50-100%
+        # win on small samples (n=4-13), real and positive but thinner. Solana via THIS file
+        # stays blocked entirely already (MC_SOLANA_ENABLED, see the gate above) -- this weighting
+        # only ever applies to base/robinhood_chain/bsc, chains that already passed their own
+        # quality gate. Only affects sprint (the book driving this specific 72h attempt); other
+        # books keep their existing stake sizing unchanged.
+        if stake and lane == "sprint":
+            sprint_w = {"robinhood_chain": _f("SPRINT_WEIGHT_ROBINHOOD", 1.3), "robinhood": _f("SPRINT_WEIGHT_ROBINHOOD", 1.3),
+                        "base": _f("SPRINT_WEIGHT_BASE", 1.0), "bsc": _f("SPRINT_WEIGHT_BSC", 0.3),
+                        "solana": _f("SPRINT_WEIGHT_SOLANA", 0.3)}.get(d["chain"], 1.0)
+            stake = round(stake * sprint_w, 2)
+            stake = stake if stake >= 5.0 else 0.0
         if not stake:
             refused.append(f"{lane}: {reason}")
             continue

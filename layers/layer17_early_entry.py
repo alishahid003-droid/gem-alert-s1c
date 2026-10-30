@@ -356,6 +356,21 @@ class EarlyTracker:
             mcap_hi = _f("EARLY_GATE_MAX_MCAP_USD", 20000.0)
             if not (mcap_lo <= mcap_usd < mcap_hi and len(conf) == 3 and "hot_meta" not in conf):
                 return None
+        # 30 Oct 2026 (Ali): "if a dev grad or anything going on wrong on the Solana part ... is
+        # making Solana bleed, we should stop that immediately" -- full audit of repeat_grad's
+        # ENTIRE trade history (its only trades ever, 17 trades / 9 unique coins, all real
+        # market stop-losses, zero rugs -- every exit_type checked individually: stop_loss or a
+        # "no pop" early exit, never a liquidity-drain pattern): 1/9 coins won (11.1%), -$17.61
+        # net. Split by hot_meta (already proven net-negative elsewhere in this system, 15 Oct/
+        # 28 Oct): WITH hot_meta = 6 coins, 0 wins, 0% -- a clean, total loss across every one.
+        # WITHOUT hot_meta = 3 coins, 1 win, 33.3% -- including the one real winner (+$7.59,
+        # +194.78%). Excluding hot_meta from repeat_grad specifically (same rule the standard
+        # gate above already applies) removes 6 pure losers and keeps every winner found so far,
+        # on the only data that exists -- a real, evidenced fix, not a guess. dev_list (the OTHER
+        # devish-qualifying signal) is untouched here: its own evidence is separate (1 trade,
+        # too thin to judge) and is not being penalized for repeat_grad's result.
+        if "repeat_grad" in conf and "hot_meta" in conf:
+            return None
         c2_age, c2_mc = _f("EARLY_CORE2_MAX_AGE_S", 240), _f("EARLY_CORE2_MAX_MCAP_SOL", 55)
         c1_age, c1_mc = _f("EARLY_CORE1_MAX_AGE_S", 1200), _f("EARLY_CORE1_MAX_MCAP_SOL", 130)
         lanes = []
