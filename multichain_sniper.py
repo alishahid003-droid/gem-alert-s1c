@@ -439,9 +439,18 @@ def act(d: dict, now: Optional[float] = None) -> dict:
         tier = d.get("tier", "probe")
         can, reason = books.can_open(lane, strong=tier in ("standard", "conviction") and len(d["confirmations"]) >= 5)
         stake = books.tier_stake_usd(lane, tier, d.get("mcap")) if can else 0.0
-        if stake and d["chain"] in ("bsc", "robinhood_chain", "robinhood"):
-            # Oct 13 2026 first run: bsc 0 wins / 9 (avg -81%), robinhood 0 / 5 (avg -54%): evidence mode.
-            mult = _f("MC_RHC_STAKE_MULT", 0.6) if d["chain"] != "bsc" else _f("MC_EVM_STAKE_MULT", 0.3)
+        # 31 Oct 2026 (Ali): removed robinhood_chain from this Oct-13-evidence downweight.
+        # That 0.6x was based on a 5-trade, 0-win sample from BEFORE the 28 Oct fix to
+        # layer14_revival's dead-on-arrival handling (robinhood_chain's actual problem back
+        # then -- a feed/revival bug, not a strategy flaw). Current real evidence (cited below,
+        # 30 Oct comment) is 52.6% win / +$938.63 net on n=38, and a fresher 83.3% on n=6 --
+        # this old block was silently halving that weighting underneath the newer one
+        # (0.6 x 1.3 = 0.78x actual, not the 1.3x the newer comment describes), which Ali
+        # asked to fix when moving robinhood_chain + base to full weight. bsc stays
+        # downweighted here -- it's also in DISABLED_CHAINS by default, so this mostly guards
+        # the case it's manually re-enabled without fresh evidence.
+        if stake and d["chain"] == "bsc":
+            mult = _f("MC_EVM_STAKE_MULT", 0.3)
             stake = round(stake * (mult or 0.3), 2)
             stake = stake if stake >= 5.0 else 0.0
         # 30 Oct 2026 (Ali): per-chain sprint stake-weighting for the 72h/$20k flip attempt --
