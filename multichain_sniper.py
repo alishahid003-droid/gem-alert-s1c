@@ -247,6 +247,21 @@ class Scanner:
         # n=114/82 coins -- the floor change is a real reclassification, not noise.
         if rhc and mcap < _f("MC_RHC_MIN_MCAP_USD", 30_000):
             return None
+        # 31 Oct 2026 (Ali): combined the $30k floor above (still correct, re-confirmed on the
+        # newest data too) with a NEW $50k ceiling -- Ali's ask was "a combination... a slab...
+        # from your finding to the previous finding" rather than picking one over the other.
+        # Fine-grained mcap slab on robinhood_chain's most recent real trades (n=24, both the
+        # current state and the Oct 26 pre-reset snapshot combined):
+        #   $30-40k: 72.7% win, EV/$1=+0.68 (n=11)   $40-50k: 50.0% win, EV/$1=+0.11 (n=6)
+        #   $50-60k: 0.0% win, EV/$1=-0.64 (n=7, 6 unique coins, every one a loss)
+        # A clean, monotonic decay, not noise -- and it reconciles with the 28 Oct history
+        # above, not contradicts it: that audit already showed the old >=$50k floor's win rate
+        # eroding over time (56.3% -> 54.5% -> 40.0% across its own checkpoints) before the
+        # floor was dropped to $30k with no ceiling. This is that same erosion continuing past
+        # where that audit left off, now crossing into a real negative band. $30-50k (where
+        # both the old and new data agree) stays open; only $50k+ is newly excluded.
+        if rhc and mcap >= _f("MC_RHC_MAX_MCAP_USD_FLOOR", 50_000):
+            return None
         # 28 Oct 2026 (Ali): asked to combine filters on robinhood_chain to push the >=50k
         # win rate higher. Within that >=50k slice (n=29), every mechanical confirmation is
         # universal (need=5 already forces pressure/buyers/velocity/volume/fresh on all of

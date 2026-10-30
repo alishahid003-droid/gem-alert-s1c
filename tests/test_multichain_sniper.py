@@ -80,6 +80,30 @@ def test_robinhood_chain_mcap_floor_env_override(monkeypatch):
     assert d and d["chain"] == "robinhood_chain"
 
 
+def test_robinhood_chain_rejects_50k_plus_entry_mcap():
+    """31 Oct 2026 (Ali): "a combination... a slab... from your finding to the previous
+    finding" -- fine mcap slab on robinhood_chain's most recent real trades (n=24, current +
+    Oct 26 snapshot): $30-40k 72.7% win/EV+0.68 (n=11), $40-50k 50.0% win/EV+0.11 (n=6),
+    $50-60k 0.0% win/EV-0.64 (n=7, 6 unique coins, every one a loss) -- a clean, monotonic
+    decay. Reconciles with (doesn't contradict) the 28 Oct history above: that audit already
+    showed the old >=$50k floor eroding over time before the floor moved to $30k with no
+    ceiling; this is that same erosion continuing past where that audit left off. The
+    still-strong $30-50k band (where old and new data agree) stays open; only $50k+ is newly
+    excluded."""
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrh49k", chain="robinhood_chain", mcap=49_999.0), 10_000.0)
+    assert d and d["chain"] == "robinhood_chain"
+    assert sc.evaluate(_pool(addr="0xrh50k", chain="robinhood_chain", mcap=50_000.0), 10_000.0) is None
+
+
+def test_robinhood_chain_mcap_ceiling_env_override(monkeypatch):
+    monkeypatch.setenv("MC_RHC_MAX_MCAP_USD_FLOOR", "40000")
+    sc = m.Scanner()
+    assert sc.evaluate(_pool(addr="0xrh45k", chain="robinhood_chain", mcap=45_000.0), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrh35k", chain="robinhood_chain", mcap=35_000.0), 10_000.0)
+    assert d and d["chain"] == "robinhood_chain"
+
+
 def test_robinhood_chain_age_floor_disabled_by_default():
     """28 Oct 2026 (Ali, later same day): the age>=2min gate found earlier today was specific
     to the old $50k-only bucket and did NOT generalize once the mcap floor was corrected to
@@ -89,7 +113,7 @@ def test_robinhood_chain_age_floor_disabled_by_default():
     (MC_RHC_MIN_AGE_MIN) stays available if a future, larger sample finds a real effect again.
     A very young robinhood_chain trade at the new $30k floor should pass through."""
     sc = m.Scanner()
-    d = sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=60_000.0, created_ago=90), 10_000.0)
+    d = sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=40_000.0, created_ago=90), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
@@ -97,8 +121,8 @@ def test_robinhood_chain_age_floor_env_override(monkeypatch):
     monkeypatch.setenv("MC_RHC_MIN_AGE_MIN", "2.0")
     sc = m.Scanner()
     # With the override restoring a 2min floor, a 90s-old (1.5min) trade is refused again.
-    assert sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=60_000.0, created_ago=90), 10_000.0) is None
-    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=60_000.0, created_ago=130), 10_000.0)
+    assert sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=40_000.0, created_ago=90), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=40_000.0, created_ago=130), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
