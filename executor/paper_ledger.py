@@ -286,17 +286,36 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
 # far price has to fall before we even START trying to sell, which is the
 # one lever available without redesigning the monitor. Tightened +8-10pts
 # per lane (fast_moon left alone -- it's the explicit lottery/runner lane).
+# 31 Oct 2026 (Ali): added a sub-2x rung at 1.3x to sprint/core1/core2/compound (dev_list/
+# leaderboard/fast_* untouched -- no evidence pulled for those yet). Root cause found while
+# diagnosing why sprint lost money today while compound won on the SAME filtered coin pool: sprint's
+# one loss (-$99.17, a robinhood_chain coin that ran to 1.81x peak then rugged to $0 liquidity) and
+# 8 of compound's 10 rug losses today ALSO peaked between 1.0x-1.96x -- below the OLD first rung
+# (2x), so every one of them got ZERO profit protection despite running up first. Backtest across
+# all 246 historical sprint/compound/core1/core2 "early"-strategy trades (entry/peak/final-pnl
+# replay -- an approximation, not a tick-by-tick resim, since that's the data actually stored):
+# a 1.3x rung affects 29 trades (11 for compound alone), only 2 of which are made (trivially) worse
+# off, for a total backtested improvement of +$342-393 depending on take-fraction, and flips
+# sprint's own historical total from -$15.43 to a small positive. Take-fraction kept PER-MODULE
+# rather than flat, matching each book's existing risk design: compound's existing ladder already
+# takes much more at 2x (60%) than sprint/core1/core2 (20%), so its new sub-rung takes more too
+# (25%, not flat 20% -- the backtest kept improving past 25% up to 35%+, but that is overfit to a
+# small 11-trade compound sample, 3 of which are already-winners whose upside would get trimmed
+# harder than the evidence justifies; 25% captures most of the benefit, +$341 of the available
+# +$393, without choking compound's actual profit engine). Sprint/core1/core2 use the more
+# conservative 15%, consistent with their own existing first-rung weighting and their role as the
+# more aggressive/moonshot-oriented books where more should still ride past 1.3x.
 EARLY_RULES = {
-    "sprint": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "sprint": ({1.3: 0.15, 2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
     # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
-    "core2": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
-    "core1": ({2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "core2": ({1.3: 0.15, 2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "core1": ({1.3: 0.15, 2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
     "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.68),
     # FAST module (14 Oct 2026): earlier first slice, trail starts at 1.4x (see EARLY_TRAIL_AFTER), big runner
     "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.65),
     "fast_core": ({1.5: 0.20, 3: 0.20, 8: 0.10}, 0.45, 0.60),
     "fast_moon": ({5: 0.10, 20: 0.10}, 0.50, 0.50),                 # lottery: 80% rides, trail starts at 3x -- left as-is
-    "compound": ({2: 0.60, 3: 0.40}, 0.70, 0.78),
+    "compound": ({1.3: 0.25, 2: 0.60, 3: 0.40}, 0.70, 0.78),
     "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.78),
 }
 
