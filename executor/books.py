@@ -158,6 +158,36 @@ def check_bust(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     return rec[book_id][-1]
 
 
+def force_reseed(book_id: str, now: Optional[float] = None, reason: str = "manual") -> dict:
+    """Explicit, on-demand reseed to exactly this book's current seed (cfg(book_id)["seed"]),
+    wiping all prior realized P&L from the running total -- the SAME mechanism check_bust() already
+    uses (a bust-snapshot of realized_pnl, subtracted going forward by bust_offset()), just invoked
+    directly instead of waiting for the book to fall under BUST_BELOW_USD on its own.
+
+    31 Oct 2026 (Ali): "the only part should be left on my end is to fund the wallet ... paper
+    testing should be run till I fund the wallet and let you know." Sprint and compound both carry
+    real paper P&L right now (sprint +$90.44/38 trades, compound +$1,533.63/83 trades as of today) --
+    Ali confirmed that balance doesn't matter while still paper-testing, but wants a clean $50 start
+    the moment the wallet is funded and this goes live. Call this (via go_live.py) at that moment,
+    for sprint and compound, AFTER setting EXECUTION_ENABLED/live config -- it is intentionally a
+    manual, explicit action, never automatic, so a real-money run always starts from a known, clean
+    $50 and nothing from the paper-testing history leaks into the live P&L figures."""
+    now = now if now is not None else time.time()
+    rec = state.get_value(BUST_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec.setdefault(book_id, []).append({"ts": now, "realized_at_bust": realized_pnl(book_id) + bust_offset(book_id),
+                                        "value": total_value(book_id), "reason": reason})
+    state.set_value(BUST_KEY, rec)
+    starts = state.get_value(BOOKS_KEY)
+    starts = starts if isinstance(starts, dict) else {}
+    starts[book_id] = {"start_ts": now}
+    state.set_value(BOOKS_KEY, starts)
+    # compound's staged bank stages are derived from realized_pnl too (see compound_banked()) --
+    # resetting realized_pnl to 0 via the bust snapshot above automatically resets the stage ladder
+    # as well, with no separate state to clear.
+    return rec[book_id][-1]
+
+
 def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     """Sprint-style books: when total value reaches the target, CASH OUT everything above the
     reseed (SPRINT_RESEED_USD, default $200), log it, restart the cycle. Ali withdraws the money."""
@@ -185,10 +215,59 @@ def total_value(book_id: str) -> float:
     return max(0.0, round(cfg(book_id)["seed"] + realized_pnl(book_id), 2))
 
 
+# 31 Oct 2026 (Ali): staged profit-banking for the $50->$20,000 attempt. Ali's own structure,
+# verbatim from his message: "build 50 to 1,000 or $1,500 ... stage out 30%, 35% ... another run
+# from that $1,000 going up to $5,000, $6,000 ... staging out 35% to 40% ... reach to 10K, staging
+# out 50 to 60% ... from remaining trying to achieve [$20,000]" -- and critically, "the amount
+# taken out is already contributing to the amount for $20,000" (banked money counts toward the
+# goal, it is not set aside separately from it). Modeled with a bootstrap Monte Carlo against
+# compound's real observed per-trade multiples (robinhood_chain+base) before implementing: an
+# EQUAL time budget across the 4 stages gave p50=$228, 1.3% chance of $20k, because stage 1 (a
+# 20x from $50) is the slot-starved hard part and was getting shortchanged on time. Weighting the
+# 96h trade budget toward stage 1 (55/25/12/8% split) gave p50=$1,728, 5.8% chance of $20k, and a
+# median of $373.56 PERMANENTLY LOCKED IN regardless of what happens after -- reported to Ali and
+# approved ("Yes wire this up"). This replaces the old flat BANK_AFTER_MULT/bank_pct scheme for
+# compound ONLY (sprint/core1/core2 keep that original mechanism unchanged below).
+COMPOUND_STAGES = (
+    # (total_value threshold the book must CLEAR to bank at this stage, fraction of total_value banked)
+    (1_000.0, 0.325),
+    (5_000.0, 0.375),
+    (10_000.0, 0.55),
+    (20_000.0, 0.0),   # final target stage: no further banking, this IS the goal
+)
+
+
+def _compound_total_value_raw(book_id: str) -> float:
+    """compound's seed + realized P&L, WITHOUT subtracting any bank -- the undiscounted total this
+    book has ever made, used only to figure out which stage line has been crossed."""
+    c = cfg(book_id)
+    return max(0.0, round(c["seed"] + realized_pnl(book_id), 2))
+
+
+def compound_banked(book_id: str) -> float:
+    """Staged version of banked() for compound: walks COMPOUND_STAGES in order, banking bank_pct of
+    the total value AT THE MOMENT each threshold is first crossed (not continuously re-banking a
+    percentage of ever-growing equity, which would double-bank). Stateless and idempotent: recomputed
+    fresh from realized_pnl() every call, like the rest of this module -- no separate stage-tracking
+    state to get out of sync. A book that has retraced below a threshold it once crossed keeps the
+    bank from having crossed it (money already taken off the table stays off), since each stage bank
+    amount is fixed at the threshold VALUE itself, not the book's current (possibly lower) value."""
+    raw = _compound_total_value_raw(book_id)
+    total_banked = 0.0
+    for threshold, bank_pct in COMPOUND_STAGES:
+        if raw >= threshold and bank_pct > 0:
+            total_banked += threshold * bank_pct
+    return round(total_banked, 2)
+
+
 def banked(book_id: str) -> float:
-    """Profit taken OUT of play (the vault). Once realized profit passes BANK_AFTER_MULT x seed
-    (default 3x), bank_pct of the profit above that line is locked away and no longer staked.
-    Stateless: derived from realized P&L, so it never gets out of sync."""
+    """Profit taken OUT of play (the vault).
+    compound: staged escalating bank-out per COMPOUND_STAGES above (Ali, 31 Oct 2026).
+    sprint/core1/core2/copy books: original mechanism -- once realized profit passes
+    BANK_AFTER_MULT x seed (default 3x), bank_pct of the profit above that line is locked away.
+    Both are stateless: derived from realized P&L, so neither ever gets out of sync."""
+    if book_id == "compound":
+        return compound_banked(book_id)
     c = cfg(book_id)
     line = float(os.environ.get("BANK_AFTER_MULT", "3")) * c["seed"]
     return round(max(0.0, (c.get("bank_pct") or 0.0) * (realized_pnl(book_id) - line)), 2)
