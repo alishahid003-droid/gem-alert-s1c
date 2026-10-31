@@ -164,6 +164,13 @@ def _make_tracker() -> EarlyTracker:
 
 # every sniper entry uses the early exit engine (paper_ledger._manage_early); the profile is the lane name
 _PROFILE = {k: ("early", k) for k in ("core1", "core2", "sprint", "compound", "dev_list", "leaderboard", "fast_sprint", "fast_core", "fast_moon")}
+# 1 Nov 2026 (Ali): isolated Solana paper-tracking lanes -- same EARLY_RULES exit profile as their
+# non-solana counterpart (so the exit engine's rung/trail logic still applies realistically), but a
+# separate book id so equity/win-rate never mixes with sprint/compound/core1/core2's real numbers.
+_SOLANA_LANE_MAP = {"sprint": "solana_sprint", "compound": "solana_compound",
+                     "core1": "solana_core1", "core2": "solana_core2"}
+for _sol_lane, _sol_book in _SOLANA_LANE_MAP.items():
+    _PROFILE[_sol_book] = ("early", _sol_lane)  # reuse the real lane's EARLY_RULES profile for exits
 _RECORDER = None
 LIVE_KEY = "live_open_v1"
 
@@ -233,6 +240,13 @@ def act(decision: dict, send=None, now=None) -> dict:
     # decisions that lean on the free DexScreener confirmations stay PAPER until Ali sets EARLY_FREE_CONFIRM=live
     free_paper_only = bool(decision.get("uses_free")) and os.environ.get("EARLY_FREE_CONFIRM", "paper").strip().lower() != "live"
     for lane in decision.get("lanes") or [decision["lane"]]:
+        # 1 Nov 2026 (Ali): route Solana entries into their own isolated solana_* book (see
+        # executor/books.py BOOKS and _SOLANA_LANE_MAP above) so pattern-tracking data never
+        # mixes into sprint/compound/core1/core2's live win-rate while those are being finalized
+        # on robinhood_chain+base. Only affects stake sizing / ledger module -- scoring/entry
+        # decision logic upstream is untouched.
+        if lane in _SOLANA_LANE_MAP:          # worker_early_watch.py is Solana-only end to end
+            lane = _SOLANA_LANE_MAP[lane]
         conf = decision.get("confirmations") or []
         strong = [c for c in conf if c not in ("dev_list", "repeat_grad")]     # dev_list lane: 0/69 graduated (Oct 13)
         tier = "conviction" if len(strong) >= 4 else "standard" if len(strong) >= 2 else "probe"
@@ -279,11 +293,12 @@ def act(decision: dict, send=None, now=None) -> dict:
                 refused.append(f"{lane}: live blocked ({l_why})")
         except Exception as e:  # noqa: BLE001
             refused.append(f"{lane}: live error {type(e).__name__}")
+        _ledger_module = _SOLANA_LANE_MAP.get(_rmap[lane]["book"], _rmap[lane]["book"]) if fast else lane
         pos = paper_ledger.open_paper(
             "solana", mint, f"early_{lane}", f"early_{lane}", stake, mcap_usd, strategy=strategy, exit_profile=profile,
             live=is_live,
             tags={"origin": "early", "age_s": decision["age_s"], "confirmations": decision["confirmations"],
-                  "mcap_sol": decision["entry_mcap_sol"], **({"fast": "1"} if fast else {})}, module=(_rmap[lane]["book"] if fast else lane))
+                  "mcap_sol": decision["entry_mcap_sol"], **({"fast": "1"} if fast else {})}, module=_ledger_module)
         if pos and is_live:
             remember_live(pos)
         if is_live and not pos:                       # real coins bought but no managed position: never leave them unmanaged

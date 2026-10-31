@@ -1,0 +1,323 @@
+chains used: ['bsc', 'solana', 'base'] (Robinhood chain listed by the free feed: False)
+bsc platforms/DEXes: ['pancakeswap_v2', 'jswap_bsc', 'apeswap_bsc', 'mdex_bsc', 'biswap', 'sushiswap_bsc', 'firebird_bsc', 'impossible_finance', 'babyswap', 'wault_finance', 'mars_ecosystem', 'jetswap_bsc', 'elk_finance_bsc', 'annex_finance_bsc', 'autoshark_finance', 'julswap', 'leonicornswap', 'yoshi_exchange_bsc', 'empiredex_bsc', 'polkaex_bsc', 'knightswap', 'impossible_finance_v3', 'moonlift', 'sphynx_swap', 'justmoney_bsc', 'radioshack_bsc', 'pyeswap_bsc', 'bakeryswap', 'pls2e', 'winery_swap']
+bsc candidates so far: 121
+solana platforms/DEXes: ['raydium', 'orca', 'raydium-clmm', 'fluxbeam', 'meteora', 'dexlab', 'daos-fun', 'pumpswap', 'virtuals-solana', 'boop-fun', 'saros-amm', 'meteora-dbc', 'byreal', 'pancakeswap-v3-solana', 'meteora-damm-v2', 'raydium-launchlab', 'pump-fun', 'saros-dlmm', 'wavebreak', 'heaven', 'token-mill', 'defituna', 'moonit', 'humidifi', 'zora', 'bags-fm', 'moonshot', 'clanker-solana', 'printr-v2', 'manifest']
+solana candidates so far: 210
+base platforms/DEXes: ['leetswap-base', 'rocketswap', 'cbswap', 'ensurer', 'oasisswap-base', 'sushiswap-v3-base', 'synthswap', 'swapbased', 'horizondex-base', 'baseswap', 'velocimeter-base', 'kokonutswap-base', 'lfgswap-base', 'crescentswap-base', 'swapline-base', 'balancer-v2-base', 'sobal-base', 'dackieswap-v3-base', 'uniswap-v3-base', 'degenbrains-base', 'cloudbase', 'yum-yum-swap', 'throne-v3-base', 'alien-base', 'baso-finance', 'icecreamswap-base', 'bakeryswap-base', 'throne-v2-base', 'archly-base', 'soswap']
+base candidates so far: 86
+total candidates: 418
+...analysed 0 of 161
+...analysed 10 of 161
+...analysed 20 of 161
+...analysed 30 of 161
+...analysed 40 of 161
+...analysed 60 of 161
+...analysed 80 of 161
+...analysed 90 of 161
+...analysed 100 of 161
+...analysed 120 of 161
+...analysed 140 of 161
+
+================ 1. WHERE THE WINNERS WERE BORN (chain / platform) ================
+bsc      pancakeswap_v2         winners= 23 | born FDV median $2,251,692 | peak FDV median $48,438,420 | days to peak median 30
+solana   pumpswap               winners= 18 | born FDV median $1,337,254 | peak FDV median $72,580,289 | days to peak median 2
+base     uniswap-v4-base        winners= 16 | born FDV median $74,724 | peak FDV median $201,276,511 | days to peak median 1
+bsc      pancakeswap-v3-bsc     winners= 15 | born FDV median $39,606,627 | peak FDV median $138,919,697 | days to peak median 29
+base     sushiswap-v3-base      winners=  7 | born FDV median $156,225,535 | peak FDV median $850,190,358 | days to peak median 19
+solana   raydium-clmm           winners=  6 | born FDV median $166,041,775 | peak FDV median $167,127,597 | days to peak median 17
+bsc      pancakeswap-infinity-clmm winners=  6 | born FDV median $65,378,553 | peak FDV median $209,220,711 | days to peak median 9
+solana   meteora                winners=  5 | born FDV median $19,367,641 | peak FDV median $64,736,840 | days to peak median 30
+base     aerodrome-slipstream-3 winners=  4 | born FDV median $115,046,286 | peak FDV median $143,211,429 | days to peak median 63
+solana   orca                   winners=  4 | born FDV median $57,251,410 | peak FDV median $71,206,954 | days to peak median 22
+base     uniswap-v3-base        winners=  4 | born FDV median $6,054,896 | peak FDV median $50,571,326 | days to peak median 40
+solana   raydium                winners=  3 | born FDV median $56,925,621 | peak FDV median $68,172,280 | days to peak median 3
+base     uniswap-v2-base        winners=  3 | born FDV median $2,052,475 | peak FDV median $86,086,272 | days to peak median 3
+pulsechain 9inch                  winners=  1 | born FDV median $8,122,887,754 | peak FDV median $10,364,043,522 | days to peak median 130
+base     pancakeswap-v3-base    winners=  1 | born FDV median $398,159,606 | peak FDV median $695,189,323 | days to peak median 2
+base     baseswap               winners=  1 | born FDV median $30,820,684 | peak FDV median $95,663,637 | days to peak median 29
+bsc      uniswap-v4-bsc         winners=  1 | born FDV median $36,757,353 | peak FDV median $350,398,088 | days to peak median 6
+base     baseline-base          winners=  1 | born FDV median $16,312,725 | peak FDV median $33,134,498 | days to peak median 43
+
+================ 2. HOW BIG WERE THEY WHEN THEY STARTED? ================
+{'>200k': 91, '10-50k': 7, '50-200k': 16, '<10k': 5}
+multiple from first $50k+ close to peak: median 1.9x, top quartile 4.7x, max 34965937x (n=119)
+days from launch to first $50k close, median: 0
+
+================ 3. TOP 40 WINNERS ================
+ BEM / USDT 0.01%           bsc     pancakeswap-v3-b born $6,083,094 peak $380,390,970,491,934 in   0d  x-from-50k 34965937.2  created 2026-08-21
+ 1 / SOL                    solana  pumpswap         born $   24,462 peak $47,005,692,215,576 in   1d  x-from-50k 1901.8  created 2026-10-15
+ SFIG / USDT                bsc     pancakeswap_v2   born $201,377,726 peak $23,203,903,167 in   4d  x-from-50k 58.5  created 2026-07-26
+*WHALE / BUCK               pulsechain 9inch            born $8,122,887,754 peak $10,364,043,522 in 130d  x-from-50k 1.2  created 2024-04-28
+ BCDB / USDC 0.01%          base    sushiswap-v3-bas born $541,068,403 peak $9,660,396,190 in  28d  x-from-50k 5.7  created 2026-09-17
+*PONS / USDC                solana  raydium-clmm     born $5,058,815,187 peak $5,130,914,800 in   2d  x-from-50k 1.0  created 2026-09-03
+ AXONE / USDC 0.01%         base    sushiswap-v3-bas born $639,319,252 peak $4,709,824,103 in  42d  x-from-50k 3.3  created 2026-07-28
+ 79AU / USDT                bsc     pancakeswap_v2   born $4,982,450 peak $4,704,793,809 in 129d  x-from-50k 15.0  created 2026-05-30
+ THRQN / USDC 0.01%         base    sushiswap-v3-bas born $595,970,232 peak $4,166,672,116 in  19d  x-from-50k 3.0  created 2026-08-10
+ RADR / WBNB                bsc     pancakeswap_v2   born $200,374,319 peak $3,495,201,104 in  11d  x-from-50k 8.8  created 2026-09-03
+ DRACMA / USDT 0.25%        bsc     pancakeswap-v3-b born $479,965,742 peak $2,523,742,047 in  10d  x-from-50k 58.8  created 2026-06-12
+ DGAI / USDT 0.01%          bsc     pancakeswap-v3-b born $100,073,571 peak $1,329,282,639 in  29d  x-from-50k 1.9  created 2026-08-24
+ MPX / USDC                 base    uniswap-v2-base  born $328,532,145 peak $1,143,665,842 in  42d  x-from-50k 3.4  created 2026-09-04
+ 币安金库 / WBNB                bsc     pancakeswap_v2   born $       96 peak $  861,130,539 in   0d  x-from-50k 3.8  created 2026-10-15
+ LOAMD / USDC 0.01%         base    sushiswap-v3-bas born $156,225,535 peak $  850,190,358 in   5d  x-from-50k 2.1  created 2026-07-28
+ ANTFUN / USDT              solana  meteora          born $303,588,185 peak $  824,971,220 in  67d  x-from-50k 2.7  created 2026-07-10
+ PLAY / USDC 0.01%          base    pancakeswap-v3-b born $398,159,606 peak $  695,189,323 in   2d  x-from-50k 1.5  created 2026-05-04
+ SYBT / USDC 0.01%          base    sushiswap-v3-bas born $41,544,952 peak $  678,218,507 in  25d  x-from-50k 16.3  created 2026-09-21
+ AZET / USDC 0.01%          base    sushiswap-v3-bas born $119,063,350 peak $  548,093,113 in   1d  x-from-50k 1.6  created 2026-10-14
+ ARF / SOL                  solana  pumpswap         born $154,528,739 peak $  454,829,919 in   2d  x-from-50k 1.8  created 2026-10-14
+ xdp / USDC 2%              base    aerodrome-slipst born $241,271,612 peak $  453,359,510 in   0d  x-from-50k 2.1  created 2026-09-28
+ ANSEM / SOL                solana  pumpswap         born $   35,262 peak $  444,390,025 in  20d  x-from-50k 2019.6  created 2026-06-16
+ DEBIT / USDT 0.007%        bsc     pancakeswap-infi born $57,047,029 peak $  431,698,149 in  18d  x-from-50k 3.9  created 2026-08-24
+ STONK / SOL                solana  meteora          born $9,927,715 peak $  420,948,578 in  30d  x-from-50k 40.3  created 2026-08-12
+ SBLB / USDC 0.01%          base    sushiswap-v3-bas born $105,235,350 peak $  387,401,917 in   4d  x-from-50k 1.7  created 2026-10-01
+ NODF / SOL                 solana  pumpswap         born $216,792,877 peak $  373,058,749 in   1d  x-from-50k 1.3  created 2026-10-15
+ XRC / WETH 0.3%            base    uniswap-v4-base  born $  175,377 peak $  356,729,652 in   2d  x-from-50k 1.1  created 2026-10-14
+ B13B / USDT 0.025%         bsc     uniswap-v4-bsc   born $36,757,353 peak $  350,398,088 in   6d  x-from-50k 9.5  created 2026-10-04
+ Monero / WETH 0.3%         base    uniswap-v4-base  born $   73,280 peak $  335,368,758 in   1d  x-from-50k 1.3  created 2026-10-15
+ GOIF / WETH 0.3%           base    uniswap-v4-base  born $  172,330 peak $  319,595,723 in   1d  x-from-50k 1.1  created 2026-10-15
+ ARF / WETH 0.3%            base    uniswap-v4-base  born $  170,327 peak $  316,250,889 in   1d  x-from-50k 1.0  created 2026-10-15
+ UDR / WETH 0.3%            base    uniswap-v4-base  born $  170,617 peak $  315,728,911 in   1d  x-from-50k 1.0  created 2026-10-15
+ SAC / USDT                 bsc     pancakeswap_v2   born $38,403,340 peak $  281,126,792 in  25d  x-from-50k 1.1  created 2026-05-23
+ SHARE / USDT 0.007%        bsc     pancakeswap-infi born $74,205,931 peak $  268,804,165 in 156d  x-from-50k 4.6  created 2026-05-07
+ MarsCoin / USDT 0.25%      bsc     pancakeswap-v3-b born $22,680,288 peak $  266,740,243 in  37d  x-from-50k 9.1  created 2026-07-30
+*USELESS / USDC             solana  raydium-clmm     born $247,116,111 peak $  248,454,867 in  28d  x-from-50k 1.0  created 2026-09-04
+ WOTF / WETH 0.3%           base    uniswap-v4-base  born $   71,939 peak $  248,348,105 in   1d  x-from-50k 1.4  created 2026-10-15
+ UDR / SOL                  solana  pumpswap         born $   41,790 peak $  246,975,890 in   1d  x-from-50k 1.2  created 2026-10-15
+ cbXRP / WETH 0.021%        base    aerodrome-slipst born $207,670,213 peak $  242,862,182 in 127d  x-from-50k 1.2  created 2026-04-16
+ $OLIVIA2.0 / USDC 0.3%     base    uniswap-v3-base  born $21,034,842 peak $  236,638,325 in  57d  x-from-50k 7.2  created 2026-05-12
+
+================ 4. YOUR NAMED COINS (*) ================
+WHALE / BUCK | pulsechain 9inch | created 2024-04-28 | born $8,122,887,754 -> peak $10,364,043,522 after 130d | x from first $50k close: 1.2 | now $6,926,236,910
+PONS / USDC | solana raydium-clmm | created 2026-09-03 | born $5,058,815,187 -> peak $5,130,914,800 after 2d | x from first $50k close: 1.0 | now $5,029,124,245
+USELESS / USDC | solana raydium-clmm | created 2026-09-04 | born $247,116,111 -> peak $248,454,867 after 28d | x from first $50k close: 1.0 | now $247,671,079
+MARSCOIN / USDC | solana raydium-clmm | created 2026-09-04 | born $170,612,125 -> peak $171,675,881 after 4d | x from first $50k close: 1.0 | now $170,305,295
+STONK / USDC | solana raydium-clmm | created 2026-09-08 | born $161,471,425 -> peak $162,579,313 after 7d | x from first $50k close: 1.0 | now $161,430,369
+CLAUDIA / SOL | solana pumpswap | created 2026-10-07 | born $48,369 -> peak $11,744,127 after 4d | x from first $50k close: 33.6 | now $5,248,849
+PEPE / FEELSGOOD | solana raydium | created 2026-09-18 | born $1,330,154 -> peak $1,918,113 after 4d | x from first $50k close: 1.4 | now $1,446,938
+SHROOM / SOL | solana raydium | created 2024-03-20 | born $198,929 -> peak $288,228 after 169d | x from first $50k close: 1.4 | now $242,467
+PAWN / WETH | base uniswap-v4-base | created 2026-06-01 | born $20,989 -> peak $24,257 after 130d | x from first $50k close:  | now $24,257
+CLAWS / WETH | base uniswap-v4-base | created 2026-02-01 | born $37,722 -> peak $100,181 after 0d | x from first $50k close:  | now $24,248
+JOHN PHIL / SOL | solana pump-fun | created 2026-10-11 | born $3,141 -> peak $3,220 after 0d | x from first $50k close:  | now $3,155
+
+================ 5. SOLANA DEEP DIVE: creator, insiders, snipers, first buyers ================
+
+1 / SOL | pumpswap | born $24,462 peak $47,005,692,215,576
+   launch pools: [('pumpfun-amm', '1792096910')] | creator: BxZbZgMzHDT4D2nkM8rmrngJwjFKSy6Vmdt8wKGtF948
+   holders: 20 | txns: 53998 | bundlers: 14 initial supply bundled %: 6.7751 | snipers: 0 | insiders: 0 | top10 %: 6.7133 | dev %: 0 | rugged: True
+   first buyers: 100 fetched; top by profit: [('3wySUKHi', 52), ('EEL7hUB8', 3), ('5yF3Fq3p', 2), ('5RtDX9YT', 0), ('Ajx2Je2M', 0)]
+
+PONS / USDC | raydium-clmm | born $5,058,815,187 peak $5,130,914,800
+   launch pools: [] | creator: ?
+   holders: None | txns: None | bundlers: None initial supply bundled %: None | snipers: None | insiders: None | top10 %: None | dev %: None | rugged: None
+   first buyers: 11 fetched; top by profit: [('F297BaNr', 0), ('Hx6dw1ko', 0), ('EaBJGRus', 0), ('FQ8dSnp4', 0), ('2i78a9Zd', 0)]
+
+ANTFUN / USDT | meteora | born $303,588,185 peak $824,971,220
+   launch pools: [('meteora-dlmm', '1777692715')] | creator: 4rgcZVz3dfLLWg6rBXRzoNb9bT8Hqy918iijDNXuTwea
+   holders: 233805 | txns: 2773369 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 51.8299 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('BsE7T81i', 105791), ('3ZkTg5y5', 62893), ('8ysdbxUq', 37927), ('3Jf8NcS3', 21110), ('7p42qfW6', 19642)]
+
+ARF / SOL | pumpswap | born $154,528,739 peak $454,829,919
+   launch pools: [('pumpfun-amm', '1791948056'), ('pumpfun', '1791948056')] | creator: HWBmbCK8PmhoFRWgXmPrhPX44TviciuDF3THupPXBBkF
+   holders: 2971 | txns: 315412 | bundlers: 3 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 0.6869999999999999 | dev %: 0.0002 | rugged: False
+   first buyers: 100 fetched; top by profit: [('7rdrmL4w', 362789630), ('AoveMZKQ', 314378), ('CwREGx1G', 314378), ('7q424e8U', 314378), ('5zc3MEQe', 314378)]
+
+ANSEM / SOL | pumpswap | born $35,262 peak $444,390,025
+   launch pools: [('pumpfun-amm', '1781643950'), ('meteora-dlmm', 'None'), ('meteora-dlmm', 'None')] | creator: EGwMvHLvMA6P2B3ti8Yd7MkuMgvAXPLRY2Q9eG5B1LFV
+   holders: 154913 | txns: 1743618 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 65.3152 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('5SZpbVJM', 82234), ('4MzNje1K', 12242), ('5XosLb8D', 5652), ('yHCxHBEa', 5610), ('bYeXgdiu', 2446)]
+
+STONK / SOL | meteora | born $9,927,715 peak $420,948,578
+   launch pools: [('meteora-dlmm', '1786531833'), ('raydium-clmm', 'None'), ('meteora-dlmm', '1785967385')] | creator: 3TKvfGhpcin8BerYreV4ZMtCjK8ju1XABnjECUYqGioJ
+   holders: 108583 | txns: 1300686 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 18.4419 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('AoJHCcxF', 3136470), ('E5CDqtiZ', 2538230), ('E7zft8Lb', 1701013), ('ECCVCF2m', 764422), ('DCtw9nrD', 659767)]
+
+NODF / SOL | pumpswap | born $216,792,877 peak $373,058,749
+   launch pools: [('pumpfun-amm', '1792103425'), ('pumpfun', '1792103424')] | creator: 3udtZhjKKTfyLGQehiJuYZ1EUtcGWVreM2LDrqygkL4U
+   holders: 2535 | txns: 139000 | bundlers: 21 initial supply bundled %: 0.0011 | snipers: 0 | insiders: 0 | top10 %: 1.994 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('5F6d4J3L', 298834093), ('9CLjD5o5', 895453), ('28PPhqND', 4), ('2WHF3hNb', 1), ('9K47ECMR', 0)]
+
+USELESS / USDC | raydium-clmm | born $247,116,111 peak $248,454,867
+   launch pools: [] | creator: ?
+   holders: None | txns: None | bundlers: None initial supply bundled %: None | snipers: None | insiders: None | top10 %: None | dev %: None | rugged: None
+   first buyers: 27 fetched; top by profit: [('8RvqEo9p', 19145), ('D9jiVBax', 0), ('4C8EybQT', 0), ('4UBG9iSh', 0), ('5x1gJmgY', 0)]
+
+UDR / SOL | pumpswap | born $41,790 peak $246,975,890
+   launch pools: [('pumpfun-amm', '1792067599'), ('pumpfun', '1792067599')] | creator: 525wjaqtf9V1TzRXazFdNmxEjKEvKbEv3vg86dT8ZEEc
+   holders: 2462 | txns: 90025 | bundlers: 2 initial supply bundled %: 0.4753 | snipers: 0 | insiders: 0 | top10 %: 1.9458000000000009 | dev %: 0.0079 | rugged: False
+   first buyers: 100 fetched; top by profit: [('7fvHgfuM', 2541369), ('7E4AX4cW', 261783), ('EBiR8sJk', 261783), ('H6CYHFTT', 261783), ('FC36VNSc', 261783)]
+
+GDF / SOL | pumpswap | born $151,549,608 peak $195,019,297
+   launch pools: [('pumpfun-amm', '1792082567'), ('pumpfun', '1792082567')] | creator: A9y84Sd8QnrmQG2Mnrc56c4NgJPHSLKmKSANQj4sY6vf
+   holders: 3033 | txns: 26877 | bundlers: 25 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 0.363 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('EGiMRExG', 155139692), ('8oucTscC', 464837), ('GsAkJt7j', 231), ('EUNxNgu5', 229), ('5CmVBn6b', 215)]
+
+MARSCOIN / USDC | raydium-clmm | born $170,612,125 peak $171,675,881
+   launch pools: [] | creator: ?
+   holders: None | txns: None | bundlers: None initial supply bundled %: None | snipers: None | insiders: None | top10 %: None | dev %: None | rugged: None
+   first buyers: 29 fetched; top by profit: [('3QG3aFvS', 601), ('4C8EybQT', 0), ('4UBG9iSh', 0), ('5x1gJmgY', 0), ('7omFb5Zo', 0)]
+
+ZEC / MASK | raydium | born $166,664,671 peak $170,387,844
+   launch pools: [('orca', 'None'), ('orca', 'None'), ('meteora-dlmm', '1761497075')] | creator: ?
+   holders: 146237 | txns: 846016 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 37.8877 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('CEEXTqHa', 1314699), ('7q3HUGf8', 240012), ('BYK6U9Rk', 17464), ('3e9DpeMu', 13624), ('D7biw2Hm', 8804)]
+
+STONK / USDC | raydium-clmm | born $161,471,425 peak $162,579,313
+   launch pools: [('raydium-clmm', '1788880678')] | creator: 4rsCQWU9mnD3QKwdWYnui2rqortyYBWBeYHPyyGf12yw
+   holders: 22 | txns: 3057 | bundlers: 0 initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 0.2504 | dev %: 0 | rugged: True
+   first buyers: 16 fetched; top by profit: [('25JdqEjQ', 0), ('DeTBg6MV', 0), ('Ay6M3TTg', 0), ('boNmaH1k', 0), ('GNoDitxy', 0)]
+
+XTO / SOL | pumpswap | born $2,155,103 peak $137,553,664
+   launch pools: [('pumpfun-amm', '1792114869'), ('pumpfun', '1792114869')] | creator: GBsn3j7qQFYU8TjRGg4P1MmZYnvjkmjFLMJiqY6URWop
+   holders: 2531 | txns: 32055 | bundlers: 1 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 1.9920000000000002 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('C7LhZRfx', 110815004), ('G175E2dn', 473), ('GJb3DrYS', 467), ('BB85ZGRe', 457), ('79Jb11ur', 445)]
+
+CATE / SOL | pumpswap | born $25,816 peak $121,562,743
+   launch pools: [('pumpfun-amm', '1785083564'), ('meteora-dlmm', '1785121099'), ('meteora-dlmm', '1785861639')] | creator: 7UFZ5Dbbk6U2mZb5Pd3sd7Kn8TQRh5MTRCPZnLwhZxr2
+   holders: 142294 | txns: 3109319 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 15.220500000000001 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('suqh5sHt', 2300486), ('2fg5QD1e', 1871712), ('7NAd2EpY', 1648977), ('6MaZ2ikX', 1496607), ('FxN3VZ4B', 1197166)]
+
+SPCXx / USDC | orca | born $86,397,216 peak $100,555,851
+   launch pools: [('raydium-clmm', 'None'), ('orca', '1790100039'), ('raydium-clmm', '1789827824')] | creator: DrwATQjGHo76CxnXUYtNam1igT77emUVD8UNk4fpU2uY
+   holders: 79255 | txns: 676191 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 82.8155 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('JDwuGv8M', 6248), ('E5G7S7qJ', 2564), ('J33Tbm13', 2341), ('4dDTZDXV', 1993), ('5mqL2en4', 1312)]
+
+NVDAx / SOL | orca | born $68,879,737 peak $95,952,322
+   launch pools: [('raydium-clmm', 'None'), ('raydium-clmm', 'None'), ('meteora-dlmm', '1752076752')] | creator: Gt3Mte33zcW32Pj3wsY8J5KjULhuL5KhSwfRf44pDLUi
+   holders: 184947 | txns: 1379965 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 74.1081 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('C3WQdUDQ', 273), ('GcJUttrE', 266), ('8kBDRE9m', 160), ('5gVowEEu', 62), ('AzBTervs', 59)]
+
+TSLAx / FTR | raydium-clmm | born $82,357,137 peak $88,668,220
+   launch pools: [('raydium-clmm', '1751028992'), ('meteora-dlmm', '1752044495'), ('pumpfun', '1776158528')] | creator: B8NonLMFo1AQyPARL3ZGz4GLsEFgKDQuaCFh4zSXtjLB
+   holders: 58989 | txns: 309521 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 55.26390000000001 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('Dzn6dRCr', 6646), ('JDZZX8EG', 2759), ('J1STPkyi', 2092), ('GdjFx5sf', 1006), ('GcJUttrE', 496)]
+
+SARP / SOL | pumpswap | born $38,503,690 peak $78,726,762
+   launch pools: [('pumpfun-amm', '1791899780')] | creator: 4DMcCYPRoqYBk8QC9PYhfu3qZarpxyuM89yx1RDbkW5r
+   holders: 2635 | txns: 164357 | bundlers: 21 initial supply bundled %: 0.4753 | snipers: 0 | insiders: 0 | top10 %: 0.5256000000000001 | dev %: 0.0783 | rugged: False
+   first buyers: 59 fetched; top by profit: [('FpSZ5GuF', 62740168), ('Tu4qbHFe', 2989), ('81qcqaSk', 2955), ('7raQ6CA7', 2877), ('37MxKULq', 2745)]
+
+HYPE / SOL | raydium-clmm | born $31,465,285 peak $68,848,817
+   launch pools: [('tessera', '1789927090'), ('orca', '1760753881'), ('meteora-dlmm', '1760126255')] | creator: ?
+   holders: 61268 | txns: 779555 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 2 | top10 %: 34.1995 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('HxjwdF32', 24756), ('HuTshmtw', 21347), ('3nUVVUMG', 12514), ('HvFdDWS3', 8599), ('ECtLweT8', 8558)]
+
+APEONBULL / SOL | raydium | born $56,925,621 peak $68,172,280
+   launch pools: [('raydium-cpmm', '1791806768')] | creator: BDkyrQBtb1TmEXyRiC3dvyinCswerrv5CGLa2VTMHVVw
+   holders: 49 | txns: 1167 | bundlers: 1 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 94.9948 | dev %: 0 | rugged: False
+   first buyers: 30 fetched; top by profit: [('FfwhVsP3', 33), ('EQABK6Qg', 3), ('Deo9DBZ4', 2), ('7Cs6YvqY', 0), ('AqFvRXSZ', 0)]
+
+XTO / SOL | pumpswap | born $25,946,743 peak $66,433,817
+   launch pools: [('pumpfun-amm', '1791946602')] | creator: 7JmWXu8R1gMXJHJvkPqttig8vS9WMT85tLgRgrcMNNzk
+   holders: 3032 | txns: 171003 | bundlers: 2 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 2.3657000000000004 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('DMRjVysG', 20), ('FQ2CwJ14', 20), ('F4GWMbB3', 20), ('9BZraCtL', 20), ('8tLMQ8zH', 20)]
+
+SI / USDC | meteora | born $52,784,167 peak $64,736,840
+   launch pools: [('meteora-dlmm', '1790007953'), ('raydium-cpmm', '1790005501'), ('meteora-dlmm', '1790707853')] | creator: 6Rcq844rw69itEAYMamyVJYCKYio67EtpNcFw6SdqjFL
+   holders: 54801 | txns: 181049 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 12.2819 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('q1x4ZBM4', 43186), ('4yNfStDF', 35343), ('8f8zzsgu', 21044), ('Ar2Y6o1Q', 15368), ('AYZryL5J', 13659)]
+
+MASK / SOL | meteora | born $19,367,641 peak $62,861,122
+   launch pools: [('raydium-cpmm', '1790161462'), ('meteora-dlmm', '1790379108'), ('meteora-dlmm', '1790466029')] | creator: 5CEbueQnq1Ym2uSSx2xXds3jQAqT1BDnkA59RZobSPAG
+   holders: 12798 | txns: 75779 | bundlers: 111 initial supply bundled %: 1.1518 | snipers: 0 | insiders: 0 | top10 %: 55.2837 | dev %: 38.533 | rugged: False
+   first buyers: 100 fetched; top by profit: [('43GticiM', 281364), ('DsGJkPzF', 242457), ('9p3Qtkwp', 225808), ('CFohuh3X', 186423), ('AVso7own', 155571)]
+
+GLDx / USDC | orca | born $45,623,083 peak $46,461,586
+   launch pools: [('raydium-clmm', 'None'), ('meteora-dlmm', '1788309528'), ('raydium-clmm', 'None')] | creator: 7QxQGzKGDjkKZRrXAS9A2o3xd1wfp7uqM1amrfEXjXv8
+   holders: 42484 | txns: 670504 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 94.08709999999998 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('4ckxtvVS', 8927), ('6RWg9VhM', 1644), ('DfvEGg2n', 596), ('9Q2qfBhY', 443), ('AjqUGATi', 258)]
+
+SI276 / SOL | pumpswap | born $24,768,093 peak $45,889,890
+   launch pools: [('pumpfun-amm', '1792031781')] | creator: ALAwJAc1uTLddxmxPMWH8jkK6QKzYM4AKkWvURrWJac5
+   holders: 2208 | txns: 155781 | bundlers: 28 initial supply bundled %: 0.4753 | snipers: 0 | insiders: 0 | top10 %: 0.49499999999999994 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('87sAgEU3', 37444969), ('9YVP7VEW', 112138), ('7NNMwN4C', 1242), ('EoDbdYTH', 1064), ('BTEMmUcV', 884)]
+
+FTR / SOL | pumpswap | born $20,657,360 peak $35,481,215
+   launch pools: [('pumpfun-amm', '1792112555'), ('pumpfun', '1792112555')] | creator: FEDg7srb7yah9LkVsn57XqdYRHQuotk3jsCG7Q3vBEAf
+   holders: 2973 | txns: 39465 | bundlers: 32 initial supply bundled %: 0.4755 | snipers: 0 | insiders: 0 | top10 %: 20.010799999999985 | dev %: 0 | rugged: False
+   first buyers: 86 fetched; top by profit: [('FMomKd5p', 86470), ('2NhRzq8u', 858), ('C6EZXguf', 801), ('3KVLQUR1', 785), ('B3pwZEVJ', 697)]
+
+STREAM / SOL | pumpswap | born $299,857 peak $30,997,908
+   launch pools: [('pumpfun-amm', '1792005509'), ('pumpfun', '1792005509')] | creator: JE4XdCKo19YDFKpUB6VnbesMak9Kptn3RjCKK7Casref
+   holders: 16668 | txns: 158842 | bundlers: 335 initial supply bundled %: 0.7191 | snipers: 0 | insiders: 0 | top10 %: 1.8906000000000005 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('EMTAdZqg', 37483), ('AioGAPc7', 33149), ('7GwTnVWs', 30688), ('G9Fh6tHE', 29628), ('HtYtXidu', 28921)]
+
+baton / SOL | meteora | born $4,449,251 peak $22,536,034
+   launch pools: [('pumpfun-amm', '1788985935'), ('meteora-dlmm', '1789006345'), ('meteora-dlmm', '1789408411')] | creator: HJg3kPiZjo6LD8aqKMYrV5kSaft7khkEkxpADpoYZzp1
+   holders: 23865 | txns: 819992 | bundlers: 1093 initial supply bundled %: 19.4579 | snipers: 0 | insiders: 0 | top10 %: 17.5203 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('7qj3xQSy', 363451), ('Fzz2amRo', 238455), ('AMAoBmUM', 122166), ('EoxtfjMw', 78295), ('2zvSYhoe', 62292)]
+
+DOPE / SOL | pumpswap | born $519,406 peak $21,356,955
+   launch pools: [('pumpfun-amm', '1791916180'), ('pumpfun', '1791916180')] | creator: CWFg9x7UwnhWkQCSkLhUdWuGqBvhghSHcgbo8zAqZJsT
+   holders: 2570 | txns: 183141 | bundlers: 4 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 1.9639999999999995 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('6zGpVJHZ', 17349969), ('Ej6J4RqY', 7434), ('BB85ZGRe', 6384), ('H9Va3Dds', 5484), ('G175E2dn', 4891)]
+
+ATFS / SOL | pumpswap | born $14,773,743 peak $21,231,481
+   launch pools: [('pumpfun-amm', '1791982334')] | creator: BwqwvwV5sCCp55Nw3bLfFaYrdSs4hzH2pqPeLgLoCdPv
+   holders: 2531 | txns: 121917 | bundlers: 1 initial supply bundled %: 0 | snipers: 0 | insiders: 0 | top10 %: 1.9769999999999999 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('BnmSBo3R', 17111842), ('5HJR7Kwr', 312), ('AXXtnTp7', 251), ('57eFYzH4', 1), ('BgHMDgtg', 0)]
+
+ARF / SOL | pumpswap | born $43,925 peak $16,897,221
+   launch pools: [('pumpfun-amm', '1791968737')] | creator: 8esRhu9AubmpVCj8zGer2qt8uARRZWhMhTAqn5EVDGH2
+   holders: 2528 | txns: 141554 | bundlers: 4 initial supply bundled %: 0.4753 | snipers: 0 | insiders: 0 | top10 %: 1.974 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('2skSmqkS', 13532363), ('DJaDjhF4', 4127), ('2GVtuJ8b', 0), ('Cby7taA7', 0), ('4mXZCQ4p', 0)]
+
+wNEAR / USDC | orca | born $6,533,946 peak $16,447,611
+   launch pools: [('raydium-cpmm', '1740489942'), ('meteora-dlmm', '1765992781'), ('meteora-dlmm', '1789889698')] | creator: 9gKn9XviPGrkfrjQ6H558tDdXnzT7burR4LknHJbVMk2
+   holders: 18501 | txns: 258855 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 88.2419 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('FqH9ScHd', 15098), ('HuTshmtw', 3606), ('8m1Qnh1Q', 3063), ('FcBrG1FS', 3036), ('9NRF7cc2', 1701)]
+
+DGAI / SOL | pumpswap | born $9,712 peak $13,379,201
+   launch pools: [('pumpfun-amm', '1792047128')] | creator: GfNzaLhnDs5hcKf8zNgsqPNGGDLRS4ZCC1G6zDfgWQ7N
+   holders: 23 | txns: 23742 | bundlers: 20 initial supply bundled %: 39.2878 | snipers: 9 | insiders: 0 | top10 %: 94.31840000000001 | dev %: 86.6184 | rugged: True
+   first buyers: 100 fetched; top by profit: [('5yM7ZW7h', 4948), ('BiEHvFqA', 4530), ('8hjeVX22', 1864), ('HW4bK5bw', 2), ('GDu7gQLL', 1)]
+
+CLAUDIA / SOL | pumpswap | born $48,369 peak $11,744,127
+   launch pools: [('meteora-dlmm', '1791344303'), ('pumpfun-amm', '1791337471'), ('meteora-dlmm', '1791709724')] | creator: Aqtz7EbxWVH8dy3Y4tH2RmdNY8bVjAqcQMc2VTTT8t9T
+   holders: 9318 | txns: 35314 | bundlers: 2123 initial supply bundled %: 96.2655 | snipers: 3 | insiders: 0 | top10 %: 15.624 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('HXHoJwF5', 179422), ('8eftoRDp', 11643), ('2mtaKQVg', 1798), ('3ZDX6sSq', 1741), ('J7HGnMer', 335)]
+
+PEPE / FEELSGOOD | raydium | born $1,330,154 peak $1,918,113
+   launch pools: [('meteora-dlmm', '1789769324'), ('meteora-dlmm', '1789919266'), ('orca', '1790948720')] | creator: XwQxtWqtLynUxy5zP7TauUfN11251sosn9yF1E6v5Cm
+   holders: 24698 | txns: 371024 | bundlers: None initial supply bundled %: None | snipers: 0 | insiders: 0 | top10 %: 184239299.0359 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('C5EMTGGE', 9844), ('9pkJqJLt', 8083), ('signeraM', 5404), ('9su3UPQW', 4547), ('CyaE1Vxv', 2603)]
+
+SHROOM / SOL | raydium | born $198,929 peak $288,228
+   launch pools: [('raydium', '1710885836')] | creator: ?
+   holders: 61972 | txns: 25770 | bundlers: 11 initial supply bundled %: 0.2912 | snipers: 0 | insiders: 0 | top10 %: 3.7097 | dev %: 0 | rugged: False
+   first buyers: 100 fetched; top by profit: [('5hU5DwfS', 1747220), ('4ySxHasf', 152882), ('DrAcUHdh', 31267), ('BTaYD51j', 9906), ('Cu3i58Mt', 8013)]
+
+JOHN PHIL / SOL | pump-fun | born $3,141 peak $3,220
+   launch pools: [('pumpfun', '1791762415')] | creator: HewRszVWvgbUFYQ6SdkZWFFHriWR3dB8DXPJ1M1WWwv3
+   holders: 1 | txns: 7 | bundlers: 2 initial supply bundled %: 5.2383 | snipers: 0 | insiders: 0 | top10 %: 1.5663 | dev %: 0 | rugged: False
+   first buyers: 3 fetched; top by profit: [('HewRszVW', 0), ('3DZYpZri', 0), ('AMDEmVoc', 0)]
+
+================ 6. WALLETS THAT WERE EARLY IN MANY WINNERS (copy-trade candidates) ================
+wallets early in >=2 of the top 38 Solana winners: 172  (already in our watch list: 9)
+   Fn9n3ftUzjhcmoLwXbTqJdATzamCp3xPEu4LmLSS8ELr | in 15 winners | profit total $0 | 1 / SOL, ARF / SOL, NODF / SOL, UDR / SOL, GDF / SOL, XTO / SOL, SARP / SOL, APEONBULL / S 
+   DKKybxrW7Ugg4yCiuvz3PFvC7eB4T5tFHVVg1ouPE7nP | in 9 winners | profit total $-10 | ARF / SOL, NODF / SOL, XTO / SOL, SARP / SOL, XTO / SOL, FTR / SOL, DOPE / SOL, ATFS / SOL | ours
+   FRQD8Lc1oY537vwVHFsAKGWbXrMGFgZ8CBHACV2WovAn | in 8 winners | profit total $0 | ARF / SOL, SARP / SOL, XTO / SOL, SI276 / SOL, STREAM / SOL, DOPE / SOL, ATFS / SOL, ARF / 
+   EvDTDvN9SUzgfR1LzsAevrXKLcDW2rQ3GPS7TDY18dzr | in 7 winners | profit total $-3 | ARF / SOL, NODF / SOL, UDR / SOL, XTO / SOL, XTO / SOL, ATFS / SOL, ARF / SOL 
+   7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9 | in 7 winners | profit total $-4 | ARF / SOL, SARP / SOL, XTO / SOL, STREAM / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL | ours
+   HVRZFUK8cGNiM53E3ZRabLRC2nGAzASTnAyfrCH8iDK9 | in 6 winners | profit total $0 | UDR / SOL, GDF / SOL, XTO / SOL, FTR / SOL, ATFS / SOL, ARF / SOL | ours
+   4mXZCQ4phYpHSobESG5d8UUWM8arFxotx9nXWi1RaL2E | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   APa4urSaSEv38J6pF3tVUGYW7ApXyfqLWbnrN9QmUXXR | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   3kFaysLXy3R7G2TzZWN3754DGxVixmnpp5KqNjH2oCwN | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   A7bXBkfxWhnuA7tFG5jev3rAzmL8KWAGeWCC4eaXXaCR | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   D1VHoUipMmtHXtcNunMvnFpEk9tzRp9UN4acjGaCjrCe | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   GhNURBVg7vdAWexJeFc3rS8yYQEWo8xX9T2nY4LmFHWU | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   EXG2DWx9eNNkVpxGsEpamR1BGXQjuU8nEY5wu9FufAA9 | in 4 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL, ARF / SOL 
+   8qNupZGMcFwg75efaG6njLusgn3wCwr7JXvamsACeVAq | in 4 winners | profit total $0 | NODF / SOL, XTO / SOL, SARP / SOL, ARF / SOL 
+   7FPqg7MpJwvGneBPvkBrCDjAvZhFnAvoiUw9LF91nsN | in 4 winners | profit total $-4 | XTO / SOL, STREAM / SOL, DOPE / SOL, ARF / SOL | ours
+   5HJR7Kwrijy4DmPpaNFn9zZF5J9xeeirevg4G559tn2b | in 3 winners | profit total $4683 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   AXXtnTp78HMKHz1Swu1jjCHHZQsh7hVW1SZsfr8VHzai | in 3 winners | profit total $4198 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   EQ5A4VfyAFWU3Tf9zXGwzZSUfjW8iskfDsgtmWMkT59p | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   5ghrFgVSPHBQYdJENEYH3Pj2Hd1Va5DZJ5nPXL5UMoAF | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   86H4CDMG8bAcoeHeumdpXHKNohe8j4ycsAohYFiGxB6M | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   4BfdYhcLpqCqoybxDiX6SWfUqSbYSVHKUMJ73xBNDBvT | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   JB8nYZqxcrGEEMPDAucnM4s5junyyvRdegY33Uw4vjPs | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   7zLtNBb48NMZ7vJqRhPuo4A2jPS7MGGzDTL8bvEg69Eq | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   G6buWLM4Wm7gN3t16Tjq9UCrGzHAQyDwbWfNCVdKQQso | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+   7dJAbsqYVYBkUwT7hxWpXtdoT7oXvXZZwLFfARP2z7Uv | in 3 winners | profit total $1 | XTO / SOL, DOPE / SOL, ATFS / SOL 
+creators with >1 winner: []
+
+Solana Tracker credits used this run: 76 (of 2,500/month)
+DONE

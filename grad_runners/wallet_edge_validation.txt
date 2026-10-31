@@ -1,0 +1,15 @@
+labeled coins in wallet_db: 654 (274 runner, 380 dud)
+labeled coins with a known graduation time: 654
+TRAIN (earlier, chronologically): 457 coins | TEST (later, held out): 197 coins
+TRAIN: usable (cached) 457/457 (0 not in disk cache) | base rate 41% runner
+confident wallets from TRAIN only: 190 (vs 3331 candidates with >=3 sightings)
+
+================ HELD-OUT TEST (coins the wallet list never saw) ================
+TEST coins usable: 197 (0 not in disk cache)
+  coins where >=1 confident wallet was an early buyer: n= 61  runner rate = 54%
+  coins with no confident wallet among early buyers:  n=136  runner rate = 38%
+
+LIFT (held-out, honest): +16 points (54% vs 38% base)
+READ: the edge survives a genuine out-of-sample check -- worth continuing to validate live via layer19.
+
+DONE - send me grad_runners/wallet_edge_validation.txt

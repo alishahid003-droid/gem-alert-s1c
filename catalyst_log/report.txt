@@ -1,0 +1,14 @@
+alerts logged: 238   outcome rows: 442
+
+HEADS-UP: 225 alerts
+  +  15m  n=222  up    5%  median x1.00  best x1.08  >=2x   0%  <=0.5x   0%
+  +  60m  n=195  up   13%  median x1.00  best x1.15  >=2x   0%  <=0.5x   0%
+
+CONFIRMED: 13 alerts
+  +  15m  n= 13  up   46%  median x1.00  best x1.13  >=2x   0%  <=0.5x   0%
+  +  60m  n= 12  up   50%  median x1.00  best x1.33  >=2x   0%  <=0.5x   0%
+
+LATE: 0 alerts
+
+alerts from trusted sources: 0 of 238
+Read: an edge exists only if median multiple at +1h/+6h clearly beats ~0.85 (our round-trip cost) AND >=2x share is meaningful.

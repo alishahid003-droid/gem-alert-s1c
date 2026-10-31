@@ -1,0 +1,25 @@
+coins in pool: 15192 | candidate wallets: ['BwWK17cb', 'sssssDdM', 'Bb8Vh3iH', 'TbLZ3V79']
+... 0 of 300 | credits 1
+... 50 of 300 | credits 51
+... 100 of 300 | credits 101
+... 150 of 300 | credits 151
+... 200 of 300 | credits 200
+... 250 of 300 | credits 249
+
+BASE (random coins):
+ALL sampled coins              present in 300 coins | 2x    1% 3x    1% 5x    0% | best TP/SL return after cost: 15% -> 0.84x  8% -> 0.91x
+
+EACH CANDIDATE WALLET (present among first 100 buyers):
+BwWK17cbHx..                   present in  23 coins | 2x    4% 3x    4% 5x    0% | best TP/SL return after cost: 15% -> 0.84x  8% -> 0.91x
+BwWK17cbHx.. (rank<=5)         present in  23 coins | 2x    4% 3x    4% 5x    0% | best TP/SL return after cost: 15% -> 0.84x  8% -> 0.91x
+sssssDdMNA..                   present in  19 coins | 2x    5% 3x    0% 5x    0% | best TP/SL return after cost: 15% -> 0.97x  8% -> 1.05x
+sssssDdMNA.. (rank<=5)         coins where present: 0 (too few)
+Bb8Vh3iHJe..                   coins where present: 0 (too few)
+Bb8Vh3iHJe.. (rank<=5)         coins where present: 0 (too few)
+TbLZ3V79Tt..                   coins where present: 2 (too few)
+TbLZ3V79Tt.. (rank<=5)         coins where present: 0 (too few)
+ANY of the candidates          present in  44 coins | 2x    5% 3x    2% 5x    0% | best TP/SL return after cost: 15% -> 0.89x  8% -> 0.97x
+ANY candidate rank<=5          present in  23 coins | 2x    4% 3x    4% 5x    0% | best TP/SL return after cost: 15% -> 0.84x  8% -> 0.91x
+
+Solana Tracker credits used this run: 297
+DONE

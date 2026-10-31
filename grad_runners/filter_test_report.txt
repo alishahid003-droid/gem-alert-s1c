@@ -1,0 +1,5 @@
+universe (same seed as grad_runners.py, cache-only): 1000 candidate mints
+usable coins (price path rebuilt from cache): 998
+
+baseline (all 998 coins)        EV(TP3/SL.6) = 0.73
+fast-grad only (<5min, n=769)  EV(TP3/SL.6) = 0.74

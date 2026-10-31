@@ -1,0 +1,49 @@
+universe available (same cache grad_runners.py already built): 1070 mints
+already in wallet_db from prior runs: 1067 mints | will check up to 3 new ones this run (credit-capped)
+this run: +0 runner mints, +0 dud mints checked (skipped 0 ambiguous, 1.5x-5x)
+Solana Tracker credits used this run: 0 of cap 250
+
+================ ACCUMULATED SO FAR: 274 runner mints, 380 dud mints checked (total across every run of this script) ================
+base rate: a random labeled coin in this sample is a runner 42% of the time
+
+================ CANDIDATE SMART WALLETS: more runner-list appearances than base rate predicts (bots excluded) ================
+wallet | runner hits | dud hits | times seen | edge-over-base-rate
+   F3xoVAiKkvwGqautKEL1fWehCBGh9bHzs2SiBbfM7JSg |  62 |  43 | 105 | +18.0
+   2mRNRi7HsfhionmoEhAbg2kqruJZJsi5pXnCwLeNyqow |  62 |  46 | 108 | +16.8
+   9rG1EjcsSBU5C6jfP2TLxtz3y5xLGmwPjsxnUVDxhCjc |  65 |  51 | 116 | +16.4
+   4Zxsnmyd9naMqipfvd1YKaHThVVwqSTahH21EaTBjrDK |  83 |  79 | 162 | +15.1
+   C3XQNXcV2KsWnjoKbUGFeXMkjfe6Ro7hRPZCMDt9tAiS |  40 |  23 |  63 | +13.6
+   DXHzsS985eqy7VrcGGR7rPBhphy3Q7wdHmCJbY9gxjVN |  49 |  37 |  86 | +13.0
+   Dx9CKWjxWRas5aFdC93VwmmM3rq2PYvKND4NuGJ1vub1 |  39 |  24 |  63 | +12.6
+   5zWxvqhrow6np1MWujaJ63V76DuDQ5pnKCh6UGnEUT3K |  62 |  58 | 120 | +11.7
+   ErNSEB2VUvXqT5PFiXMTFd53Ugg6AZMMe36UtCZvDRzV |  40 |  28 |  68 | +11.5
+   2Y8usro64scEExdG9nhzzuFjpGy8sy9T5G8TfAyYgDLm |  31 |  17 |  48 | +10.9
+   E83AvoFVWPbVx6m5TvCQytifvBts7p1YF6f4bbNVoydU |  77 |  82 | 159 | +10.4
+   61FZqAuGknpgBTHn7HdB5NBwMXgWkxmXdzmoa4Sdprak |  28 |  16 |  44 | +9.6
+   5WbraSGdTFwatqXyEHCfxaVUQ3DKSENQramXb94ukLmf |  31 |  20 |  51 | +9.6
+   AKerrUkmycGsfy2rTvcqAe23x3mMpJgPmy9ijHVqJ32n |  25 |  12 |  37 | +9.5
+   d1vAyVLnBzoXScufb4PgjxPgeN7KpLjc9QExkDJLazx |  25 |  14 |  39 | +8.7
+   HRxHaroNqabx7j2xCLESkcdRoyzXaaEW9uGNXJGBrmcT |  25 |  14 |  39 | +8.7
+   Ho9Vt1FwiEnVTCtz5nFgxeoWuetzyvp41TSsYdmAQzgy |  22 |  11 |  33 | +8.2
+   BddBif86zuEAuX7GNykiLwAUmv1hQaNoRcYZWm1wRWEd |  18 |   8 |  26 | +7.1
+   2jX6jm3eXFvGKeJCWHY5oH8JvP5vNKLvCw4m3eDzvHfm |  17 |   7 |  24 | +6.9
+   2w3nD9VdShyo1zTuoajtgQKKSRMQNPSHxHPwDwfB5Q3c |  17 |   7 |  24 | +6.9
+   4mXBSYETmhaNS5B3obA3na71nB1rABU8EiB1Rqy9wsqu |  18 |   9 |  27 | +6.7
+   8ZqGH9M1GoxekKXv7DPLQE4LoNKkW4u1oJjpxh9yERJB |  14 |   4 |  18 | +6.5
+   31NNvZxTNWCDfgp8yttwEXYd4bE2uKUwHZhXF3juwL1A |  14 |   5 |  19 | +6.0
+   EJE7JiQqV8Tzbi7UxWd4bz3zbzW8K9AZLV6mojD62htr |  11 |   1 |  12 | +6.0
+   Efd1sH77x72AzZcvHGLqQtYMucwGFto41rA82oga2rRE |  10 |   0 |  10 | +5.8
+   SSrWcRgVZA6B9UZLNbsZYqVXx4HtVNeMpXZAkwVZZGD |  10 |   0 |  10 | +5.8
+   CyZr4spJUhhqSEj2pCZnZSCUqtj3MEGeTst1WWp3rURX |  10 |   0 |  10 | +5.8
+   HGpvPMY8hrMfqoxNnwL9yCk1pn2fvuMpJvQ7fYdz4Br7 |  10 |   1 |  11 | +5.4
+   9sdGTC2aukNySjzx74ZHTdyRqyPMs7gMUd6XyL4pNWmz |  10 |   1 |  11 | +5.4
+   A2S9fhsCztgFUxoDynJPmF6g8XLR3SLskzAsAfx9joUx |  20 |  15 |  35 | +5.3
+
+wallets confident enough to watch live (>=5 runner hits, dud hits <= 1/4 of runner hits): 306
+written to grad_runners/smart_wallets.csv -- layer19_smart_wallet_watch.py reads this file.
+
+Read: this is early-buyer PRESENCE, not proof of foreknowledge -- some of this is just skilled/fast sniping,
+not literal insider information, and a wallet can still be a bot even if not on bot_wallets.txt yet.
+Treat this as a watchlist to validate live (layer19, alert-only), not something to trade on yet.
+
+DONE - send me grad_runners/wallet_edge_report.txt. Re-run this script on other days to grow the sample before trusting it.

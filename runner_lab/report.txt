@@ -1,0 +1,65 @@
+coins with a clean 1-minute snapshot: runners(>=3x) 103, duds(<1.5x) 14588
+sampled: 103 runners, 160 duds (population weight for duds ~131x)
+... 0 of 263 | credits used this run 2
+... 25 of 263 | credits used this run 52
+... 50 of 263 | credits used this run 102
+... 75 of 263 | credits used this run 152
+... 100 of 263 | credits used this run 202
+... 125 of 263 | credits used this run 238
+... 150 of 263 | credits used this run 267
+... 175 of 263 | credits used this run 297
+... 200 of 263 | credits used this run 328
+... 225 of 263 | credits used this run 359
+... 250 of 263 | credits used this run 392
+tokens with Solana Tracker data: 263 of 263
+
+===== A. LAUNCH FEATURES: runners vs duds (median) =====
+launches           runners        3.000   duds        1.000
+grads              runners        0.000   duds        0.000
+init_sol           runners        0.099   duds        0.570
+b1                 runners        8.000   duds        3.000
+s1                 runners        5.000   duds        1.000
+v1                 runners      153.000   duds      205.000
+mc1                runners     3042.000   duds     3065.000
+bundlers           runners        0.000   duds        0.000
+bundled_init_pct   runners        0.000   duds        0.000
+snipers            runners        1.000   duds        0.000
+sniper_pct         runners        0.000   duds        0.000
+insiders           runners        0.000   duds        0.000
+top10              runners        0.063   duds        0.230
+
+===== B. SINGLE RULES (population-corrected hit rate) =====
+bundlers >= 1                                runners  41 duds  22 -> P(runner | rule) ~ 1.40%  (base 0.49%, lift 2.9x)
+bundlers >= 5                                runners  14 duds   2 -> P(runner | rule) ~ 5.06%  (base 0.49%, lift 10.4x)
+bundled at launch >= 0.5% of supply          runners  14 duds   7 -> P(runner | rule) ~ 1.50%  (base 0.49%, lift 3.1x)
+bundled at launch >= 5% of supply            runners   5 duds   1 -> P(runner | rule) ~ 3.67%  (base 0.49%, lift 7.5x)
+snipers >= 1                                 runners  73 duds  63 -> P(runner | rule) ~ 0.87%  (base 0.49%, lift 1.8x)
+snipers >= 3                                 runners  19 duds  27 -> P(runner | rule) ~ 0.53%  (base 0.49%, lift 1.1x)
+no bundlers                                  runners  62 duds 138 -> P(runner | rule) ~ 0.34%  (base 0.49%, lift 0.7x)
+creator launches 1-15                        runners 100 duds 155 -> P(runner | rule) ~ 0.49%  (base 0.49%, lift 1.0x)
+creator launches 3-15                        runners  62 duds  49 -> P(runner | rule) ~ 0.95%  (base 0.49%, lift 2.0x)
+creator has a graduated coin                 runners  11 duds   2 -> P(runner | rule) ~ 4.02%  (base 0.49%, lift 8.2x)
+buys >= 6 at 1 min                           runners  71 duds  48 -> P(runner | rule) ~ 1.11%  (base 0.49%, lift 2.3x)
+buys >= 10 at 1 min                          runners  48 duds  38 -> P(runner | rule) ~ 0.95%  (base 0.49%, lift 2.0x)
+buys >= 20 at 1 min                          runners  22 duds  17 -> P(runner | rule) ~ 0.98%  (base 0.49%, lift 2.0x)
+dev buy >= 0.5 SOL                           runners  26 duds  83 -> P(runner | rule) ~ 0.24%  (base 0.49%, lift 0.5x)
+dev buy >= 2 SOL                             runners   8 duds  20 -> P(runner | rule) ~ 0.30%  (base 0.49%, lift 0.6x)
+holders >= 50 (now)                          runners   5 duds   1 -> P(runner | rule) ~ 3.67%  (base 0.49%, lift 7.5x)
+
+===== C. BEST COMBINATIONS, tested on the LAST 30% of coins by time (not used to choose) =====
+bundlers>=5 AND devbuy>=0.5: train 7r/0d (P~100.0%) | HOLDOUT 0 runners / 0 duds -> P~0.0%
+bundlers>=5 AND bundled>=1%: train 10r/1d (P~7.1%) | HOLDOUT 1 runners / 0 duds -> P~100.0%
+bundlers>=5 AND snipers>=1: train 10r/2d (P~3.7%) | HOLDOUT 1 runners / 0 duds -> P~100.0%
+bundled>=1% AND snipers>=1: train 10r/2d (P~3.7%) | HOLDOUT 1 runners / 1 duds -> P~0.8%
+bundled>=1% AND buys1m>=10: train 9r/2d (P~3.3%) | HOLDOUT 1 runners / 1 duds -> P~0.8%
+launches3-15 AND buys1m>=10: train 17r/4d (P~3.1%) | HOLDOUT 11 runners / 3 duds -> P~2.7%
+
+===== D. CLEAN WALLETS: early in many runners with real profit, rarely in duds =====
+clean candidates (profitable early in >=3 runners, <=2 duds): 4
+   BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s | early in 80 runners, profitable in 49 | total $387697 | in 0 duds
+   sssssDdMNAWKingjpEojkTNdVuZrBe7FsJLaGtexe7d | early in 9 runners, profitable in 5 | total $1303 | in 1 duds
+   Bb8Vh3iHJeVWRfnUNkpncnxshnk9By1Emj9VS35Tkp53 | early in 7 runners, profitable in 4 | total $2118 | in 0 duds
+   TbLZ3V79Tt2yrAUWpAGwtczj5XDJ3sfFbEyxEMnVJy9 | early in 3 runners, profitable in 3 | total $678 | in 0 duds
+
+Solana Tracker credits used this run: 407
+DONE

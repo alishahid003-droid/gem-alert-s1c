@@ -40,6 +40,22 @@ BOOKS: Dict[str, dict] = {
                     "shot_pct": 0.10, "max_share": 0.25},
     "dev_list": {"name": "Dev Launch", "kind": "copy", "seed": 50.0, "target": None, "days": None,
                  "shot_pct": 0.10, "max_share": 0.25},
+    # 1 Nov 2026 (Ali): isolated Solana PAPER-ONLY pattern-tracking books. Ali wants Solana launches
+    # tracked (entries, peaks, rugs, 2x/10x/moonshot outcomes) to find a real filter combination later,
+    # WITHOUT mixing into sprint/compound/core1/core2's live win-rate/equity while those are being
+    # finalized tonight on robinhood_chain+base alone. worker_early_watch.py's act() remaps
+    # chain=="solana" positions to these solana_* books instead of the shared ones -- same exit-rung
+    # logic and entry scoring, fully separate ledger/equity/win-rate. Never wired into EARLY_RULES'
+    # take-fractions on purpose; reuses "sprint"'s profile (see worker_early_watch.py's _PROFILE) so the
+    # exit engine still has a real rule to run, it just books the trade under a separate id.
+    "solana_sprint": {"name": "Solana Watch (Sprint profile)", "kind": "moonshot", "seed": 100.0, "target": 10_000.0,
+                       "days": 4.0, "shot_pct": 0.30, "max_share": 0.45, "bank_pct": 0.20, "cashout": True},
+    "solana_compound": {"name": "Solana Watch (Compound profile)", "kind": "daily", "seed": 100.0, "target": None,
+                         "days": None, "shot_pct": 0.50, "max_share": 0.60, "daily_goal_pct": 5.0},
+    "solana_core1": {"name": "Solana Watch (Core 2 profile)", "kind": "moonshot", "seed": 100.0, "target": 125_000.0,
+                      "days": 30.0, "shot_pct": 0.20, "max_share": 0.35, "bank_pct": 0.25},
+    "solana_core2": {"name": "Solana Watch (Core 3 profile)", "kind": "moonshot", "seed": 100.0, "target": 1_000_000.0,
+                      "days": 180.0, "shot_pct": 0.10, "max_share": 0.25, "bank_pct": 0.25},
 }
 
 # Moonshot floors (fees eat anything smaller: Ali, Oct 1 2026): equity from -> min stake.
