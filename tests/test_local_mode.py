@@ -91,3 +91,66 @@ def test_actions_runner_skips_without_upstash(monkeypatch, capsys):
     assert scheduler._skip_local_state_on_actions("poll-fast") is True
     monkeypatch.setattr(scheduler, "IS_GITHUB_ACTIONS", False)
     assert scheduler._skip_local_state_on_actions("poll-fast") is False
+
+
+def test_local_runner_loads_dotenv_at_import(tmp_path):
+    pytest.importorskip("dotenv", reason="python-dotenv not installed in this test environment -- "
+                        "this exact gap (dotenv present on the real deployment machine but this "
+                        "test's own interpreter lacking it) is what let the real bug go unverified "
+                        "earlier; skip rather than report a misleading pass/fail here. Confirmed "
+                        "installed (1.2.3) on Ali's real Windows Python via `pip show python-dotenv`.")
+    """1 Nov 2026 (Ali): REAL bug found live -- local_runner.py never called load_dotenv() at all,
+    unlike every other entry-point in this repo (worker_early_watch.py, dashboard.py, backtest.py).
+    early_enabled() reads os.environ directly in THIS process at main() startup, before
+    worker_early_watch.py is even spawned -- with .env never loaded, LOCAL_RUNNER_EARLY=false in
+    .env silently had no effect and the supervisor kept launching the solana watcher anyway.
+    Confirmed from live logs: the 31 Oct 21:17:45 PKT restart (meant to disable solana) re-started
+    early-watch at that exact same timestamp, and solana kept trading for hours afterward.
+
+    This test proves the fix by actually spawning a fresh subprocess (import-time load_dotenv()
+    effects can't be tested by importing the already-loaded module in-process) in an isolated cwd
+    with its own .env, and checking that LOCAL_RUNNER_EARLY from that .env is visible."""
+    import subprocess
+    import shutil
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    shutil.copy(os.path.join(repo_root, "local_runner.py"), str(tmp_path / "local_runner.py"))
+    (tmp_path / ".env").write_text("LOCAL_RUNNER_EARLY=false\n")
+    script = (
+        "import local_runner\n"
+        "print('EARLY_ENABLED=' + str(local_runner.early_enabled()))\n"
+    )
+    (tmp_path / "check.py").write_text(script)
+    clean_env = {k: v for k, v in os.environ.items() if k != "LOCAL_RUNNER_EARLY"}
+    result = subprocess.run(["python3", "check.py"], cwd=str(tmp_path),
+                            capture_output=True, text=True, timeout=30, env=clean_env)
+    assert "EARLY_ENABLED=False" in result.stdout, (
+        f"local_runner.py did not pick up LOCAL_RUNNER_EARLY=false from .env -- "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}")
+
+
+def test_local_runner_defaults_early_enabled_true_without_env_override(tmp_path):
+    pytest.importorskip("dotenv", reason="python-dotenv not installed in this test environment")
+    """Contrast: with no .env override at all, early_enabled() must still default to True (the
+    documented default) -- the dotenv fix must not flip the default, only make real overrides work.
+
+    IMPORTANT: this subprocess must get a CLEAN environment, not inherit the pytest process's own
+    os.environ -- see tests/conftest.py's own module docstring: importing dashboard.py anywhere in
+    this pytest session loads Ali's REAL repo .env (including today's real LOCAL_RUNNER_EARLY=false)
+    into the pytest process's environment, which subprocess.run() would otherwise silently pass
+    through to the child, making this test fail for a completely different reason than a real bug
+    (caught by this exact failure while writing this test)."""
+    import subprocess
+    import shutil
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    shutil.copy(os.path.join(repo_root, "local_runner.py"), str(tmp_path / "local_runner.py"))
+    # no .env file at all in this tmp_path
+    script = (
+        "import local_runner\n"
+        "print('EARLY_ENABLED=' + str(local_runner.early_enabled()))\n"
+    )
+    (tmp_path / "check.py").write_text(script)
+    clean_env = {k: v for k, v in os.environ.items() if k != "LOCAL_RUNNER_EARLY"}
+    result = subprocess.run(["python3", "check.py"], cwd=str(tmp_path),
+                            capture_output=True, text=True, timeout=30, env=clean_env)
+    assert "EARLY_ENABLED=True" in result.stdout, (
+        f"stdout={result.stdout!r} stderr={result.stderr!r}")

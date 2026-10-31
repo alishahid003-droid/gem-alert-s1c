@@ -59,6 +59,31 @@ def _clean_shared_singletons(monkeypatch):
     yield
 
 
+# 1 Nov 2026 (Ali): found live -- adding SPRINT_SEED_USD=50 / COMPOUND_SEED_USD=50 to the real
+# .env (for the go_live.py $50 reseed flow) leaked through the SAME dashboard.py load_dotenv()
+# path the docstring above already warns about, except into executor/books.py's cfg() function,
+# which reads os.environ directly on every call rather than through a singleton -- so the existing
+# _clean_shared_singletons fixture above (which only resets CONFIG/EXECUTOR_CONFIG) didn't catch
+# it. 7 tests across test_router_books.py and test_sprint.py failed on a real run, all expecting
+# the old $100 default seed and getting $50 instead -- not a code regression, a test-isolation gap
+# that only surfaced once .env's actual seed values diverged from the suite's hardcoded $100
+# assumption. Strips every *_SEED_USD / *_TARGET_USD / *_DAYS book-config override pytest's own
+# process may have inherited from a real .env, before each test, same autouse pattern as above.
+_BOOK_ENV_VARS_TO_CLEAR = (
+    "SPRINT_SEED_USD", "SPRINT_TARGET_USD", "SPRINT_DAYS",
+    "COMPOUND_SEED_USD", "COMPOUND_BANK_PCT",
+    "CORE1_SEED_USD", "CORE1_TARGET_USD", "CORE1_DAYS",
+    "CORE2_SEED_USD", "CORE2_TARGET_USD", "CORE2_DAYS",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_book_env_overrides(monkeypatch):
+    for k in _BOOK_ENV_VARS_TO_CLEAR:
+        monkeypatch.delenv(k, raising=False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _paper_stats_include_all(monkeypatch):
     """Fixture timestamps predate the live paper-stats cutoff

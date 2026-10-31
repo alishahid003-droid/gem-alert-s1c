@@ -25,6 +25,25 @@ import sys
 import time
 from typing import Dict, List, Tuple
 
+# 1 Nov 2026 (Ali): REAL BUG FOUND -- this file never called load_dotenv() at all, unlike every
+# other entry-point process in this repo (worker_early_watch.py, dashboard.py, backtest.py all do
+# it at their own top). early_enabled() below reads os.environ.get("LOCAL_RUNNER_EARLY", "true")
+# directly in THIS process, at main() startup, BEFORE worker_early_watch.py is even spawned --
+# with .env never loaded into this process's environment, that read silently fell back to the
+# default "true" every single time, regardless of what .env actually said. Confirmed from the
+# live logs: LOCAL_RUNNER_EARLY=false was set in .env this morning (31 Oct), start_local_mode.bat
+# was run at 21:17:45 PKT believing it would stop solana -- and logs/local_early-watch.log shows
+# early-watch started AGAIN at exactly 21:17:45, and 6 more solana trades closed afterward,
+# the latest just 16 minutes before this fix. The disable was never actually in effect, from the
+# very first time it was set, through every restart today -- this was a silent no-op the whole
+# time, not a stale-process/restart-timing issue as earlier diagnosed. Loading .env here, the same
+# way every other process in this repo already does, is the fix.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
