@@ -244,7 +244,11 @@ def act(decision: dict, send=None, now=None) -> dict:
         # executor/books.py BOOKS and _SOLANA_LANE_MAP above) so pattern-tracking data never
         # mixes into sprint/compound/core1/core2's live win-rate while those are being finalized
         # on robinhood_chain+base. Only affects stake sizing / ledger module -- scoring/entry
-        # decision logic upstream is untouched.
+        # decision logic upstream is untouched. IMPORTANT: _rmap (built from fast_lane.route())
+        # is keyed by the ORIGINAL lane name, so fast-lane stake lookup below must use
+        # _orig_lane, never the remapped `lane` -- using `lane` there raised a real KeyError
+        # (caught by tests/test_early_entry.py's fast-lane tests, not a pre-existing failure).
+        _orig_lane = lane
         if lane in _SOLANA_LANE_MAP:          # worker_early_watch.py is Solana-only end to end
             lane = _SOLANA_LANE_MAP[lane]
         conf = decision.get("confirmations") or []
@@ -252,7 +256,7 @@ def act(decision: dict, send=None, now=None) -> dict:
         tier = "conviction" if len(strong) >= 4 else "standard" if len(strong) >= 2 else "probe"
         if fast:
             ok, why = fast_lane.paper_gate()
-            stake = _rmap[lane]["stake"] if ok else 0.0
+            stake = _rmap[_orig_lane]["stake"] if ok else 0.0
         else:
             ok, why = books.can_open(lane, strong=len(strong) >= 4)
             stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
@@ -293,7 +297,7 @@ def act(decision: dict, send=None, now=None) -> dict:
                 refused.append(f"{lane}: live blocked ({l_why})")
         except Exception as e:  # noqa: BLE001
             refused.append(f"{lane}: live error {type(e).__name__}")
-        _ledger_module = _SOLANA_LANE_MAP.get(_rmap[lane]["book"], _rmap[lane]["book"]) if fast else lane
+        _ledger_module = _SOLANA_LANE_MAP.get(_rmap[_orig_lane]["book"], _rmap[_orig_lane]["book"]) if fast else lane
         pos = paper_ledger.open_paper(
             "solana", mint, f"early_{lane}", f"early_{lane}", stake, mcap_usd, strategy=strategy, exit_profile=profile,
             live=is_live,

@@ -114,11 +114,11 @@ def test_act_opens_paper_in_each_lane_and_alerts():
            "confirmations": ["smart_wallet", "velocity", "pressure"], "smart": ["w3"], "potential": "100x+"}
     sent = []
     out = w.act(dec, send=lambda m: sent.append(m), now=T0)
-    assert out["opened"] == ["core2", "compound"]
+    assert out["opened"] == ["solana_core2", "solana_compound"]  # 1 Nov 2026: solana isolation (449b853)
     book = paper_ledger._open()
-    assert book["early_core2:solana:MintA"]["module"] == "core2" and book["early_core2:solana:MintA"]["exit_profile"] == "core2"
-    assert book["early_compound:solana:MintA"]["exit_profile"] == "compound" and book["early_compound:solana:MintA"]["strategy"] == "early"
-    assert book["early_core2:solana:MintA"]["entry_mcap"] == pytest.approx(33.0 * 150)
+    assert book["early_solana_core2:solana:MintA"]["module"] == "solana_core2" and book["early_solana_core2:solana:MintA"]["exit_profile"] == "core2"
+    assert book["early_solana_compound:solana:MintA"]["module"] == "solana_compound" and book["early_solana_compound:solana:MintA"]["exit_profile"] == "compound" and book["early_solana_compound:solana:MintA"]["strategy"] == "early"
+    assert book["early_solana_core2:solana:MintA"]["entry_mcap"] == pytest.approx(33.0 * 150)
     assert sent and "CORE 2" in sent[0] and "EARLY ENTRY" in sent[0]
     assert w.act(dec, send=lambda m: sent.append(m), now=T0) == {"skipped": "already acted"}
 
@@ -392,11 +392,12 @@ def test_repeat_grad_no_hot_meta_sprint_stake_full(monkeypatch):
               "age_s": 40.0, "mcap_sol": 33.0, "entry_mcap_sol": 33.0, "buyers": 12, "buys": 14, "sells": 1,
               "confirmations": ["repeat_grad"], "smart": [], "potential": "10x-50x"}
     out = w.act(dec_rg, send=lambda m: None, now=T0)
-    assert out.get("opened") == ["sprint"]
+    assert out.get("opened") == ["solana_sprint"]  # 1 Nov 2026: solana isolation (449b853)
     book = paper_ledger._open()
-    pos = book.get("early_sprint:solana:MintRG")
+    pos = book.get("early_solana_sprint:solana:MintRG")
     assert pos is not None
-    assert pos["usd"] == books.tier_stake_usd("sprint", "probe", 33.0 * 150)
+    assert pos["module"] == "solana_sprint"
+    assert pos["usd"] == books.tier_stake_usd("solana_sprint", "probe", 33.0 * 150)
 
 
 def test_non_repeat_grad_sprint_stake_unaffected(monkeypatch):
@@ -406,7 +407,7 @@ def test_non_repeat_grad_sprint_stake_unaffected(monkeypatch):
                 "age_s": 40.0, "mcap_sol": 33.0, "entry_mcap_sol": 33.0, "buyers": 12, "buys": 14, "sells": 1,
                 "confirmations": ["smart_wallet", "velocity", "pressure"], "smart": ["w3"], "potential": "10x-50x"}
     out = w.act(dec_real, send=lambda m: None, now=T0)
-    assert out.get("opened") == ["sprint"]
+    assert out.get("opened") == ["solana_sprint"]  # 1 Nov 2026: solana isolation (449b853)
 
 
 def test_repeat_grad_blocked_when_hot_meta_also_fires():

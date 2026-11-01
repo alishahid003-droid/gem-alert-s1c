@@ -57,18 +57,25 @@ def test_free_signal_opens_exactly_one_position_in_fast_module(monkeypatch):
     from executor import pumpportal_exec
     monkeypatch.setattr(pumpportal_exec, "buy", lambda *a, **k: (_ for _ in ()).throw(AssertionError("live buy must not fire")))
     out = w.act(_dec("MintFastA", 60.0, 40.0), send=lambda m: None, now=T0)
-    assert out["opened"] == ["fast_sprint", "compound"]
+    # 1 Nov 2026: solana isolation (449b853) -- "opened" appends the (possibly remapped) `lane`
+    # variable. "fast_sprint" is a fast_lane PROFILE name, not in _SOLANA_LANE_MAP, so it is
+    # untouched; "compound" IS in the map and becomes "solana_compound" (worker_early_watch.py
+    # is solana-only end to end).
+    assert out["opened"] == ["fast_sprint", "solana_compound"]
     pos = {p["exit_profile"]: p for p in paper_ledger._open().values() if p["token"] == "MintFastA"}
     assert set(pos) == {"fast_sprint", "compound"}                   # one moonshot book + the in/out stream, no triple copy
-    assert pos["fast_sprint"]["module"] == "sprint" and pos["fast_sprint"]["usd"] == 5.0
-    assert pos["compound"]["module"] == "compound" and not pos["fast_sprint"]["live"]
+    # exit_profile keys stay the original fast_lane profile names (unaffected by the module remap)
+    assert pos["fast_sprint"]["module"] == "solana_sprint" and pos["fast_sprint"]["usd"] == 5.0
+    assert pos["compound"]["module"] == "solana_compound" and not pos["fast_sprint"]["live"]
 
 
 def test_fast_paper_capacity_refuses_without_burning_book_slots(monkeypatch):
     monkeypatch.setenv("FAST_PAPER_MAX_OPEN", "2")
     a = w.act(_dec("MintFastB", 60.0, 40.0), send=lambda m: None, now=T0)
     b = w.act(_dec("MintFastC", 60.0, 41.0), send=lambda m: None, now=T0 + 1)
-    assert a["opened"] == ["fast_sprint", "compound"] and b["opened"] == [] and b["refused"]
+    # "compound" in "opened" becomes "solana_compound" (1 Nov 2026, 449b853) -- see
+    # test_free_signal_opens_exactly_one_position_in_fast_module for why.
+    assert a["opened"] == ["fast_sprint", "solana_compound"] and b["opened"] == [] and b["refused"]
 
 
 def test_decision_outside_windows_is_skipped():
