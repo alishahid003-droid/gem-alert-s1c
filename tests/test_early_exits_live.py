@@ -29,13 +29,14 @@ def _run(mcap, now):
 def test_take_profits_then_trailing_stop():
     pos = _open()
     assert pos["cost_pct"] >= 0.10
-    # 31 Oct 2026 (Ali): core2's ladder now has a 1.3x rung (15%) ahead of the existing 2x rung
-    # (20%) -- see EARLY_RULES in executor/paper_ledger.py. One tick straight to 2.1x crosses BOTH
-    # tiers in the same manage() cycle (the ladder loop fires every tier <= the current mult, not
-    # just the nearest one), so remaining is now 1.0 - 0.15 - 0.20 = 0.65, not the old 0.80.
-    _run(10500, 1010)                      # 2.1x -> sells 1.3x rung (15%) + 2x rung (20%) = 35%
+    # 2 Nov 2026 (Ali audit): core2's 1.3x/2x rungs trimmed from (0.15, 0.20) to (0.10, 0.15) --
+    # more of a real winner rides, since a $50 stake's runner alone would need ~50,000x to reach
+    # $1M and raising it further gives up more on the 2-4x band that's already working on real
+    # data. One tick straight to 2.1x crosses BOTH tiers in the same manage() cycle, so remaining
+    # is now 1.0 - 0.10 - 0.15 = 0.75.
+    _run(10500, 1010)                      # 2.1x -> sells 1.3x rung (10%) + 2x rung (15%) = 25%
     p = paper_ledger._open()["early_core2:solana:MINT1"]
-    assert abs(p["remaining"] - 0.65) < 1e-6
+    assert abs(p["remaining"] - 0.75) < 1e-6
     _run(25000, 1020)                      # 5x -> 4x rung sells 25%
     _run(40000, 1030)                      # 8x peak
     _run(15000, 1040)                      # 3x = 37% of peak -> trailing stop (0.40)
@@ -78,13 +79,13 @@ def test_live_sell_is_mirrored(monkeypatch):
     calls = []
     monkeypatch.setattr(pumpportal_exec, "sell", lambda m, pct: calls.append((m, round(pct))) or {"ok": True})
     _open(live=True)
-    # 31 Oct 2026: same ladder change as test_take_profits_then_trailing_stop above -- one tick to
-    # 2.1x now fires both the 1.3x (15%) and 2x (20%) rungs in the same cycle. Each rung sells its
-    # fraction of the ORIGINAL stake as a pct of what's CURRENTLY remaining at the time it fires:
-    # the 1.3x rung fires first at 100% remaining -> sells 15% of that (round(pct)=15); the 2x rung
-    # then fires against the new 85% remaining -> sells 0.20/0.85 = ~23.5% of what's left (round=24).
+    # 2 Nov 2026: ladder trimmed to (0.10, 0.15) -- see test_take_profits_then_trailing_stop. One
+    # tick to 2.1x fires both rungs in the same cycle. Each rung sells its fraction of the ORIGINAL
+    # stake as a pct of what's CURRENTLY remaining when it fires: the 1.3x rung fires first at 100%
+    # remaining -> sells 10% of that (round(pct)=10); the 2x rung then fires against the new 90%
+    # remaining -> sells 0.15/0.90 = ~16.7% of what's left (round=17).
     _run(10500, 1010)
-    assert calls == [("MINT1", 15), ("MINT1", 24)]
+    assert calls == [("MINT1", 10), ("MINT1", 17)]
 
 
 def test_daily_loss_cap(monkeypatch):
@@ -158,24 +159,24 @@ def test_analyze_script_runs(tmp_path, monkeypatch, capsys):
 # ---- 1.3x sub-rung (Ali, 31 Oct 2026) -----------------------------------------------------------
 
 def test_sub_2x_rung_fires_and_banks_profit_before_a_reversal():
-    """31 Oct 2026: the exact gap diagnosed today -- a coin that runs to 1.3x-2x then reverses
+    """31 Oct 2026: the exact gap diagnosed that day -- a coin that runs to 1.3x-2x then reverses
     used to get ZERO profit protection (first rung was 2x). Now a coin that peaks at 1.5x (clears
-    the new 1.3x core2 rung at 15%) and then reverses back toward entry should have banked
-    something real on the way, not ridden the whole move down to a full loss on 100% of the stake."""
+    the 1.3x core2 rung, trimmed 2 Nov 2026 to 10%) and then reverses back toward entry should have
+    banked something real on the way, not ridden the whole move down to a full loss on the stake."""
     _open(usd=100.0)                       # core2, $100 stake, entry mcap 5000
-    _run(6500, 1010)                       # 1.3x -> fires the new rung, sells 15% of original
+    _run(6500, 1010)                       # 1.3x -> fires the rung, sells 10% of original
     p = paper_ledger._open()["early_core2:solana:MINT1"]
-    assert abs(p["remaining"] - 0.85) < 1e-6
+    assert abs(p["remaining"] - 0.90) < 1e-6
     assert "1.3" in p["rungs_fired"]
     # reverses hard toward entry -- without the rung, this would be a near-total loss on $100;
-    # with it, 15% of the stake was already banked as real profit before the drop. core2's hard
+    # with it, 10% of the stake was already banked as real profit before the drop. core2's hard
     # stop fires at mult <= 0.35 (see EARLY_RULES), so drop well under that to trip it cleanly.
     _run(1500, 1020)                       # 0.3x of entry -> hard stop (<=0.35)
     closed = paper_ledger._closed_raw()[-1]    # _closed() filters to STATS_SINCE_TS; this test uses epoch-near timestamps
     assert closed["exit_type"] == "stop_loss"
-    # the 15% already sold at 1.3x locked in profit on that slice -- bounds the overall loss
+    # the 10% already sold at 1.3x locked in profit on that slice -- bounds the overall loss
     # tighter than a full-stake stop-loss from entry would (sanity bound, not an exact figure)
-    assert closed["pnl_usd"] > -100.0 * 0.70   # well short of a full -$70+ loss on $100
+    assert closed["pnl_usd"] > -100.0 * 0.75   # well short of a full -$75+ loss on $100
 
 
 def test_sub_2x_rung_does_not_fire_below_1_3x():
@@ -200,13 +201,15 @@ def test_compound_sub_2x_rung_uses_its_own_25pct_fraction():
     assert "1.3" in p["rungs_fired"]
 
 
-def test_sprint_sub_2x_rung_uses_15pct_fraction():
+def test_sprint_sub_2x_rung_uses_10pct_fraction():
+    """2 Nov 2026: sprint's 1.3x rung trimmed from 15% to 10% (same change as core2/core1) --
+    more of a real winner rides past the early rungs."""
     paper_ledger.open_paper("solana", "SMINT", "early_sprint", "early_sprint", 100.0, 5000.0,
                             strategy="early", exit_profile="sprint", now=1000.0)
     paper_ledger.manage(lambda c, t: {"mcap_usd": 6500, "liquidity_usd": 9999}, now=1010,
                         source_prefix="early_")
     p = paper_ledger._open()["early_sprint:solana:SMINT"]
-    assert abs(p["remaining"] - 0.85) < 1e-6
+    assert abs(p["remaining"] - 0.90) < 1e-6
 
 
 def test_dev_list_and_leaderboard_unaffected_by_sub_2x_rung():

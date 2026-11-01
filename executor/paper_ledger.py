@@ -327,10 +327,17 @@ def _manage_scalper(pos: dict, mcap: float, now: float) -> bool:
 # conservative 15%, consistent with their own existing first-rung weighting and their role as the
 # more aggressive/moonshot-oriented books where more should still ride past 1.3x.
 EARLY_RULES = {
-    "sprint": ({1.3: 0.15, 2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
-    # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x)
-    "core2": ({1.3: 0.15, 2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
-    "core1": ({1.3: 0.15, 2: 0.20, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    # 2 Nov 2026 (Ali audit): rebalanced core1/core2/sprint's early rungs from
+    # (0.15, 0.20, 0.15, 0.10) -- which sold 60% by 10x, leaving only 40% to ride a real
+    # moonshot -- to (0.10, 0.15, 0.15, 0.10), selling 50% by 10x and leaving 50% to ride.
+    # Real data (63 closed trades, 1.5 days): a $50 stake needs its runner alone to hit
+    # ~50,000x to reach $1M -- no single realistic coin move gets there, so the fix isn't
+    # "ride more of one coin," it's "keep slightly more of every real winner so repeated
+    # trades compound faster." See EARLY_TRAIL_RATCHET below for the matching trail change.
+    "sprint": ({1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x -- unused when a ratchet is defined below, kept as the fallback)
+    "core2": ({1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "core1": ({1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}, 0.35, 0.50),
     "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.68),
     # FAST module (14 Oct 2026): earlier first slice, trail starts at 1.4x (see EARLY_TRAIL_AFTER), big runner
     "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.65),
@@ -342,6 +349,33 @@ EARLY_RULES = {
 
 
 EARLY_TRAIL_AFTER = {"fast_sprint": 1.4, "fast_core": 1.5, "fast_moon": 3.0}      # peak multiple from which the trailing stop replaces the hard stop (default 2.0)
+
+# 2 Nov 2026 (Ali audit): core1/core2/sprint's flat 50%-giveback trailing stop was confirmed (real
+# closed-trade replay) to flush genuine moonshots before their own ladder's 4x/10x rungs could fire
+# -- e.g. one real ELONPAD trade peaked 8.23x and exited at 3.64x, giving back 56%. The 2x-4x band
+# is NOT changed (37% of the sample peaks there and that band is working fine as-is); only runs that
+# prove themselves past 4x get a tighter, ratcheting giveback, so a confirmed real mover keeps more
+# of its gain the higher it climbs, instead of one flat percentage applying everywhere.
+EARLY_TRAIL_RATCHET = {
+    "sprint": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
+    "core1": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
+    "core2": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
+}   # (activation_peak_mult, giveback_lock_pct) bands, checked highest-first; a book not listed keeps its flat trail from EARLY_RULES
+
+
+def _ratchet_trail(exit_profile: str, peak_mult: float, fallback_trail: float) -> float:
+    """Returns the giveback-lock fraction (how much of PEAK the trailing-stop exit price
+    locks in) for the current peak. Higher peak -> tighter lock (more of the real gain is
+    protected), matching EARLY_TRAIL_RATCHET's bands for this profile; unlisted profiles or a
+    peak below the lowest band fall back to the book's flat EARLY_RULES trail unchanged."""
+    bands = EARLY_TRAIL_RATCHET.get(exit_profile)
+    if not bands:
+        return fallback_trail
+    lock = fallback_trail
+    for activation, pct in bands:
+        if peak_mult >= activation:
+            lock = pct
+    return lock
 
 
 def _manage_early(pos: dict, mcap: float, now: float) -> bool:
@@ -379,8 +413,9 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
         why = ("stop_loss", f"no pop after {age_min:.1f} min ({mult:.2f}x, never reached {no_pop_mult}x)")
     if why is None and peak < ta and mult <= stop:
         why = ("stop_loss", f"hard stop at {mult:.2f}x")
-    elif peak >= ta and mult <= peak * trail:
-        why = ("trailing_stop", f"{mult:.1f}x is {int((1 - trail) * 100)}% below the {peak:.1f}x peak")
+    elif peak >= ta and mult <= peak * _ratchet_trail(pos.get("exit_profile") or "", peak, trail):
+        _trail = _ratchet_trail(pos.get("exit_profile") or "", peak, trail)
+        why = ("trailing_stop", f"{mult:.1f}x is {int((1 - _trail) * 100)}% below the {peak:.1f}x peak")
     # 20 Oct 2026: every time_stop exit in 1,090 paper trades fired at exactly
     # ~90 min (never earlier, never later -- it's a hard flush, not catching
     # a real reversal) with a median loss of -35% (range -9% to -67%), zero
