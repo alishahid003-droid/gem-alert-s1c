@@ -327,9 +327,23 @@ def pace(book_id: str, now: Optional[float] = None, eq: Optional[float] = None) 
 
 def max_open(book_id: str, eq: Optional[float] = None) -> int:
     """Moonshot books take MORE small shots (lottery odds need shots on goal);
-    other books stay tighter."""
+    other books stay tighter.
+
+    1 Nov 2026 (Ali): real overnight data showed compound genuinely stuck -- 5 legitimate open
+    positions (all actively managed, unpriced_cycles=0, rungs firing correctly, none stuck or
+    silently failing) against a cap of only 2 (+2 strong-signal extra = 4) at its ~$700 equity
+    band, so it refused every new entry for hours while 5 real winners were still riding.
+    Root cause: compound's own EARLY_RULES exit design (wide hard_stop/trail_giveback, see
+    paper_ledger.py) deliberately holds winners 11-21+ hours -- the position-count cap was never
+    sized for how long compound's own exits are designed to hold a trade. Fix: give "daily"-kind
+    books (currently only compound) the same wider ladder moonshot books get, since compound's
+    long-hold exit behavior has the same "don't starve a real winner for capacity" need moonshot
+    books were already given -- not a general loosening of risk, purely a capacity-vs-hold-time
+    fix for a book that was structurally blocking itself. sprint/core1/core2 (kind=="moonshot")
+    and anything else kind=="daily" in the future get this too; nothing about stake sizing or
+    exit logic changed."""
     eq = equity(book_id) if eq is None else eq
-    steps = (3, 4, 5, 6) if cfg(book_id)["kind"] == "moonshot" else (1, 2, 3, 4)
+    steps = (3, 4, 5, 6) if cfg(book_id)["kind"] in ("moonshot", "daily") else (1, 2, 3, 4)
     return steps[0] if eq < 300 else steps[1] if eq < 3_000 else steps[2] if eq < 30_000 else steps[3]
 
 
