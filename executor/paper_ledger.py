@@ -102,6 +102,27 @@ def _closed_raw() -> list:
     return v if isinstance(v, list) else []
 
 
+# 1 Nov 2026 (Ali audit): manage() is called from scheduler.py, worker_early_watch.py, and
+# worker_fast_watch.py -- separate OS processes on Windows, not threads, so _OPEN_LOCK (a plain
+# threading.RLock) provides zero cross-process protection. When two of these processes' manage()
+# calls overlap on the same open position (both read it as open, both independently decide to
+# close it, both append their own closed-row copy), the read-modify-write on CLOSED_KEY below lets
+# BOTH appends land -- confirmed in production state: one eETH position (same id, same opened_ts)
+# appears 3x in paper_closed_positions with closed_ts seconds apart, inflating win/loss counts and
+# total_pnl in every stats report built from this list. Dedupe on write by (id, opened_ts) -- the
+# true position identity -- keeping the first-seen close (whichever process won the race first).
+def _dedupe_closed(rows: list) -> list:
+    seen = set()
+    out = []
+    for r in rows:
+        key = (r.get("id"), r.get("opened_ts"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
 # Paper trades opened before the entry-price fix (PR #13, Sept 30 2026 ~15:35
 # UTC) were priced against an entry mcap from a different source/unit: the
 # dashboard showed 8 closed at 0% wins / -49.5%, with -93..-96% "stops" on
@@ -253,7 +274,7 @@ def swap_out(module_id: str, now: Optional[float] = None) -> Optional[dict]:
     row = _close(pos, "slot_swap", f"swapped out at {mult:.2f}x to free a slot for a stronger signal", now)
     del book[pid]
     state.set_value(OPEN_KEY, book)
-    state.set_value(CLOSED_KEY, (_closed_raw() + [row])[-MAX_CLOSED_KEPT:])
+    state.set_value(CLOSED_KEY, _dedupe_closed(_closed_raw() + [row])[-MAX_CLOSED_KEPT:])
     return row
 
 
@@ -539,7 +560,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 book[_pid] = _p
         state.set_value(OPEN_KEY, book)
         if closed_now:
-            state.set_value(CLOSED_KEY, (_closed_raw() + closed_now)[-MAX_CLOSED_KEPT:])
+            state.set_value(CLOSED_KEY, _dedupe_closed(_closed_raw() + closed_now)[-MAX_CLOSED_KEPT:])
     return {"open": len(book), "closed_now": len(closed_now)}
 
 
