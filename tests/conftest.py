@@ -84,6 +84,29 @@ def _clean_book_env_overrides(monkeypatch):
     yield
 
 
+# 1 Nov 2026 (Ali audit): FOMOAPI_DAILY_CREDIT_BUDGET=0 is now set in the real .env (Fomo
+# intentionally paused while credits are repaced over a month -- see layer13_fomo_copytrade.py's
+# _daily_budget()). That function reads os.environ DIRECTLY on every call, same leak class as the
+# *_SEED_USD vars above, and nothing reset it -- so every test that exercises _fomo_get()'s success
+# path (fetch_trader_pnl, fetch_trader_profile, fetch_fomo_alerts, etc.) got silently refused with
+# "daily credit budget reached (0/0)" no matter what the test's own get_json mock returned. Looked
+# like file-order-dependent flakiness (passed when a file ran alone and had already monkeypatched
+# its own temporary budget via setenv; failed once collected with other files that hadn't) but the
+# real cause was this single inherited env var, present for the whole pytest process regardless of
+# order. Giving tests a real, non-zero default budget here removes the false "flake" entirely --
+# any test that specifically wants to exercise the 0-budget/exhausted path still sets it itself via
+# monkeypatch.setenv, same as test_layer13_fomo_copytrade.py already does for its 402 test.
+_FOMO_ENV_VARS_TO_CLEAR = ("FOMOAPI_DAILY_CREDIT_BUDGET", "FOMO_ALERTS_MIN_INTERVAL_SECONDS",
+                           "FOMO_LEADERBOARD_INTERVAL_SECONDS")
+
+
+@pytest.fixture(autouse=True)
+def _clean_fomo_env_overrides(monkeypatch):
+    for k in _FOMO_ENV_VARS_TO_CLEAR:
+        monkeypatch.delenv(k, raising=False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _paper_stats_include_all(monkeypatch):
     """Fixture timestamps predate the live paper-stats cutoff
