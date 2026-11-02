@@ -24,11 +24,22 @@ def _f(name: str, default: float) -> float:
 
 
 # profile -> (book id = ledger module, env name for stake, default stake USD)
+# 3 Nov 2026 (Ali, critical fix): this file only ever runs from worker_early_watch.py's
+# fast-lane path, which is SOLANA-ONLY end to end (see that file's own comment at its
+# _SOLANA_LANE_MAP). This table used to point straight at the real sprint/core1/core2/compound
+# books -- bypassing the Nov 1 Solana-isolation rule entirely, because this file predates that
+# rule and was never updated. Real effect: every fast-lane paper trade (all Solana, since this
+# whole file is Solana-only) was landing inside the real books' own equity/win-rate, mixed in
+# with the robinhood_chain+base trades those books are supposed to be proving a pattern on for
+# live deployment. Confirmed via raw closed-trade `module` field: 99 of 353 "real book" closed
+# trades had chain=="solana" and came through here. Fixed by pointing directly at the isolated
+# solana_* pattern-watch books -- Solana data keeps flowing into its own separate module exactly
+# as designed, and never touches the real books' numbers again.
 STREAMS = {
-    "fast_moon": ("core2", "FAST_MOON_STAKE_USD", 2.0),
-    "fast_sprint": ("sprint", "FAST_SPRINT_STAKE_USD", 5.0),
-    "fast_core": ("core1", "FAST_CORE_STAKE_USD", 4.0),
-    "compound": ("compound", "FAST_COMPOUND_STAKE_USD", 4.0),
+    "fast_moon": ("solana_core2", "FAST_MOON_STAKE_USD", 2.0),
+    "fast_sprint": ("solana_sprint", "FAST_SPRINT_STAKE_USD", 5.0),
+    "fast_core": ("solana_core1", "FAST_CORE_STAKE_USD", 4.0),
+    "compound": ("solana_compound", "FAST_COMPOUND_STAKE_USD", 4.0),
 }
 
 

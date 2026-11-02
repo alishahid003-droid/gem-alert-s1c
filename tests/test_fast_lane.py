@@ -27,8 +27,12 @@ def _d(age, mc, conf=("pressure_free", "velocity_free")):
 
 
 def test_router_one_moonshot_book_plus_optional_compound():
+    # 3 Nov 2026 (Ali, critical fix): STREAMS now points at the isolated solana_* pattern-watch
+    # books, never the real sprint/core1/core2/compound books -- this whole fast-lane path only
+    # ever runs on Solana coins (worker_early_watch.py is Solana-only end to end), and Solana
+    # must stay isolated until it has a proven winning pattern.
     r = fast_lane.route(_d(60, 30))
-    assert [x["profile"] for x in r] == ["fast_sprint", "compound"] and [x["book"] for x in r] == ["sprint", "compound"]
+    assert [x["profile"] for x in r] == ["fast_sprint", "compound"] and [x["book"] for x in r] == ["solana_sprint", "solana_compound"]
     r = fast_lane.route(_d(300, 30))
     assert [x["profile"] for x in r] == ["fast_core", "compound"]
     assert fast_lane.route(_d(60, 200)) == []
@@ -39,7 +43,7 @@ def test_router_one_moonshot_book_plus_optional_compound():
 
 def test_router_moon_lottery_needs_famous_name_and_three_confirmations():
     conf = ("pressure_free", "velocity_free", "famous_name")
-    assert fast_lane.route(_d(40, 30, conf))[0] == {"profile": "fast_moon", "book": "core2", "stake": 2.0}
+    assert fast_lane.route(_d(40, 30, conf))[0] == {"profile": "fast_moon", "book": "solana_core2", "stake": 2.0}
     assert fast_lane.route(_d(40, 30))[0]["profile"] == "fast_sprint"          # no famous name -> sprint
     assert fast_lane.route(_d(90, 30, conf))[0]["profile"] == "fast_sprint"    # too old for moon
 
