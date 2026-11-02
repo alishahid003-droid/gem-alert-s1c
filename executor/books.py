@@ -335,15 +335,45 @@ def max_open(book_id: str, eq: Optional[float] = None) -> int:
     band, so it refused every new entry for hours while 5 real winners were still riding.
     Root cause: compound's own EARLY_RULES exit design (wide hard_stop/trail_giveback, see
     paper_ledger.py) deliberately holds winners 11-21+ hours -- the position-count cap was never
-    sized for how long compound's own exits are designed to hold a trade. Fix: give "daily"-kind
-    books (currently only compound) the same wider ladder moonshot books get, since compound's
-    long-hold exit behavior has the same "don't starve a real winner for capacity" need moonshot
-    books were already given -- not a general loosening of risk, purely a capacity-vs-hold-time
-    fix for a book that was structurally blocking itself. sprint/core1/core2 (kind=="moonshot")
-    and anything else kind=="daily" in the future get this too; nothing about stake sizing or
-    exit logic changed."""
+    sized for how long compound's own exits are designed to hold a trade. First fix (same night):
+    gave "daily"-kind books the same wider step ladder moonshot books get.
+
+    2 Nov 2026 (Ali audit): that step ladder fix was NOT ENOUGH -- compound went silent a SECOND
+    time overnight. Real data: equity $2,558 (still under the $3,000 step boundary) with 8 real
+    open positions (all green or near-flat, none stuck), but the step ladder only allowed 4 (+2
+    strong = 6) at that equity band. $2,036 of free capital (80% of equity) sat idle behind a pure
+    position-COUNT ceiling while real signals kept getting refused. A static step ladder will
+    always eventually lag a book whose equity is compounding this fast -- any fixed band gets
+    outgrown before the next threshold arrives. Real fix: for "daily"-kind books (compound), size
+    the cap off actual committed capital instead of a step count -- allow as many positions as fit
+    under max_share of equity at this book's typical per-position stake, with a floor of 4 so a
+    small/early book isn't starved before it has meaningful capital. "moonshot" books (sprint/
+    core1/core2) keep the step ladder unchanged -- their stake sizes are small and roughly fixed,
+    so the old count-based limit was never the bottleneck for them (confirmed: they are NOT
+    showing this self-starvation pattern, only compound is)."""
     eq = equity(book_id) if eq is None else eq
-    steps = (3, 4, 5, 6) if cfg(book_id)["kind"] in ("moonshot", "daily") else (1, 2, 3, 4)
+    c = cfg(book_id)
+    if c["kind"] == "daily":
+        # Capital-based cap (2 Nov 2026): how many of this book's REAL, currently-committed average
+        # stake sizes fit under max_share of equity -- using stake_usd()'s actual return (which
+        # already applies every real cap: hard_cap=seed*3, max_share, free_equity, pace adjustment),
+        # not a re-derived formula. A re-derivation using shot_pct alone was tried first and was
+        # wrong -- stake_usd()'s hard_cap (seed*MAX_STAKE_SEED_MULT) dominates for any book whose
+        # equity has grown past a few multiples of its seed, so the real typical stake is far
+        # smaller than shot_pct*equity suggests. Falls back to committed_usd()/open_count() (the
+        # book's own actual average open stake) when fresh stake_usd() returns 0 (e.g. book is
+        # fully committed right now) so the cap still reflects reality instead of guessing.
+        n_open_now = open_count(book_id)
+        committed = committed_usd(book_id)
+        avg_open_stake = (committed / n_open_now) if n_open_now else 0.0
+        # Use the book's own REAL average open stake as the "typical" size, not a freshly computed
+        # max-sized next stake (stake_usd() often returns the hard_cap, which overstates the size
+        # of a typical position and under-counts real capacity). Falls back to stake_usd() only
+        # when nothing is open yet (avg_open_stake is undefined with zero positions).
+        typical_stake = max(avg_open_stake or stake_usd(book_id), 5.0)
+        capacity = int((eq * c.get("max_share", 0.6)) / typical_stake) if typical_stake else 4
+        return max(4, capacity)
+    steps = (3, 4, 5, 6) if c["kind"] == "moonshot" else (1, 2, 3, 4)
     return steps[0] if eq < 300 else steps[1] if eq < 3_000 else steps[2] if eq < 30_000 else steps[3]
 
 
