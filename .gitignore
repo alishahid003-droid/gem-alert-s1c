@@ -13,3 +13,5 @@ KILL_SWITCH
 # secrets backup copies - never commit
 .env.*
 !.env.example
+grad_runners/*.jsonl
+catalyst_log/*.jsonl
