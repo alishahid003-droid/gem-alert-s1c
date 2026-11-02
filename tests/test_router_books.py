@@ -120,9 +120,16 @@ def test_router_integration_core_moonshot_into_book(monkeypatch):
     assert res["fired"] is False
     pos = paper_ledger._open()["core2:solana:TokC2"]
     assert pos["module"] == "core2" and pos["usd"] == books.stake_usd("core2") or pos["usd"] == 25.0
-    for i in range(2):
-        paper_ledger.open_paper("solana", f"X{i}", "core2", "moonshot", 10, 50_000, module="core2")
-    # book limit reached: next entry is refused with the book's reason
+    # 2 Nov 2026: a few small $10 fills no longer blocks core2 (its position-count cap is now
+    # capacity-based, not a static 3, per the earlier 2 Nov fix) -- fill to its REAL position-count
+    # ceiling instead, which still blocks regardless of pool borrowing (pooling only widens STAKE
+    # SIZE when a book's own cash is tapped out; it never raises the position-count ceiling, so a
+    # book genuinely at its count limit is still refused even with pool capital available).
+    for i in range(4):
+        r = paper_ledger.open_paper("solana", f"X{i}", "core2", "moonshot", 20, 50_000,
+                                     strategy="early", exit_profile="core2", module="core2")
+        assert r is not None
+    assert books.can_open("core2")[0] is False   # confirm the real ceiling was actually reached
     res2 = handle_moonshot_candidate("solana", "TokC2b", "B", 150_000, 40_000, 70, {}, book="core2")
     assert "core2 book" in res2["reason"] and "core2:solana:TokC2b" not in paper_ledger._open()
 

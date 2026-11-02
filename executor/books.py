@@ -423,6 +423,57 @@ def max_open(book_id: str, eq: Optional[float] = None) -> int:
     return max(4, int((eq * c.get("max_share", 0.6)) / max(fresh, 5.0)) if fresh else 4)
 
 
+# 2 Nov 2026 (Ali, pool borrowing): the 4 real books -- sprint/core1/core2/compound -- that
+# phase_target.py tracks combined equity across. Capital sharing only ever happens among these 4;
+# fomo/leaderboard/dev_list/solana_* copy and pattern-tracking books are never pool sources or
+# borrowers (same boundary phase_target.py and can_open()'s pause gate already use).
+POOL_BOOKS = ("sprint", "core1", "core2", "compound")
+
+# How much of its OWN committed capital a book may have sourced from borrowing against other
+# books' idle capital, as a multiple of what it would normally be able to stake from its own
+# equity alone. 2.0 means a book can run with up to 2x its own natural capacity when the rest of
+# the pool has room -- enough to stop a hot module starving next to idle siblings, without letting
+# one module permanently swallow the whole $100 (the other 3 books' can_open() keeps working off
+# their OWN equity, unaffected by what one book borrowed).
+POOL_BORROW_MULT = 2.0
+
+
+def pool_free_usd() -> float:
+    """Total UNCOMMITTED capital across the 4 real books right now -- equity minus committed, summed.
+    Ali's ask (2 Nov 2026): a fixed $25/module split on a real $100 live seed would starve whichever
+    module is busy (e.g. compound mid-signal-cycle) while another sits quiet with idle cash. This is
+    the shared-pool number a book can borrow against when its OWN free_equity() is too small for a
+    real signal but capital is genuinely sitting idle elsewhere in the same 4-book family."""
+    return round(sum(max(0.0, equity(b) - committed_usd(b)) for b in POOL_BOOKS), 2)
+
+
+def borrow_room_usd(book_id: str) -> float:
+    """How much MORE this book could stake right now by drawing on the shared pool, beyond what its
+    own equity alone would allow -- 0.0 for any book outside POOL_BOOKS (no borrowing for copy/
+    pattern-tracking books). Capped at (POOL_BORROW_MULT - 1) x the book's full natural capacity
+    (eq*effective_max_share, AS IF NOTHING WERE COMMITTED) so one module can never fully swallow
+    the other 3's capital, and further capped by what the pool genuinely has free right now. A
+    trade that borrows this way still counts in full toward the BORROWING module's own P&L/equity
+    -- 'home share' is a capital SOURCE, not a profit-attribution boundary (Ali, 2 Nov 2026:
+    simplest, matches how phase_target.py already only cares about the 4 books' COMBINED equity,
+    never per-module purity).
+
+    2 Nov 2026 fix: an earlier version based the cap on REMAINING room (eq*share - committed),
+    which backfires exactly for the module that actually needs to borrow -- a module already AT or
+    OVER its own risk ceiling (own_room == 0, Ali's example: compound mid-signal-cycle, already
+    committed past eq*share) got ZERO borrow room even with real idle cash sitting in siblings,
+    because 0 x anything is 0. The cap must be based on the book's FULL natural capacity
+    (eq*share, as if it had nothing committed yet), not what's left of it -- a busy module is
+    exactly the one this mechanism exists to help."""
+    if book_id not in POOL_BOOKS:
+        return 0.0
+    eq = equity(book_id)
+    share = effective_max_share(book_id)
+    full_natural_capacity = eq * share
+    extra_allowed = full_natural_capacity * (POOL_BORROW_MULT - 1.0)
+    return round(max(0.0, min(extra_allowed, pool_free_usd())), 2)
+
+
 def committed_usd(book_id: str) -> float:
     """Cost of this book's open (not yet closed) paper positions still at risk."""
     from executor import paper_ledger
@@ -508,7 +559,16 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
         elif r is not None and r > 1.5:
             base *= 0.8
     room_left = max(0.0, eq * share - committed_usd(book_id))
-    out = min(base, eq * share, room_left, free_equity(book_id))
+    # 2 Nov 2026 (Ali, pool borrowing): free_equity(book_id) alone only reflects this book's OWN
+    # idle cash -- on a real small live seed (e.g. $25/module of a $100 total), that starves a busy
+    # module sitting next to idle siblings (Ali's exact example: compound mid-signal-cycle with
+    # sprint/core1/core2 quiet). cash_available adds borrow_room_usd() -- capital genuinely idle
+    # elsewhere in the same 4-book family, capped at POOL_BORROW_MULT x this book's own natural
+    # capacity so one module can never fully swallow the other 3's capital. A trade sized this way
+    # still counts in full toward THIS book's own P&L (see borrow_room_usd()'s docstring) -- the
+    # pool is a capital source, not a profit-sharing split.
+    cash_available = free_equity(book_id) + borrow_room_usd(book_id)
+    out = min(base, eq * share + borrow_room_usd(book_id), room_left + borrow_room_usd(book_id), cash_available)
     # 27 Oct 2026: absolute backstop, independent of the equity math above. Every cap until now was
     # RELATIVE to equity() -- exactly the single point of failure a now-fixed accounting bug exploited
     # (a phantom equity reading let a single $100-seed book size a $1,289 stake, all caps "working
@@ -563,7 +623,13 @@ def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: O
     elif r is not None and r > 1.5:
         base *= 0.8
     cap_mc = _f("TIER_MAX_MCAP_FRAC", 0.02) * mcap if mcap else float("inf")
-    out = min(base, eq * TIER_MAX_SHARE, free_equity(book_id), cap_mc)
+    # 2 Nov 2026 (Ali, pool borrowing): same reasoning as stake_usd() -- let sprint/core1/core2
+    # (the TIER_BOOK_SCALE books, which go through THIS function, not stake_usd() directly) draw on
+    # genuinely idle capital elsewhere in the 4-book family when their own free_equity() is tapped
+    # out but a real signal needs sizing. See borrow_room_usd()'s docstring for the cap/attribution
+    # rules.
+    cash_available = free_equity(book_id) + borrow_room_usd(book_id)
+    out = min(base, eq * TIER_MAX_SHARE + borrow_room_usd(book_id), cash_available, cap_mc)
     # 27 Oct 2026: same absolute backstop as stake_usd() below, pinned to the book's real seed rather
     # than its (possibly corrupted) current equity -- see that comment for the full reasoning. This is
     # the path the $1,289.59 oversized stake actually went through; every cap above it was relative to
