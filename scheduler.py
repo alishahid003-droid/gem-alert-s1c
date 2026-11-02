@@ -142,7 +142,7 @@ from layers.layer12_caller_channels import fetch_caller_channel_posts, extract_t
 from layers.layer13_fomo_copytrade import (
     fetch_new_alerts, newest_alert_iso, learn_handles_from_leaderboard,
     fetch_fomo_alerts, fetch_leaderboard, detect_roster_buys_and_theses,
-    find_new_trader_candidates,
+    find_new_trader_candidates, detect_new_wallet_buys,
 )
 from layers.pumpfun_trades import fetch_recent_signatures, fetch_transaction, decode_trade
 from layers.layer2b_pumpfun_smart_money import process_trade as pumpfun_process_trade, \
