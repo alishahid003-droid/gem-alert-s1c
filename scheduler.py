@@ -2228,6 +2228,18 @@ def run_poll_fast():
     # See _run_post_alert_monitor_cycle's docstring for what this closes. ---
     _safe(_run_post_alert_monitor_cycle)
 
+    # --- Combined-equity phase target (Ali, 2 Nov 2026) -- sprint+core1+core2+compound's
+    # combined-equity A->B->C->D target chain (see executor/phase_target.py). Runs UNCONDITIONALLY,
+    # before the fast_owner check below, because that check skips position management entirely
+    # when worker_fast_watch.py (the PC fast watcher) owns it -- but the phase target must still be
+    # watched every cycle regardless of which process is managing positions, since a target hit or
+    # drawdown-breaker trip has to pause new entries (via books.can_open()) no matter who is running.
+    from executor import phase_target
+    _pt_result = _safe(phase_target.check)
+    if isinstance(_pt_result, dict) and _pt_result.get("fired"):
+        for _pt_ev in _pt_result["fired"]:
+            print(f"[phase_target] {_pt_ev.get('type')}: {_pt_ev}")
+
     # --- Live position management (Ali, Sept 28 2026 -- "fix it live
     # let the test run") -- moonbag trims, campaign milestones, and
     # defensive rug-exits for every OPEN EXECUTOR POSITION, every fast

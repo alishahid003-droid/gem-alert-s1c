@@ -391,13 +391,23 @@ def test_repeat_grad_no_hot_meta_sprint_stake_full(monkeypatch):
     dec_rg = {"lane": "sprint", "lanes": ["sprint"], "mint": "MintRG", "symbol": "RG", "name": "RG", "creator": "c",
               "age_s": 40.0, "mcap_sol": 33.0, "entry_mcap_sol": 33.0, "buyers": 12, "buys": 14, "sells": 1,
               "confirmations": ["repeat_grad"], "smart": [], "potential": "10x-50x"}
+    # 2 Nov 2026: capture the EXPECTED stake BEFORE opening the position, not after. stake_usd()/
+    # tier_stake_usd() now cap each new stake against (eq*effective_max_share - committed_usd()),
+    # Ali's explicit fix for cumulative committed capital drifting past the risk ceiling -- which
+    # makes the function's result depend on what is ALREADY committed. Calling it a second time
+    # AFTER the real position opened and committed its stake is comparing two genuinely different,
+    # correct answers (pre-commitment room vs. post-commitment room), not the same value computed
+    # twice -- confirmed: $30 before opening, $15 after, both correct for their own moment. This
+    # also was already latent before 2 Nov (re-deriving at a different `now` than the real open
+    # could drift the two apart via pace()), just not exposed until this fix widened the gap.
+    expected_stake = books.tier_stake_usd("solana_sprint", "probe", 33.0 * 150, now=T0)
     out = w.act(dec_rg, send=lambda m: None, now=T0)
     assert out.get("opened") == ["solana_sprint"]  # 1 Nov 2026: solana isolation (449b853)
     book = paper_ledger._open()
     pos = book.get("early_solana_sprint:solana:MintRG")
     assert pos is not None
     assert pos["module"] == "solana_sprint"
-    assert pos["usd"] == books.tier_stake_usd("solana_sprint", "probe", 33.0 * 150)
+    assert pos["usd"] == expected_stake
 
 
 def test_non_repeat_grad_sprint_stake_unaffected(monkeypatch):

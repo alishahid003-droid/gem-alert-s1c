@@ -259,7 +259,16 @@ def act(decision: dict, send=None, now=None) -> dict:
             stake = _rmap[_orig_lane]["stake"] if ok else 0.0
         else:
             ok, why = books.can_open(lane, strong=len(strong) >= 4)
-            stake = books.tier_stake_usd(lane, tier, mcap_usd) if ok else 0.0
+            # 2 Nov 2026: pass this call's own `now` through -- tier_stake_usd() is pace-sensitive
+            # (elapsed time since the book started), and leaving this unset made it size the stake
+            # off REAL wall-clock time even when `act()` itself was called with an explicit `now`
+            # (e.g. every test in tests/test_early_entry.py passes now=T0). Harmless in production
+            # (real now ~= real time anyway) but made any test asserting the exact stake value
+            # non-deterministic. Combined with a second latent bug this exposed (effective_max_share()
+            # inside stake_usd()/tier_stake_usd() was ALSO silently defaulting to real time, now
+            # fixed directly in executor/books.py), the same function with identical args could
+            # give different answers call to call purely from this mismatch.
+            stake = books.tier_stake_usd(lane, tier, mcap_usd, now=now) if ok else 0.0
         # 30 Oct 2026 (Ali): REMOVED the blanket repeat_grad sprint downweight added earlier
         # today. Superseded by a sharper, evidenced fix applied upstream in
         # layers/layer17_early_entry.py: repeat_grad coins that ALSO carry hot_meta are now

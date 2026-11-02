@@ -49,10 +49,15 @@ def test_pace_and_needed_growth():
 def test_stake_floor_and_pace_adjustment():
     now = time.time()
     books._start("core1", now - 30 * 86400)
-    behind = books.stake_usd("core1", now)                # far behind -> x1.25 on the $30 floor, capped 35% of $100
-    assert 30 <= behind <= 35
+    # 2 Nov 2026: max_share now widens (effective_max_share) the further behind pace a book is --
+    # Ali's explicit ask ("as volume increasing, stake size can also increase") for the new tight-
+    # window Phase A/B/C/D targets. core1 30 days behind its own (old, slower) target is maximally
+    # behind -> ceiling widens toward 2x base (0.35 -> 0.70), so the $30 floor x1.25 pace bump
+    # (=$37.50) now fits under the ceiling instead of being clipped at the old fixed 35%.
+    behind = books.stake_usd("core1", now)
+    assert 30 <= behind <= 37.5
     books._start("core2", now)
-    assert books.stake_usd("core2", now) == 25.0          # fee floor $30 capped at 25% of $100
+    assert books.stake_usd("core2", now) == 25.0          # fee floor $30 capped at 25% of $100 (on pace -- ceiling stays at base)
 
 
 def test_book_equity_from_paper_trades(monkeypatch):
@@ -68,10 +73,24 @@ def test_book_equity_from_paper_trades(monkeypatch):
 
 def test_can_open_limits(monkeypatch):
     assert books.can_open("core2")[0] is True
-    for i in range(3):                                   # moonshot books take up to 3 shots below $300
+    # 2 Nov 2026: max_open() for moonshot books is now capacity-based (room under the risk
+    # ceiling / typical stake size), not a fixed step count -- a static "3 is always the limit"
+    # starved sprint/core1/core2 of real capital on real data (confirmed: sprint had 4 open
+    # against a hardcoded cap of 3 with $45 of genuinely free capital still sitting idle). $10
+    # positions are small enough that 3 of them ($30 committed) still leaves room under core2's
+    # ceiling at $100 equity -- so it must NOT be blocked here. Fill past the real ceiling instead
+    # (10 x $10 = $100, at or past equity itself) to exercise the actual limit.
+    for i in range(3):
         paper_ledger.open_paper("solana", f"T{i}", "core2", "moonshot", 10, 50_000, module="core2")
-    ok, why = books.can_open("core2")
-    assert not ok and "limit" in why
+    assert books.can_open("core2")[0] is True              # still real room left -- not starved
+    for i in range(3, 10):
+        ok, why = books.can_open("core2")
+        if not ok:
+            assert "limit" in why or "committed" in why
+            break
+        paper_ledger.open_paper("solana", f"T{i}", "core2", "moonshot", 10, 50_000, module="core2")
+    else:
+        assert False, "core2 never hit a real capital/count ceiling after 10 opens"
 
 
 def test_new_wallet_buys_paper_copy(monkeypatch):
@@ -270,12 +289,23 @@ def _fill(book, n, now=1000.0, start=0):
 
 def test_strong_signal_gets_extra_slots_then_swaps_stale_flat_position(monkeypatch):
     monkeypatch.setenv("BOOK_STRONG_EXTRA_SLOTS", "2")
+    # 2 Nov 2026: max_open() is capacity-based now, so a fixed "3 is the limit" no longer holds --
+    # 3 x $5 = $15 committed still leaves real room at $100 equity. Fill further (small $5 shots)
+    # until the REAL capacity ceiling is reached before testing the strong-signal extra-slot path,
+    # so this test still exercises "normal signal refused at the real limit" rather than asserting
+    # a stale fixed count.
     _fill("core1", 3)
+    n = 3
+    while books.can_open("core1")[0]:
+        _fill("core1", 1, start=n)
+        n += 1
+        if n > 40:
+            assert False, "core1 never hit a real capacity ceiling"
     ok, why = books.can_open("core1")
-    assert not ok and "limit" in why                                   # a normal signal is refused at 3/3
+    assert not ok and "limit" in why                                   # refused at the real ceiling
     ok, why = books.can_open("core1", strong=True)
-    assert ok and "extra slot" in why                                  # a strong one gets slot 4
-    _fill("core1", 2, start=3)                                         # 5 open = limit + 2: all slots used
+    assert ok and "extra slot" in why                                  # a strong one gets the +1 extra slot
+    _fill("core1", 2, start=n)                                         # fill both extra slots: all used
     ok, why = books.can_open("core1", strong=True)
     assert not ok and "all used" in why                                # nothing stale/flat to swap yet
     # make S0 an old flat position (0.9x, never ran) -> it may be swapped out

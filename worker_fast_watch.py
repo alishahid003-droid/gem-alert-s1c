@@ -71,6 +71,17 @@ def tick(n: int, fast: bool = True) -> dict:
     out = {}
     note = f"tick {n} {'fast' if fast else 'idle'} {state.commands_per_minute():.0f} state cmds/min"
     state.record_runner_heartbeat("fast-watch", scheduler._runner_where(), note)
+
+    # Combined-equity phase target (Ali, 2 Nov 2026) -- this is the REAL live loop (ticks every
+    # 20-60s), more important to wire this into than scheduler.py's slower fast cycle for catching
+    # a target hit or drawdown-breaker trip promptly. See executor/phase_target.py.
+    from executor import phase_target
+    pt_result = scheduler._safe(phase_target.check)
+    if isinstance(pt_result, dict) and pt_result.get("fired"):
+        for ev in pt_result["fired"]:
+            print(f"[fast-watch][phase_target] {ev.get('type')}: {ev}", flush=True)
+    out["phase_target"] = pt_result
+
     out["positions"] = scheduler._safe(scheduler._run_position_management_cycle)
     out["scalper"] = scheduler._safe(scheduler._run_compound_scalper_cycle)
     out["lane"] = scheduler._safe(scheduler._run_momentum_lane)     # paper always; real buys in sprint

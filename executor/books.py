@@ -373,8 +373,54 @@ def max_open(book_id: str, eq: Optional[float] = None) -> int:
         typical_stake = max(avg_open_stake or stake_usd(book_id), 5.0)
         capacity = int((eq * c.get("max_share", 0.6)) / typical_stake) if typical_stake else 4
         return max(4, capacity)
-    steps = (3, 4, 5, 6) if c["kind"] == "moonshot" else (1, 2, 3, 4)
-    return steps[0] if eq < 300 else steps[1] if eq < 3_000 else steps[2] if eq < 30_000 else steps[3]
+    if c["kind"] == "moonshot":
+        # 2 Nov 2026 (Ali audit, Phase A/B/C/D targets): the static step ladder for "moonshot"
+        # books (sprint/core1/core2) was ALSO wrong, same class of bug as compound's -- real data
+        # at the moment this was checked: sprint had 4 open against a cap of 3 at its $92 equity
+        # band, core1 had 7 open against a cap of 3 at $271, core2 had 7 open against a cap of 3 at
+        # $188 -- all three already silently refusing every new signal mid-cycle, the exact
+        # "good cycle, system drops trades on a count cap" failure Ali flagged.
+        #
+        # This now uses the SAME effective_max_share()/room math stake_usd() enforces (see that
+        # function), so the count cap and the capital ceiling can never contradict each other:
+        # capacity is just "how many typical-size shots fit in the room still available under the
+        # pace-scaled risk ceiling", using the UNCLAMPED shot size (shot_pct of equity, lifted to
+        # the STAKE_FLOORS tier) as the typical-size divisor -- not stake_usd()'s own clamped
+        # output, which is circular (it shrinks as the book fills, so dividing by it inflates
+        # capacity right when the book has the LEAST room left) and not the historical average of
+        # already-open positions (compounding pulls that up, understating how many new small shots
+        # current equity actually supports).
+        # TOTAL slot count (how many typical-size shots fit under the ceiling), the same stable
+        # pattern the "daily" branch above uses -- NOT "room for more" added to what's currently
+        # open. An earlier version computed room_left/typical_stake and added that to n_open_now,
+        # which is unstable: as more small positions open, committed_usd() creeps up only slightly
+        # (stakes are small), so room_left barely shrinks and max_open kept climbing in lockstep
+        # with open_count every call -- confirmed on a real run filling $5 positions one at a time.
+        # A second version used the fixed STAKE_FLOORS/shot_pct design size as the typical-stake
+        # divisor, which is stable but can OVERSTATE typical size vs what a book is actually
+        # staking in practice (confirmed: sprint's real average open stake is $11.49, well under
+        # the $30 design floor, because its 4 real positions include smaller strong-signal/extra-
+        # slot entries) -- that overstatement under-counts real capacity exactly like compound's
+        # original bug. Fix: prefer the book's REAL average open stake (reflects what it is
+        # actually doing) and fall back to the design-floor estimate only when nothing is open yet
+        # to measure from.
+        share = effective_max_share(book_id)
+        n_open_now = open_count(book_id)
+        committed = committed_usd(book_id)
+        avg_open_stake = (committed / n_open_now) if n_open_now else 0.0
+        if avg_open_stake:
+            typical_stake = max(avg_open_stake, 5.0)
+        else:
+            base = eq * c["shot_pct"]
+            floor = 0.0
+            for lo, usd in STAKE_FLOORS:
+                if eq >= lo:
+                    floor = usd
+            typical_stake = max(base, min(floor, eq * share), 5.0)
+        capacity = int((eq * share) / typical_stake) if typical_stake else 4
+        return max(4, capacity)
+    fresh = stake_usd(book_id)
+    return max(4, int((eq * c.get("max_share", 0.6)) / max(fresh, 5.0)) if fresh else 4)
 
 
 def committed_usd(book_id: str) -> float:
@@ -392,29 +438,77 @@ def open_count(book_id: str) -> int:
     return paper_ledger.module_open_count(book_id)
 
 
+def effective_max_share(book_id: str, now: Optional[float] = None) -> float:
+    """How much of equity this book may have committed at once, RIGHT NOW -- scales up from the
+    book's configured base max_share as it falls behind the pace its own target/window demands,
+    capped at a sane multiple so it never goes unbounded.
+
+    2 Nov 2026 (Ali, Phase A/B/C/D targets): "as the volume is increasing, the stake size can also
+    increase... build this around in a very smart way, protecting the profits... reaching to these
+    volumes at the same time." A FIXED max_share (0.25-0.45 for sprint/core1/core2) was sized for
+    the OLD, slower per-book targets; it is too tight for the new tight-window targets ($10k/96h,
+    then $40k/5-10 days, etc) where the book genuinely needs to deploy more capital per trade and
+    hold more concurrent positions to have any real shot at the target in time. Scaling the ceiling
+    with how far behind pace the book is means: on pace or ahead -> stay at the conservative base
+    (protect profit already made); meaningfully behind -> widen the ceiling so more capital can
+    actually get to work; capped at 2x base no matter how far behind, so a book can never ignore
+    risk control entirely just because it is losing the race against the clock."""
+    c = cfg(book_id)
+    base_share = c.get("max_share", 0.6)
+    p = pace(book_id, now)
+    r = p.get("ratio_to_path")
+    if r is None:
+        return base_share
+    if r >= 1.0:
+        return base_share                       # on pace or ahead -- stay conservative
+    # Linearly widen from base_share (at r=1.0, on pace) up to 2x base_share (at r<=0.25, badly
+    # behind) -- smooth scaling, no sudden jumps, same spirit as stake_usd()'s existing x1.25/x0.8
+    # pace multipliers but applied to the RISK CEILING itself, not just one trade's size.
+    behind = max(0.0, min(1.0, (1.0 - r) / 0.75))   # 0 at r=1.0, 1 at r<=0.25
+    return round(base_share * (1.0 + behind), 4)    # up to 2x base_share
+
+
 def stake_usd(book_id: str, now: Optional[float] = None) -> float:
     """Pace-aware stake for the next entry in this book.
     base = shot_pct of equity, lifted to the fee floor; behind the target path
-    by >25% -> x1.25, ahead by >50% -> x0.8 (bank the lead); capped at max_share
-    of equity. Returns 0 when the book is broke."""
+    by >25% -> x1.25, ahead by >50% -> x0.8 (bank the lead); capped at the book's EFFECTIVE
+    max_share of equity (see effective_max_share() -- widens when badly behind pace) minus what
+    is already committed, so cumulative open stakes can never drift past the risk ceiling no
+    matter how many trades have already opened. Returns 0 when the book is broke.
+
+    2 Nov 2026 fix: the cap used to be eq*max_share PER TRADE with no check against the TOTAL
+    already committed -- confirmed on real data that this let sprint's 4 open positions commit
+    $45.97 while its max_share ceiling at that equity was only $41.26, already over budget before
+    this fix. Now capped against (eq*effective_max_share - committed_usd), the real remaining
+    room under the (now pace-scaled) ceiling, not raw free_equity (which is just eq-committed with
+    no risk-share check at all)."""
     c = cfg(book_id)
     eq = equity(book_id)
     if eq < 5.0:
         return 0.0
+    # 2 Nov 2026: pass `now` through to effective_max_share() -- it was silently defaulting to
+    # real wall-clock time while pace() a few lines below correctly used the caller's `now`,
+    # so the two could read DIFFERENT elapsed-time states within a single call to this function
+    # whenever a caller passes an explicit now != real time. Confirmed as the root cause of a
+    # real, reproducible test flake (test_repeat_grad_no_hot_meta_sprint_stake_full): the SAME
+    # function, SAME args, called moments apart with now=T0 both times, gave different answers
+    # purely because effective_max_share() ignored T0 on one of the two calls.
+    share = effective_max_share(book_id, now)
     base = eq * c["shot_pct"]
     if c["kind"] == "moonshot":
         floor = 0.0
         for lo, usd in STAKE_FLOORS:
             if eq >= lo:
                 floor = usd
-        base = max(base, min(floor, eq * c["max_share"]))
+        base = max(base, min(floor, eq * share))
         p = pace(book_id, now)
         r = p.get("ratio_to_path")
         if r is not None and r < 0.75:
             base *= 1.25
         elif r is not None and r > 1.5:
             base *= 0.8
-    out = min(base, eq * c["max_share"], free_equity(book_id))
+    room_left = max(0.0, eq * share - committed_usd(book_id))
+    out = min(base, eq * share, room_left, free_equity(book_id))
     # 27 Oct 2026: absolute backstop, independent of the equity math above. Every cap until now was
     # RELATIVE to equity() -- exactly the single point of failure a now-fixed accounting bug exploited
     # (a phantom equity reading let a single $100-seed book size a $1,289 stake, all caps "working
@@ -482,7 +576,18 @@ def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: O
 def can_open(book_id: str, strong: bool = False) -> tuple:
     """strong=True (a Standard/Conviction signal with >=5 confirmations) may use BOOK_STRONG_EXTRA_SLOTS (default 2)
     beyond the normal position limit, and when even those are full may swap out the stalest flat position
-    (paper_ledger.swap_out) -- at most one swap per book every 5 minutes."""
+    (paper_ledger.swap_out) -- at most one swap per book every 5 minutes.
+
+    2 Nov 2026 (Ali): a combined-equity phase target (phase_target.py) can pause ALL of sprint/
+    core1/core2/compound at once -- either the phase target has been hit (Ali's explicit "the
+    system does not take any trade" once $10,000 combined is reached) or the drawdown circuit
+    breaker tripped (equity fell too far below its own peak this phase). Checked first, for only
+    the 4 real books phase_target.py tracks -- fomo/leaderboard/dev_list/solana_* copy and
+    pattern-tracking books are unaffected, same as every other gate in this function."""
+    if book_id in ("sprint", "core1", "core2", "compound"):
+        from executor import phase_target
+        if phase_target.is_paused():
+            return False, f"{book_id}: paused -- phase target hit or drawdown breaker active (see phase_target.status())"
     check_cashout(book_id)
     check_bust(book_id)
     eq = equity(book_id)
