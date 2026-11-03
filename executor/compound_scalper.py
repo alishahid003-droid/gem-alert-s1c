@@ -443,6 +443,7 @@ _BUY_FN = {
     "solana": swap_executor.execute_buy_solana,
     "bsc": swap_executor.execute_buy_bsc,
     "robinhood_chain": swap_executor.execute_buy_robinhood_chain,
+    "base": swap_executor.execute_buy_base,  # added 3 Nov 2026 (Ali)
 }
 
 

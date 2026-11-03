@@ -25,19 +25,33 @@ def isolated_state(tmp_path, monkeypatch):
     yield
 
 
-def test_base_chain_refused_before_recording():
+def test_base_chain_now_follows_the_same_path_as_other_real_chains():
+    # 3 Nov 2026 (Ali): Base went from paper-only to a real execute_buy_base path
+    # (see executor/swap_executor.py) -- the Sept 30 2026 "no auto-buy path" refusal
+    # this test used to assert no longer applies to base. EXECUTION_ENABLED=false
+    # (set by this file's isolated_state fixture) is what actually keeps this inert
+    # in the test, same as every other real chain -- base no longer gets a special
+    # hardcoded refusal ahead of that normal gate.
     d = triggers.evaluate_stage1("base", "0xabc", score_band="A", deployer_tier=None, convergence_count=0)
-    assert d.should_fire is False
-    assert "no auto-buy path" in d.reason
+    assert d.should_fire is True
+    assert "no auto-buy path" not in d.reason
     r = entrypoint.handle_stage1_candidate("base", "0xabc", "A", None, 0, 100000)
-    assert r["fired"] is False
-    assert position_state.get_position("base", "0xabc") is None
+    # "fired" reflects the paper-side trigger decision (same True here as any other
+    # real chain would get); EXECUTION_ENABLED=false in this file's fixture is what
+    # actually keeps the real buy inert, visible in the nested buy dict -- same shape
+    # solana already has with execution disabled, confirmed by hand against this
+    # exact fixture before writing this assertion.
+    assert r["fired"] is True
+    assert r["buy"]["attempted"] is True and r["buy"]["ok"] is False
+    assert "EXECUTION_ENABLED" in r["buy"]["reason"]
 
 
-def test_base_chain_refused_for_stage2():
+def test_base_chain_stage2_now_follows_the_same_path_as_other_real_chains():
+    # 3 Nov 2026 (Ali): same change as test_base_chain_now_follows_the_same_path_as_other_real_chains
+    # above, for stage2's gate.
     d = triggers.evaluate_stage2("base", "0xabc", 500000, 3, True)
-    assert d.should_fire is False
-    assert "no auto-buy path" in d.reason
+    assert d.should_fire is True
+    assert "no auto-buy path" not in d.reason
 
 
 def test_max_concurrent_enforced(monkeypatch):

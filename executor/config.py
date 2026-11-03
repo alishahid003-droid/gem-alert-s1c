@@ -115,6 +115,7 @@ class ExecutorConfig:
     solana_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_SOLANA_PRIVATE_KEY"), repr=False)  # repr=False Sept 28 2026: a dataclass repr prints raw field values -- this one is a real signing key, so it must never land in a log line, pytest assertion diff, or stack trace
     bsc_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_BSC_PRIVATE_KEY"), repr=False)
     rhc_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_RHC_PRIVATE_KEY"), repr=False)
+    base_private_key: Optional[str] = field(default_factory=lambda: _env("EXECUTION_BASE_PRIVATE_KEY"), repr=False)  # added 3 Nov 2026 (Ali): Base chain execution -- same repr=False protection as the other 3 keys
 
     # --- public RPC endpoints, no account needed for any of these ---
     # solana_rpc_url / bsc_rpc_url / rhc_rpc_url are SINGLE-endpoint manual
@@ -135,6 +136,8 @@ class ExecutorConfig:
     bsc_rpc_url: str = field(default_factory=lambda: _env(
         "BSC_RPC_URL", "https://bsc-dataseed.binance.org"))
     rhc_rpc_url: str = field(default_factory=lambda: _env("RHC_RPC_URL"))  # no public default confirmed yet -- see rpc_pool.py's robinhood_chain pool (1 untested candidate)
+    base_rpc_url: str = field(default_factory=lambda: _env(
+        "BASE_RPC_URL", "https://mainnet.base.org"))  # Base's own official public RPC (no signup) -- see rpc_pool.py's base pool
 
     # --- position sizing, per Ali's Sept 22 split (example $100 wallet) ---
     stage1_position_usd: float = field(default_factory=lambda: _env_float("STAGE1_POSITION_USD", 20.0))  # bumped from $12 to $20, Ali, Sept 22 2026
@@ -221,6 +224,11 @@ class ExecutorConfig:
             # of which gate on their own *_rpc_url field either -- this was
             # a stale leftover check from before rpc_pool.py existed.
             return bool(self.rhc_private_key)
+        if chain == "base":
+            # Added 3 Nov 2026 (Ali): Base chain execution. Same pattern as bsc --
+            # gates on the private key only, real RPC calls go through rpc_pool.py's
+            # base pool (added alongside this), not this field.
+            return bool(self.base_private_key)
         return False
 
 

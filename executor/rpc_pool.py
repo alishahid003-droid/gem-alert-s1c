@@ -92,6 +92,14 @@ RPC_ENDPOINT_POOLS = {
     "robinhood_chain": [
         "https://rpc.mainnet.chain.robinhood.com",  # CONFIRMED healthy, Ali, Sept 23 2026 (round 4); official but rate-limited per Robinhood's own docs -- only 1 candidate exists
     ],
+    "base": [
+        "https://mainnet.base.org",            # Base's own official public RPC (Coinbase/OP Stack) -- no signup
+        "https://base-rpc.publicnode.com",      # Allnodes -- same free public-RPC provider already confirmed healthy for Solana/BSC above
+        "https://base.llamarpc.com",            # LlamaNodes public endpoint, no signup
+    ],  # added 3 Nov 2026 (Ali): Base chain execution. UNLIKE the 3 pools above, these have
+        # NOT yet been live-tested from Ali's machine -- same honest flag as everything else
+        # untested in this build. Run a real test call against each before trusting this pool
+        # under load, same as Solana/BSC/RHC's rounds above.
 }
 
 # How long (seconds) to skip an endpoint after it fails, so a dead or

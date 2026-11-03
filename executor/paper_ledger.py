@@ -64,8 +64,12 @@ NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF = _f_env("NEVER_PRICED_CYCLES_BEFORE_WRITE_
 NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF = _f_env("NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF", 2.0)
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
-# Base is paper-tracked too (no buy path yet -- checklist 7.3): the alert
-# replay's band-B winners were all on Base, so its record is measured now.
+# 3 Nov 2026 (Ali): Base now HAS a real buy path (swap_executor.execute_buy_base) --
+# the "no buy path yet" comment this line used to carry is stale and removed.
+# Left as its own union rather than folded into EXECUTABLE_CHAINS above because
+# nothing outside this file reads this EXECUTABLE_CHAINS constant (confirmed via
+# grep) -- PAPER_CHAINS is what every paper-tracking check in this module actually
+# uses, and it already includes base.
 PAPER_CHAINS = EXECUTABLE_CHAINS | {"base"}
 PAPER_SCALP_USD = 25.0   # compound-scalper paper size (the pool's seed scale)
 

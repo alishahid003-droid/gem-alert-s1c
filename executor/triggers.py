@@ -46,17 +46,20 @@ GRADUATED_VENUE_BY_CHAIN = {
     "solana": "jupiter/raydium",
     "robinhood_chain": "uniswap_v4",
     "bsc": "pancakeswap",
+    "base": "uniswap_v2",  # added 3 Nov 2026 (Ali), alongside execute_buy_base
 }
 
 
 # Chains swap_executor actually has a buy path for (execute_buy_solana/
-# execute_buy_bsc/execute_buy_robinhood_chain). Real bug fixed Sept 30 2026:
-# Base alerts (Layer 0b re-enabled Base on Sept 24) reached evaluate_stage1,
-# "fired", and got a position recorded -- but entrypoint has no Base buy
-# function, so nothing was ever bought AND the stage was never marked
-# failed, so its budget stayed committed forever. A chain with no buy
-# path must be refused here, before anything is recorded.
-EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
+# execute_buy_bsc/execute_buy_robinhood_chain/execute_buy_base). Real bug fixed
+# Sept 30 2026: Base alerts (Layer 0b re-enabled Base on Sept 24) reached
+# evaluate_stage1, "fired", and got a position recorded -- but entrypoint had no
+# Base buy function, so nothing was ever bought AND the stage was never marked
+# failed, so its budget stayed committed forever. A chain with no buy path must
+# be refused here, before anything is recorded. Base added back 3 Nov 2026 now
+# that execute_buy_base genuinely exists (see swap_executor.py) -- this is not a
+# reversion of the Sept 30 fix, the underlying gap that fix addressed is closed.
+EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain", "base"}
 
 # Minimum share of the structural score's weight that must come from REAL
 # data (not a "-- scored neutral" default) before a score-band-only fire

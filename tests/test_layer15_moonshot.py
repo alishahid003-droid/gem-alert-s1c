@@ -71,10 +71,20 @@ def test_handler_paper_only_by_default():
     assert "moonshot:solana:MOON" in book and book["moonshot:solana:MOON"]["exit_profile"] == "moonshot"
 
 
-def test_handler_base_paper_tracked_but_never_bought(monkeypatch):
+def test_handler_base_now_has_a_real_buy_path(monkeypatch):
+    # 3 Nov 2026 (Ali): Base went from paper-only to a real execute_buy_base path
+    # (see executor/swap_executor.py). This used to assert the OLD "no buy path on
+    # base yet" refusal (Sept 30 2026's deliberate paper-only gate) -- that refusal
+    # no longer applies to base, so this test now proves the opposite: base follows
+    # the SAME real-buy path solana/bsc/robinhood_chain already do, still paper-
+    # tracked regardless of whether the real buy fires (unchanged behavior).
     monkeypatch.setenv("MOONSHOT_ENABLED", "true")
-    res = ep.handle_moonshot_candidate("base", "0xMOON", "B", 800_000, 90_000, 70, {})
-    assert res["fired"] is False and "no buy path" in res["reason"]
+    calls = []
+    monkeypatch.setattr(ep, "_attempt_buy_and_record_fill",
+                        lambda c, t, usd, stage=None: calls.append((c, t, usd, stage)) or {"ok": True})
+    monkeypatch.setattr(ep.triggers, "_concurrency_block", lambda: None)
+    res = ep.handle_moonshot_candidate("base", "0xMOON", "B", 800_000, 400_000, 70, {"signals": 1})
+    assert res["fired"] and calls and calls[0][0] == "base"
     assert "moonshot:base:0xMOON" in pl._open()
 
 

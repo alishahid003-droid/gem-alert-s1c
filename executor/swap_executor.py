@@ -92,6 +92,26 @@ PANCAKESWAP_V2_ROUTER_BSC = "0x10ED43C718714eb63d5aA57B78B54704E256024E"  # FIXE
 WBNB_BSC = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"  # wrapped BNB, re-verified against @pancakeswap/tokens npm package source (same "one char short" trap as the router address above)
 USDT_BSC = "0x55d398326f99059fF775485246999027B3197955"  # verified against @pancakeswap/tokens
 
+# Added 3 Nov 2026 (Ali): Base chain execution. Cross-checked against TWO independent
+# official sources, same "not one page taken on faith" bar RHC's router address used:
+#   - Uniswap's own official docs (docs.uniswap.org/contracts/v2/reference/smart-contracts/v2-deployments)
+#   - Base's own official docs (docs.base.org/chain/contracts), listed under "Base Mainnet"
+# Both agree exactly on this Router02 address. UNTESTED against a live network, same
+# honest flag as every other chain in this file -- do not fund a wallet against this
+# path without first running one small real test buy.
+UNISWAP_V2_ROUTER_BASE = "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"
+# WETH9 on Base -- the standard OP-Stack predeploy address, identical on every Optimism-
+# stack chain (Base, Optimism, etc). Confirmed against Base's own official docs
+# (docs.base.org/base-chain/tools/onchain-registry-api, cites basescan.org directly).
+WETH_BASE = "0x4200000000000000000000000000000000000006"
+# Native USDC on Base (NOT the older bridged USDbC) -- confirmed against Circle's own
+# official contract-address docs (developers.circle.com/stablecoins/usdc-contract-addresses).
+USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+BASE_CHAIN_ID = 8453
+BASE_BUY_SLIPPAGE_TOLERANCE = 0.20   # same tolerance BSC's buy path uses
+BASE_SELL_SLIPPAGE_TOLERANCE = 0.25  # wider than buy, same reasoning as BSC's sell path -- a rug-triggered
+                                     # sell needs to land, not get optimal price
+
 # Confirmed Sept 22, 2026 against Uniswap's own official developer docs
 # (developers.uniswap.org/docs/protocols/v4/deployments), Robinhood Chain
 # (chain ID 4663) deployment table -- see module docstring for the
@@ -585,6 +605,221 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
     return result
 
 
+def _eth_price_usd() -> Optional[float]:
+    """Live ETH/USD on Base via Uniswap V2's own on-chain getAmountsOut (1 WETH ->
+    USDC), read through the RPC failover pool via eth_call -- identical reasoning to
+    _bnb_price_usd(): reuses the exact router/pool this module already depends on for
+    the real swap, not a separate price API."""
+    from web3 import Web3  # type: ignore
+    w3 = Web3()
+    router = w3.eth.contract(address=Web3.to_checksum_address(UNISWAP_V2_ROUTER_BASE), abi=PANCAKE_ROUTER_ABI)
+    calldata = _encode_router_call(router, "getAmountsOut", [
+        10**18, [Web3.to_checksum_address(WETH_BASE), Web3.to_checksum_address(USDC_BASE)],
+    ])
+    result = rpc_call("base", "eth_call", [{"to": UNISWAP_V2_ROUTER_BASE, "data": calldata}, "latest"])
+    if not result.get("ok"):
+        return None
+    raw = result.get("result")
+    if not isinstance(raw, str) or not raw.startswith("0x"):
+        return None
+    try:
+        decoded = w3.codec.decode(["uint256[]"], bytes.fromhex(raw[2:]))
+        usdc_out_wei = decoded[0][1]  # amounts[1] = USDC received for 1 WETH in
+        return usdc_out_wei / 10**6  # USDC is 6 decimals (unlike WETH's 18)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _base_get_amounts_out(router, amount_in: int, path: list) -> Optional[int]:
+    """Real on-chain quote via Uniswap V2's own getAmountsOut on Base -- identical
+    pattern to _bsc_get_amounts_out, kept as its own function because that one is
+    hardcoded to rpc_call("bsc", ...) and isn't chain-generic."""
+    from web3 import Web3  # type: ignore
+    calldata = _encode_router_call(router, "getAmountsOut", [amount_in, path])
+    result = rpc_call("base", "eth_call", [{"to": router.address, "data": calldata}, "latest"])
+    if not result.get("ok"):
+        return None
+    raw = result.get("result")
+    if not isinstance(raw, str) or not raw.startswith("0x"):
+        return None
+    try:
+        decoded = router.w3.codec.decode(["uint256[]"], bytes.fromhex(raw[2:]))
+        return decoded[0][-1]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def execute_buy_base(token_address: str, usd_amount: float) -> ExecutionResult:
+    """Real Uniswap V2 buy on Base, built 3 Nov 2026 directly on execute_buy_bsc's
+    proven pattern -- both are standard Uniswap-V2-family EVM chains, so this is
+    deliberately the same shape: real on-chain price, real on-chain slippage quote,
+    GoPlus safety check, sign, send, confirm. Same honest status as every other
+    chain here until a real send confirms it: written, guarded, but UNTESTED
+    against a live network. Do not fund a wallet against this path without first
+    running one small real test buy."""
+    guard = _refuse_unless_ready("base")
+    if guard:
+        return guard
+    guard = _refuse_buy_if_state_unreadable("base")
+    if guard:
+        return guard
+    try:
+        from web3 import Web3  # type: ignore
+        from eth_account import Account  # type: ignore
+    except ImportError:
+        return ExecutionResult(False, "web3.py not installed -- add to requirements.txt before enabling")
+
+    # Checklist 3.2: GoPlus honeypot / sell-tax check before anything is signed.
+    from executor.sellability import check_sellable
+    sellable, why = check_sellable("base", token_address)
+    if not sellable:
+        return ExecutionResult(False, f"refused before buying: {why}")
+
+    eth_price = _eth_price_usd()
+    if eth_price is None or eth_price <= 0:
+        return ExecutionResult(False, "could not fetch a live ETH/USD price on Base -- refusing to size a buy on a guess")
+    eth_amount_wei = int((usd_amount / eth_price) * 10**18)
+
+    w3 = Web3()
+    router_addr = Web3.to_checksum_address(UNISWAP_V2_ROUTER_BASE)
+    account = Account.from_key(EXECUTOR_CONFIG.base_private_key)
+
+    try:
+        token_checksum = Web3.to_checksum_address(token_address.lower())
+    except ValueError:
+        return ExecutionResult(False, f"'{token_address}' is not a valid Base address -- refusing to build a tx to it")
+
+    router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_ABI)
+    weth_checksum = Web3.to_checksum_address(WETH_BASE)
+
+    amounts_out_min = _base_get_amounts_out(router, eth_amount_wei, [weth_checksum, token_checksum])
+    if amounts_out_min is None:
+        return ExecutionResult(False, "could not get a real on-chain quote for slippage protection -- "
+                                       "refusing to buy with no amountOutMin floor")
+    amount_out_min = int(amounts_out_min * (1 - BASE_BUY_SLIPPAGE_TOLERANCE))
+
+    deadline = int(__import__("time").time()) + 300
+    calldata = _encode_router_call(
+        router, "swapExactETHForTokensSupportingFeeOnTransferTokens",
+        [amount_out_min, [weth_checksum, token_checksum], account.address, deadline],
+    )
+
+    nonce_result = rpc_call("base", "eth_getTransactionCount", [account.address, "pending"])
+    if not nonce_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch nonce: {nonce_result.get('reason')}")
+    gas_price_result = rpc_call("base", "eth_gasPrice", [])
+    if not gas_price_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
+
+    tx = {
+        "to": router_addr,
+        "value": eth_amount_wei,
+        "gas": 400_000,  # conservative fixed limit, same reasoning as BSC's buy path: no estimate_gas
+                          # against an untrusted new token contract pre-buy.
+        "gasPrice": int(gas_price_result["result"], 16),
+        "nonce": int(nonce_result["result"], 16),
+        "chainId": BASE_CHAIN_ID,
+        "data": calldata,
+    }
+    signed = account.sign_transaction(tx)
+    raw_hex = "0x" + signed.raw_transaction.hex() if not signed.raw_transaction.hex().startswith("0x") else signed.raw_transaction.hex()
+
+    send_result = rpc_call("base", "eth_sendRawTransaction", [raw_hex])
+    if not send_result.get("ok"):
+        return ExecutionResult(False, f"eth_sendRawTransaction failed: {send_result.get('reason')}")
+    tx_hash = send_result.get("result")
+    if not isinstance(tx_hash, str):
+        return ExecutionResult(False, f"eth_sendRawTransaction returned no usable hash: {send_result}")
+
+    confirmed = _confirm_evm_tx("base", tx_hash)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sent but could not confirm (check hash manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=tx_hash)
+    filled_tokens = _get_evm_fill_amount("base", confirmed.get("receipt") or {}, token_checksum, account.address)
+    result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
+                              filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
+    _log_trade("buy", "base", token_checksum, result)
+    return result
+
+
+def _sell_base(token_address: str, amount_tokens: float) -> ExecutionResult:
+    """Sells amount_tokens of an ERC-20 token back to ETH via Uniswap V2 on Base.
+    Identical two-step (approve -> swap) pattern to _sell_bsc, for the same reason:
+    buys pay with native ETH via msg.value and skip approval entirely, but a sell
+    needs the router allowed to move a token the wallet holds first. If approve
+    succeeds but the swap fails, the allowance is left set -- called out explicitly
+    in the failure reason rather than silently retried, same as BSC's sell path."""
+    from web3 import Web3  # type: ignore
+    from eth_account import Account  # type: ignore
+
+    try:
+        token_checksum = Web3.to_checksum_address(token_address.lower())
+    except ValueError:
+        return ExecutionResult(False, f"'{token_address}' is not a valid Base address -- refusing to build a tx to it")
+
+    w3 = Web3()
+    account = Account.from_key(EXECUTOR_CONFIG.base_private_key)
+    token = w3.eth.contract(address=token_checksum, abi=ERC20_ABI)
+
+    decimals_calldata = _encode_router_call(token, "decimals", [])
+    decimals_result = rpc_call("base", "eth_call", [{"to": token_checksum, "data": decimals_calldata}, "latest"])
+    if not decimals_result.get("ok"):
+        return ExecutionResult(False, f"could not fetch token decimals: {decimals_result.get('reason')}")
+    try:
+        decimals = int(decimals_result["result"], 16)
+    except (TypeError, ValueError):
+        return ExecutionResult(False, f"could not parse token decimals from {decimals_result.get('result')}")
+    raw_amount = int(amount_tokens * (10 ** decimals))
+
+    router_addr = Web3.to_checksum_address(UNISWAP_V2_ROUTER_BASE)
+
+    allowance_calldata = _encode_router_call(token, "allowance", [account.address, router_addr])
+    allowance_result = rpc_call("base", "eth_call", [{"to": token_checksum, "data": allowance_calldata}, "latest"])
+    current_allowance = int(allowance_result["result"], 16) if allowance_result.get("ok") else 0
+
+    if current_allowance < raw_amount:
+        approve_calldata = _encode_router_call(token, "approve", [router_addr, 2**256 - 1])  # unlimited, one-time
+        approve_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, token_checksum, 0, approve_calldata)
+        if not approve_result.ok:
+            return ExecutionResult(False, f"approve() failed, no swap attempted: {approve_result.reason}")
+        confirmed = _confirm_evm_tx("base", approve_result.tx_signature)
+        if not confirmed.get("ok"):
+            return ExecutionResult(False, f"approve() sent but could not confirm -- swap NOT attempted, "
+                                           f"check allowance manually before retrying: {confirmed.get('reason')}")
+
+    router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_SELL_ABI)
+
+    filled_usd = None
+    amount_out_min = 0  # falls back to 0 only if the quote itself is unavailable -- same reasoning as
+                         # BSC/RHC's sell paths: a sell that fails to execute (e.g. during a rug, exactly
+                         # when this call is most likely to be degraded) is worse than one that executes
+                         # unprotected.
+    try:
+        eth_out_wei = _base_get_amounts_out(router, raw_amount, [token_checksum, Web3.to_checksum_address(WETH_BASE)])
+        if eth_out_wei:
+            amount_out_min = int(eth_out_wei * (1 - BASE_SELL_SLIPPAGE_TOLERANCE))
+            eth_price = _eth_price_usd()
+            if eth_price:
+                filled_usd = (eth_out_wei / 10**18) * eth_price
+    except Exception:  # noqa: BLE001 -- pricing must never block a real sell
+        filled_usd = None
+
+    deadline = int(__import__("time").time()) + 300
+    swap_calldata = _encode_router_call(router, "swapExactTokensForETHSupportingFeeOnTransferTokens", [
+        raw_amount, amount_out_min, [token_checksum, Web3.to_checksum_address(WETH_BASE)], account.address, deadline,
+    ])
+    swap_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, router_addr, 0, swap_calldata)
+    if not swap_result.ok:
+        return ExecutionResult(False, f"approve() succeeded but swap failed: {swap_result.reason}")
+
+    confirmed = _confirm_evm_tx("base", swap_result.tx_signature)
+    if not confirmed.get("ok"):
+        return ExecutionResult(False, f"sell sent but could not confirm (check hash manually): "
+                                       f"{confirmed.get('reason')}", tx_signature=swap_result.tx_signature)
+    return ExecutionResult(True, "sell submitted and confirmed", tx_signature=swap_result.tx_signature,
+                            filled_usd=filled_usd)
+
+
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # keccak256("Transfer(address,address,uint256)"), verified via Web3.keccak
 
 
@@ -855,6 +1090,8 @@ def execute_sell(chain: str, token_address: str, amount_tokens: float, reason: s
         result = _sell_bsc(token_address, amount_tokens)
     elif chain == "robinhood_chain":
         result = _sell_robinhood_chain(token_address, amount_tokens)
+    elif chain == "base":
+        result = _sell_base(token_address, amount_tokens)  # added 3 Nov 2026 (Ali)
     else:
         result = ExecutionResult(False, f"no sell path implemented for chain '{chain}' yet "
                                          f"(reason for this sell attempt: {reason})")

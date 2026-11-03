@@ -128,7 +128,13 @@ def check_sellable(chain: str, token: str, lamports_in: Optional[int] = None,
     """(ok, reason). Called by every real buy before anything is signed."""
     if goplus_fn is None:
         from layers.layer0_scoring import fetch_goplus_security as goplus_fn  # noqa: N811
-    if chain in ("solana", "bsc"):
+    if chain in ("solana", "bsc", "base"):
+        # "base" added 3 Nov 2026 (Ali): GoPlus already supports Base (chain id 8453,
+        # see layers/layer0_scoring.py's GOPLUS_CHAIN_IDS, already present before this
+        # change) and evm_goplus_red_flags() is chain-agnostic -- this was simply never
+        # extended to call it for base. Robinhood Chain stays out of this tuple
+        # deliberately: GoPlus does not cover it, see execute_buy_robinhood_chain's own
+        # on-chain round-trip check instead.
         try:
             gp = goplus_fn(chain, token) or {}
         except Exception:
