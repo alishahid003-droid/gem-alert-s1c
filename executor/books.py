@@ -102,10 +102,29 @@ def withdrawn(book_id: str) -> float:
     return round(sum(float(c.get("amount") or 0.0) for c in cashouts(book_id)), 2)
 
 
+DEPOSITS_KEY = "books_deposits_v1"
+
+
+def deposits(book_id: str) -> list:
+    """Capital credited INTO a book from outside its own trading -- currently only
+    check_compound_split()'s automatic $200 distribution (3 Nov 2026, Ali), but kept generic
+    (not named after that one source) in case a future manual top-up ever needs the same ledger.
+    Mirrors cashouts()/CASHOUT_KEY's shape exactly, just the opposite direction."""
+    rec = state.get_value(DEPOSITS_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    return list(rec.get(book_id) or [])
+
+
+def deposited(book_id: str) -> float:
+    return round(sum(float(d.get("amount") or 0.0) for d in deposits(book_id)), 2)
+
+
 def realized_pnl(book_id: str) -> float:
-    """Paper P&L of the current cycle (cashed-out profit is subtracted: it left the book)."""
+    """Paper P&L of the current cycle (cashed-out profit is subtracted: it left the book;
+    deposited-in capital is added: it's new seed money, not trading profit, but it must still
+    show up in total_value() the same way a reseed's seed does)."""
     gross = sum(float(r.get("pnl_usd") or 0.0) for r in _rows(book_id))
-    return round(gross - withdrawn(book_id) - bust_offset(book_id), 2)
+    return round(gross - withdrawn(book_id) + deposited(book_id) - bust_offset(book_id), 2)
 
 
 BUST_KEY = "books_busts_v1"
@@ -224,6 +243,65 @@ def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     starts[book_id] = {"start_ts": now}
     state.set_value(BOOKS_KEY, starts)
     return rec[book_id][-1]
+
+
+COMPOUND_SPLIT_KEY = "compound_split_v1"
+COMPOUND_SPLIT_TRIGGER_USD = 500.0   # compound total_value crossing this fires the split, once
+COMPOUND_SPLIT_BANK_USD = 200.0      # amount pulled OUT of compound and distributed
+COMPOUND_SPLIT_RECIPIENTS = ("sprint", "core1", "core2")   # even three-way split of the $200
+
+
+def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
+    """3 Nov 2026 (Ali): "from $100 to $500 once it reaches, it should distribute $200 to the
+    three modules ... make his own one from the remaining $300 ... those modules start operating
+    with the $200, which is split amongst the three ... same very logic that if someone's capital
+    is sitting idle ... it can pick up that spare capital as well" -- i.e. the $200 becomes each
+    recipient's normal seed (via deposits()/deposited(), see above), so they trade under the exact
+    same stake_usd()/pool-borrowing rules as any other seeded book, nothing special-cased.
+
+    Fires ONCE, automatically, the first time compound's total_value() crosses
+    COMPOUND_SPLIT_TRIGGER_USD ($500) -- guarded by COMPOUND_SPLIT_KEY so it can never fire twice
+    even if compound dips back under $500 later and re-crosses. Call this every cycle alongside
+    the existing check_cashout()/check_bust() calls (can_open() already does, see below).
+
+    Pulls COMPOUND_SPLIT_BANK_USD ($200) out of compound the same way check_cashout() pulls a
+    cashout -- a CASHOUT_KEY record, so compound's own total_value() drops by exactly $200,
+    leaving it the real remaining ~$300 (not a fixed $300: compound keeps whatever it actually
+    had over $500, minus the flat $200 -- if it reaches $540, it keeps $340, not $300)."""
+    done = state.get_value(COMPOUND_SPLIT_KEY)
+    if isinstance(done, dict) and done.get("fired"):
+        return None   # already split once -- never again
+    if total_value("compound") < COMPOUND_SPLIT_TRIGGER_USD:
+        return None
+    now = now if now is not None else time.time()
+
+    # Pull $200 out of compound (same mechanism check_cashout() uses -- a CASHOUT_KEY record).
+    rec = state.get_value(CASHOUT_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    rec.setdefault("compound", []).append({"ts": now, "amount": COMPOUND_SPLIT_BANK_USD,
+                                            "reason": "compound_split_3nov2026"})
+    state.set_value(CASHOUT_KEY, rec)
+
+    # Distribute it evenly across sprint/core1/core2 as fresh deposited-in seed money.
+    share = round(COMPOUND_SPLIT_BANK_USD / len(COMPOUND_SPLIT_RECIPIENTS), 2)
+    shares = {b: share for b in COMPOUND_SPLIT_RECIPIENTS}
+    # Rounding: three-way split of $200 is $66.67/$66.67/$66.66 -- give the last cent(s) to the
+    # first recipient so the three shares sum to exactly $200.00, not $199.99 or $200.01.
+    leftover = round(COMPOUND_SPLIT_BANK_USD - sum(shares.values()), 2)
+    if leftover:
+        shares[COMPOUND_SPLIT_RECIPIENTS[0]] = round(shares[COMPOUND_SPLIT_RECIPIENTS[0]] + leftover, 2)
+
+    dep = state.get_value(DEPOSITS_KEY)
+    dep = dep if isinstance(dep, dict) else {}
+    for book_id, amount in shares.items():
+        dep.setdefault(book_id, []).append({"ts": now, "amount": amount,
+                                             "reason": "compound_split_3nov2026"})
+    state.set_value(DEPOSITS_KEY, dep)
+
+    result = {"ts": now, "fired": True, "banked_from_compound": COMPOUND_SPLIT_BANK_USD,
+              "shares": shares, "compound_remaining": total_value("compound")}
+    state.set_value(COMPOUND_SPLIT_KEY, result)
+    return result
 
 
 def total_value(book_id: str) -> float:
@@ -656,6 +734,8 @@ def can_open(book_id: str, strong: bool = False) -> tuple:
             return False, f"{book_id}: paused -- phase target hit or drawdown breaker active (see phase_target.status())"
     check_cashout(book_id)
     check_bust(book_id)
+    if book_id in COMPOUND_SPLIT_RECIPIENTS or book_id == "compound":
+        check_compound_split()   # 3 Nov 2026 (Ali): one-time $500 -> $200 split-off, see its own docstring
     eq = equity(book_id)
     if eq < 5.0:
         return False, f"{book_id} book is empty (${eq:.2f})"
