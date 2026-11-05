@@ -1514,3 +1514,60 @@ nothing here proves them either yet. The 24h mark Ali and Claude agreed on (~13:
 Ali's machine may lose power before then (grid outage, low battery) -- if that happens, the
 next restart becomes a new baseline, and this section is the last clean data point before
 the gap.
+
+---
+
+## 📍 FINAL STEPS TO LIVE EXECUTION — 5 Nov 2026, ~15:40 PKT
+
+Everything below is the complete, current list of what's actually left before real money trades.
+Confirmed directly against the running code this same day (commit `e5778d2`), not carried over
+from an older note.
+
+### What's already done (nothing more to build)
+- Full pipeline confirmed live and scoring real signals correctly (`diag_live.py`): 23 real
+  "WOULD BUY" signals queued across RHC/Base/BSC/Solana in one check, all blocked only by the
+  missing private keys below.
+- `WALLET_ADDRESSES` in `.env` fixed (was missing a `base:` entry) — same MetaMask address as
+  `robinhood_chain:`, both EVM.
+- Two-phase milestone ladder built and tested (`check_milestone_ladder()`, `executor/books.py`):
+  Phase 1 — hard $20,000 cash-out, checked FIRST every cycle so it can never be eaten by its own
+  smaller protective banks; below $20,000, banks a light 10-22% at $240/$600/$1,200/$2,400/$6,000/
+  $12,000. Phase 2 — starts automatically after the Phase-1 cashout, same idea toward $117,500.
+  62 related tests passing. **Confirmed firing correctly on the live paper run** — as of this
+  check, Phase 1 has fired 4 times ($240/$600/$1,200/$2,400 levels), $1,397.85 secured, combined
+  equity $2,702.71, from a $100 seed in ~38 hours (344 real trades) — the system went roughly
+  41x on paper under the exact seed allocation planned for real funding.
+- Seeds currently set for $120 total funding (compound-weighted): compound $45.00, sprint/core1/
+  core2 $18.33/$18.33/$18.34, + $20 gas reserve (ETH: $15 RHC / $5 Base) held outside the seeds.
+
+### What's genuinely still open (only these two things)
+1. **Fund the wallet** (`0xC9f43d60F2598B2F8eEbb1ff5B98F2c226659826`) with ETH on both Robinhood
+   Chain and Base networks separately (same address, each network holds its own balance).
+   Convert USDT → ETH, withdraw directly onto each network where the exchange supports it to
+   avoid an extra bridging fee. Budget $3-5 of the total for conversion/withdrawal fees.
+2. **Paste the private key** into `.env` as both `EXECUTION_RHC_PRIVATE_KEY=` and
+   `EXECUTION_BASE_PRIVATE_KEY=` (same key — one MetaMask wallet covers both EVM chains).
+
+### Required after funding + keys
+- **Restart the process** — `load_dotenv()` only runs once at startup, not per-cycle, so new
+  `.env` keys will NOT take effect without a restart.
+- Verify readiness: `ready_for_chain('robinhood_chain')` and `ready_for_chain('base')` should
+  both flip to `True`.
+
+### Known, honest risk flag before scaling up
+- `execute_buy_robinhood_chain()` and `execute_buy_base()` in `executor/swap_executor.py` are
+  both explicitly marked in their own docstrings: **"written, guarded, but UNTESTED against a
+  live network. Do not fund a wallet against this path without first running one small real
+  test buy."** Real protections ARE built in (live on-chain slippage quote required before any
+  buy, live gas-price fetch before every transaction, refuse-don't-guess on any failed step —
+  confirmed directly in code) — but no real transaction has yet confirmed either path end to
+  end. Treat the first live trade on each chain as a genuine test, not an assumption.
+- Solana's execution path, by contrast, has had real prior live usage (the earlier $1-test).
+
+### Push/pull/restart instructions (same as always — no credentials stored here, so push is
+Ali's manual step)
+```
+git pull        # already done for commit e5778d2 as of this writing
+# edit .env: add EXECUTION_RHC_PRIVATE_KEY and EXECUTION_BASE_PRIVATE_KEY
+# restart the running process (local_runner.py or however it's normally started/stopped)
+```
