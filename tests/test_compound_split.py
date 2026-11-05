@@ -68,9 +68,17 @@ def test_compound_remaining_reflects_real_overshoot_not_flat_300():
 
 def test_wired_into_can_open_for_all_four_real_books():
     """check_compound_split() must fire from can_open() on ANY of the 4 real books' cycle, not
-    just when compound itself is checked -- the live poll loop may hit sprint/core1/core2 first."""
+    just when compound itself is checked -- the live poll loop may hit sprint/core1/core2 first.
+
+    5 Nov 2026 (Ali, revised same day): can_open() now ALSO fires check_milestone_ladder() right
+    after the compound split (see books.py) -- with compound at 540 USD before this call, the
+    split first drops it to 340 USD (unchanged math), and combined equity across all 4 books
+    (840 USD at that point) then clears the first phase-1 ladder level (240 USD, banks 10 pct =
+    84 USD) proportionally across all 4 books, compound share 34 USD, landing compound at
+    306 USD, not 340 USD. Both mechanisms are independent and stack correctly -- this is the
+    real, intended combined effect, not a regression."""
     now = time.time()
     _seed_compound_closed_trade(440.0, now)
-    books.can_open("sprint")   # not compound -- must still trigger the split
-    assert books.total_value("compound") == 340.0
+    books.can_open("sprint")   # not compound -- must still trigger both the split and the ladder
+    assert books.total_value("compound") == 306.0
     assert books.total_value("sprint") > 100.0

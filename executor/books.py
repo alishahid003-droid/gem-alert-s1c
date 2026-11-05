@@ -303,6 +303,198 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
     state.set_value(COMPOUND_SPLIT_KEY, result)
     return result
 
+# ---------------------------------------------------------------------------
+# Milestone ladder v2 (Ali, 5 Nov 2026, revised same day): two hard, sequential real-world
+# targets, not one open-ended ladder -- "$20,000 is the main lever needed in [the next] 4 to
+# 5 [days] ... even if the remaining balance is left around $700, $800 for the next run ...
+# more likely it can achieve $117,000 to $118,000 ... we need to secure the profits as well ...
+# I don't want to be sitting blank in between."
+#
+# PHASE 1 (toward the $20,000 lever): light protective banking on the way up -- SMALLER % than
+# the old v1 ladder (10-20% vs 15-50%) so climbing toward $20,000 isn't slowed much by its own
+# banking, while still making sure a drawdown after a good run can't erase everything ("not
+# sitting blank"). The FINAL step at $20,000 is NOT a percentage -- it's a hard, fixed cash-out
+# of exactly PHASE1_CASHOUT_USD ($20,000), leaving PHASE1_RESEED_USD ($750, the middle of Ali's
+# "$700, $800") behind to keep trading. This mirrors check_cashout()'s own fixed-reseed pattern,
+# just measured on combined 4-book equity instead of one book.
+#
+# PHASE 2 (toward $117,000-118,000) starts automatically the moment Phase 1's $20,000 cash-out
+# fires, using the SAME protective-banking idea, scaled off the $750 reseed instead of the
+# original $120 start -- so "securing profits along the way" continues for the second leg too,
+# not just the first.
+MILESTONE_LADDER_KEY = "milestone_ladder_v2"
+
+PHASE1_CASHOUT_USD = 20_000.0     # the hard lever Ali needs within ~4-5 days
+PHASE1_RESEED_USD = 750.0         # left behind to keep running after the $20k cash-out
+
+# (combined_equity level to cross, fraction of CURRENT combined equity to bank) -- Phase 1 legs,
+# lighter % than v1 so the climb to $20,000 isn't slowed much by its own banking.
+PHASE1_LADDER = (
+    (240.0,    0.10),   # ~2x
+    (600.0,    0.12),   # ~5x
+    (1200.0,   0.15),   # ~10x
+    (2400.0,   0.18),   # ~20x
+    (6000.0,   0.20),   # ~50x
+    (12000.0,  0.22),   # ~100x
+    # $20,000 itself is handled separately below as the fixed PHASE1_CASHOUT_USD cash-out,
+    # not a percentage -- see check_milestone_ladder()'s phase-1 cash-out branch.
+)
+
+# Phase 2 starts fresh from PHASE1_RESEED_USD ($750) toward $117,500 (midpoint of Ali's
+# "$117,000 to $118,000"). Same lighter-banking philosophy, levels scaled off the $750 base
+# roughly matching Phase 1's own multiples (2x, 5x, 10x, 20x, 50x, 100x of the new base).
+PHASE2_TARGET_USD = 117_500.0
+PHASE2_LADDER = (
+    (1_500.0,   0.10),   # ~2x of 750
+    (3_750.0,   0.12),   # ~5x
+    (7_500.0,   0.15),   # ~10x
+    (15_000.0,  0.18),   # ~20x
+    (37_500.0,  0.20),   # ~50x
+    (75_000.0,  0.22),   # ~100x
+    # PHASE2_TARGET_USD ($117,500) is the final goal -- no automatic cash-out is wired for it
+    # yet (no fixed "what's the reseed after this" instruction from Ali for phase 2's own end),
+    # so reaching it just means combined equity has arrived; ask Ali what to do at that point
+    # when it's actually close, rather than guessing a reseed number now.
+)
+
+
+def _combined_equity_for_milestones() -> float:
+    """Local, self-contained sum -- deliberately NOT importing phase_target.combined_equity()
+    here, because phase_target.py already imports THIS module (books.py); importing back would
+    create a circular import. Same 4 real books, same equity() calls, just inlined."""
+    return round(sum(equity(b) for b in ("sprint", "core1", "core2", "compound")), 2)
+
+
+def _bank_combined_pct(pct: float, reason: str, now: float) -> dict:
+    """Banks `pct` of CURRENT combined equity, proportionally out of each of the 4 real books
+    (same CASHOUT_KEY mechanism check_cashout()/check_compound_split() both already use)."""
+    combined = _combined_equity_for_milestones()
+    bank_total = round(combined * pct, 2)
+    real_books = ("sprint", "core1", "core2", "compound")
+    book_equities = {b: equity(b) for b in real_books}
+    rec = state.get_value(CASHOUT_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    per_book_banked = {}
+    if bank_total > 0:
+        for b in real_books:
+            share = (book_equities[b] / combined) if combined > 0 else 0.0
+            amount = round(bank_total * share, 2)
+            if amount <= 0:
+                continue
+            rec.setdefault(b, []).append({"ts": now, "amount": amount, "reason": reason})
+            per_book_banked[b] = amount
+        state.set_value(CASHOUT_KEY, rec)
+    return {"combined_equity_at_fire": combined, "banked_total": sum(per_book_banked.values()),
+            "banked_per_book": per_book_banked}
+
+
+def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, now: float) -> dict:
+    """Hard, fixed-amount cash-out (not a %) off combined equity, pulled proportionally from each
+    of the 4 real books, leaving exactly `reseed_usd` worth of combined equity behind (not a flat
+    reseed per book -- the TOTAL left behind across all 4 books sums to reseed_usd). Mirrors
+    check_cashout()'s own fixed-reseed pattern, scaled to the combined total instead of one book."""
+    combined = _combined_equity_for_milestones()
+    real_books = ("sprint", "core1", "core2", "compound")
+    book_equities = {b: equity(b) for b in real_books}
+    rec = state.get_value(CASHOUT_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    per_book_cashed = {}
+    for b in real_books:
+        share = (book_equities[b] / combined) if combined > 0 else 0.0
+        amount = round(cashout_usd * share, 2)
+        if amount <= 0:
+            continue
+        rec.setdefault(b, []).append({"ts": now, "amount": amount, "reason": reason})
+        per_book_cashed[b] = amount
+    state.set_value(CASHOUT_KEY, rec)
+    return {"combined_equity_at_fire": combined, "cashed_out_total": sum(per_book_cashed.values()),
+            "cashed_out_per_book": per_book_cashed,
+            "combined_equity_after": _combined_equity_for_milestones()}
+
+
+def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
+    """Call once per cycle (can_open() wires this in, same as check_compound_split()).
+
+    PHASE 1 (default, until the $20,000 lever fires): walks PHASE1_LADDER banking a light %
+    of combined equity at each level (same mechanism as before, just lighter percentages), THEN
+    once combined equity reaches PHASE1_CASHOUT_USD ($20,000), fires a ONE-TIME hard cash-out of
+    exactly that amount (not a %), leaving PHASE1_RESEED_USD ($750) behind, and switches state to
+    phase 2.
+
+    PHASE 2 (after the $20,000 lever has fired): same idea, walks PHASE2_LADDER banking a light
+    % of combined equity at each of its own levels, scaled off the $750 restart, toward
+    PHASE2_TARGET_USD ($117,500). No automatic action is wired for reaching $117,500 itself yet.
+
+    Only ONE event (one ladder level, or the phase-1 cash-out) fires per call, same safety
+    property as before -- a big jump across several levels in one cycle still processes them one
+    call at a time. Returns the fired record, or None if nothing new fired this call."""
+    now = now if now is not None else time.time()
+    done = state.get_value(MILESTONE_LADDER_KEY)
+    done = done if isinstance(done, dict) else {}
+    phase = done.get("phase", 1)
+    fired_levels = done.get("fired_levels", [])
+
+    combined = _combined_equity_for_milestones()
+
+    if phase == 1:
+        # The $20,000 hard cash-out is checked FIRST, ahead of the lighter ladder legs below.
+        # This matters: if the smaller percentage-banks fired first every call, repeatedly
+        # bleeding equity off the top before the cashout check ever ran, a big jump that
+        # clears $20,000 AND several ladder levels in one go could drain equity back below
+        # $20,000 purely from its OWN protective banking, before the $20,000 lever -- the
+        # actual priority -- ever got to fire. Ali's instruction was explicit that $20,000 is
+        # "the main lever ... by all means" -- it must never be a casualty of the smaller
+        # banks meant only to protect the climb toward it.
+        if "p1_cashout" not in fired_levels and combined >= PHASE1_CASHOUT_USD:
+            cashout = _fixed_cashout_combined(PHASE1_CASHOUT_USD, PHASE1_RESEED_USD,
+                                               "phase1_20k_cashout_5nov2026", now)
+            fired_levels.append("p1_cashout")
+            done["fired_levels"] = fired_levels
+            done["phase"] = 2
+            done["phase2_started_ts"] = now
+            result = {"ts": now, "phase": 1, "event": "phase1_cashout",
+                       "cashout_usd": PHASE1_CASHOUT_USD, "reseed_left_usd": PHASE1_RESEED_USD,
+                       **cashout}
+            done["p1_cashout"] = result
+            state.set_value(MILESTONE_LADDER_KEY, done)
+            return result
+
+        # Only reached if $20,000 has NOT yet been hit -- safe to bank the lighter protective
+        # percentages on the way up without risking the main lever.
+        for level, pct in PHASE1_LADDER:
+            key = f"p1_{int(level)}"
+            if key in fired_levels:
+                continue
+            if combined < level:
+                break
+            bank = _bank_combined_pct(pct, f"milestone_p1_{int(level)}_5nov2026", now)
+            fired_levels.append(key)
+            done["fired_levels"] = fired_levels
+            result = {"ts": now, "phase": 1, "level": level, "pct": pct, **bank}
+            done[key] = result
+            state.set_value(MILESTONE_LADDER_KEY, done)
+            return result
+
+        return None
+
+    # phase == 2
+    for level, pct in PHASE2_LADDER:
+        key = f"p2_{int(level)}"
+        if key in fired_levels:
+            continue
+        if combined < level:
+            break
+        bank = _bank_combined_pct(pct, f"milestone_p2_{int(level)}_5nov2026", now)
+        fired_levels.append(key)
+        done["fired_levels"] = fired_levels
+        result = {"ts": now, "phase": 2, "level": level, "pct": pct, **bank}
+        done[key] = result
+        state.set_value(MILESTONE_LADDER_KEY, done)
+        return result
+
+    return None
+
+
 
 def total_value(book_id: str) -> float:
     """Everything the book has made: seed + realized paper P&L (trading balance + banked vault)."""
@@ -736,6 +928,7 @@ def can_open(book_id: str, strong: bool = False) -> tuple:
     check_bust(book_id)
     if book_id in COMPOUND_SPLIT_RECIPIENTS or book_id == "compound":
         check_compound_split()   # 3 Nov 2026 (Ali): one-time $500 -> $200 split-off, see its own docstring
+    check_milestone_ladder()   # 5 Nov 2026 (Ali): periodic partial cash-outs as combined equity climbs toward $20,000, see its own docstring
     eq = equity(book_id)
     if eq < 5.0:
         return False, f"{book_id} book is empty (${eq:.2f})"
