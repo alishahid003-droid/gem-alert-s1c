@@ -42,25 +42,29 @@ def test_phase1_fires_first_light_banking_level_when_nowhere_near_20k():
     assert "event" not in result
 
 
-def test_20000_cashout_fires_immediately_even_if_several_ladder_levels_also_cleared():
-    """Critical ordering guarantee: if combined equity jumps straight past $20,000 (and past
-    several lighter ladder levels too) in one go, the $20,000 cash-out must fire on the very
+def test_19000_cashout_fires_immediately_once_20000_trigger_cleared():
+    """Critical ordering guarantee: if combined equity jumps straight past the $20,000 TRIGGER
+    (and past several lighter ladder levels too) in one go, the cash-out must fire on the very
     FIRST call -- it must never be eaten by the lighter percentage-banks firing first and
-    draining equity back under $20,000 before the cash-out check gets a turn."""
+    draining equity back under the trigger before the cash-out check gets a turn.
+
+    5 Nov 2026 (Ali, revised): the amount actually cashed out is $19,000, not the full $20,000
+    trigger -- "if we achieve $20,000, we will cash out $19,000, and the remaining will stay in
+    the system" -- leaving $1,000 (PHASE1_RESEED_USD, was $750) behind for Phase 2."""
     now = time.time()
     _seed_closed_trade("compound", 40000.0, now, "t1")
     combined = books._combined_equity_for_milestones()
-    assert combined >= books.PHASE1_CASHOUT_USD   # confirmed real combined equity clears $20k
+    assert combined >= books.PHASE1_CASHOUT_TRIGGER_USD   # confirmed real combined equity clears the $20k trigger
 
     result = books.check_milestone_ladder(now)
     assert result is not None
     assert result["event"] == "phase1_cashout"
-    assert result["cashout_usd"] == 20000.0
-    assert result["reseed_left_usd"] == 750.0
-    # real overshoot kept, not forced down to a flat $750 (same "real overshoot" principle as
-    # check_compound_split()) -- combined equity after is (combined_before - 20000), not 750.
+    assert result["cashout_usd"] == 19000.0
+    assert result["reseed_left_usd"] == 1000.0
+    # real overshoot kept, not forced down to a flat $1,000 (same "real overshoot" principle as
+    # check_compound_split()) -- combined equity after is (combined_before - 19000), not 1000.
     combined_after = books._combined_equity_for_milestones()
-    assert combined_after == pytest.approx(combined - 20000.0, abs=0.02)
+    assert combined_after == pytest.approx(combined - 19000.0, abs=0.02)
 
 
 def test_phase1_cashout_never_fires_twice_and_switches_to_phase2():

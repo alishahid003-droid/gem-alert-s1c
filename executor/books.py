@@ -310,13 +310,16 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
 # more likely it can achieve $117,000 to $118,000 ... we need to secure the profits as well ...
 # I don't want to be sitting blank in between."
 #
-# PHASE 1 (toward the $20,000 lever): light protective banking on the way up -- SMALLER % than
-# the old v1 ladder (10-20% vs 15-50%) so climbing toward $20,000 isn't slowed much by its own
-# banking, while still making sure a drawdown after a good run can't erase everything ("not
-# sitting blank"). The FINAL step at $20,000 is NOT a percentage -- it's a hard, fixed cash-out
-# of exactly PHASE1_CASHOUT_USD ($20,000), leaving PHASE1_RESEED_USD ($750, the middle of Ali's
-# "$700, $800") behind to keep trading. This mirrors check_cashout()'s own fixed-reseed pattern,
-# just measured on combined 4-book equity instead of one book.
+# PHASE 1 (toward the $20,000 trigger): light protective banking on the way up -- SMALLER %
+# than the old v1 ladder (10-20% vs 15-50%) so climbing toward the trigger isn't slowed much by
+# its own banking, while still making sure a drawdown after a good run can't erase everything
+# ("not sitting blank"). The FINAL step, once combined equity reaches PHASE1_CASHOUT_TRIGGER_USD
+# ($20,000), is NOT a percentage -- it's a hard, fixed cash-out of PHASE1_CASHOUT_USD ($19,000,
+# revised 5 Nov 2026 same day from an earlier $20,000/$750 split -- Ali: "if we achieve $20,000,
+# we will cash out $19,000, and the remaining will stay in the system"), leaving PHASE1_RESEED_USD
+# ($1,000) behind to keep trading, or the real overshoot above $20,000 if equity cleared the
+# trigger before this check ran. This mirrors check_cashout()'s own fixed-reseed pattern, just
+# measured on combined 4-book equity instead of one book.
 #
 # PHASE 2 (toward $117,000-118,000) starts automatically the moment Phase 1's $20,000 cash-out
 # fires, using the SAME protective-banking idea, scaled off the $750 reseed instead of the
@@ -324,8 +327,13 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
 # not just the first.
 MILESTONE_LADDER_KEY = "milestone_ladder_v2"
 
-PHASE1_CASHOUT_USD = 20_000.0     # the hard lever Ali needs within ~4-5 days
-PHASE1_RESEED_USD = 750.0         # left behind to keep running after the $20k cash-out
+PHASE1_CASHOUT_TRIGGER_USD = 20_000.0   # combined equity must reach THIS before cashout fires
+PHASE1_CASHOUT_USD = 19_000.0           # 5 Nov 2026 (Ali, revised): amount actually cashed OUT is
+                                          # $19,000, not the full $20,000 trigger -- deliberately
+                                          # leaves more ($1,000 base, or the real overshoot above
+                                          # $20,000 if equity cleared the trigger before this ran)
+                                          # behind for the Phase-2 run toward $117,500.
+PHASE1_RESEED_USD = 1_000.0             # left behind to keep running after the cash-out (was $750)
 
 # (combined_equity level to cross, fraction of CURRENT combined equity to bank) -- Phase 1 legs,
 # lighter % than v1 so the climb to $20,000 isn't slowed much by its own banking.
@@ -336,7 +344,7 @@ PHASE1_LADDER = (
     (2400.0,   0.18),   # ~20x
     (6000.0,   0.20),   # ~50x
     (12000.0,  0.22),   # ~100x
-    # $20,000 itself is handled separately below as the fixed PHASE1_CASHOUT_USD cash-out,
+    # The $20,000 trigger itself is handled separately below as the fixed $19,000 cash-out,
     # not a percentage -- see check_milestone_ladder()'s phase-1 cash-out branch.
 )
 
@@ -417,7 +425,7 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
 
     PHASE 1 (default, until the $20,000 lever fires): walks PHASE1_LADDER banking a light %
     of combined equity at each level (same mechanism as before, just lighter percentages), THEN
-    once combined equity reaches PHASE1_CASHOUT_USD ($20,000), fires a ONE-TIME hard cash-out of
+    once combined equity reaches PHASE1_CASHOUT_TRIGGER_USD ($20,000), fires a ONE-TIME hard cash-out of
     exactly that amount (not a %), leaving PHASE1_RESEED_USD ($750) behind, and switches state to
     phase 2.
 
@@ -445,7 +453,7 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
         # actual priority -- ever got to fire. Ali's instruction was explicit that $20,000 is
         # "the main lever ... by all means" -- it must never be a casualty of the smaller
         # banks meant only to protect the climb toward it.
-        if "p1_cashout" not in fired_levels and combined >= PHASE1_CASHOUT_USD:
+        if "p1_cashout" not in fired_levels and combined >= PHASE1_CASHOUT_TRIGGER_USD:
             cashout = _fixed_cashout_combined(PHASE1_CASHOUT_USD, PHASE1_RESEED_USD,
                                                "phase1_20k_cashout_5nov2026", now)
             fired_levels.append("p1_cashout")
