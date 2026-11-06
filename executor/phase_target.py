@@ -172,62 +172,77 @@ def check(now: Optional[float] = None) -> dict:
     worker_fast_watch.tick() alongside the existing per-book check_cashout()/check_bust() calls).
     Updates peak-equity tracking, fires the drawdown pause/resume, and fires the target-hit
     cashout+alert+next-phase-handoff. Returns the current status dict plus any events that just
-    fired this call (empty list if nothing changed)."""
+    fired this call (empty list if nothing changed).
+
+    6 Nov 2026 (Ali, found live): scheduler.py's run_poll_fast() and worker_fast_watch.py's tick()
+    both call this independently -- separate OS processes on Windows, not threads -- and the old
+    version here did a plain _state() read followed by a separate _save() write, with no lock held
+    across the two. Confirmed live in Ali's own logs/fast_watch.log: 74 "PermissionError: [WinError
+    5] Access is denied" crashes on exactly this function's _save() call over several hours, and
+    separately reproduced in isolation as a silent lost-update race (two processes reading the same
+    old value, both computing a new one, the second write clobbering the first with zero error --
+    confirmed via a controlled test: 6 threads x100 concurrent increments landed at 100, not 600).
+    Rebuilt on state.atomic_update(), which holds one file lock across the full read+modify+write,
+    closing both failure modes -- verified in isolation (thread-level and real separate-OS-process
+    level) before being wired in here."""
     now = now if now is not None else time.time()
-    d = _state()
-    phase = d.get("current")
-    if not phase or phase not in PHASES:
-        return {"active": False, "fired": []}
-    p = PHASES[phase]
-    eq = combined_equity()
     fired = []
 
-    peak = max(d.get("peak_equity", 0.0), eq)
-    d["peak_equity"] = peak
+    def _mutate(d):
+        d = d if isinstance(d, dict) else {"current": None, "started_ts": None, "peak_equity": 0.0,
+                                            "paused": False, "events": [], "window_started_ts": {}}
+        phase = d.get("current")
+        if not phase or phase not in PHASES:
+            return d
+        p = PHASES[phase]
+        eq = combined_equity()
 
-    # --- drawdown circuit breaker: pause/resume, never force-closes anything ---
-    floor = peak * p["drawdown_pause_pct"] if peak > 0 else 0.0
-    was_paused = d.get("paused", False)
-    if not was_paused and peak > 0 and eq <= floor:
-        d["paused"] = True
-        ev = {"ts": now, "type": "drawdown_pause", "phase": phase, "equity": eq,
-              "peak_equity": peak, "floor": round(floor, 2)}
-        d.setdefault("events", []).append(ev)
-        fired.append(ev)
-    elif was_paused and eq > floor:
-        d["paused"] = False
-        ev = {"ts": now, "type": "drawdown_resume", "phase": phase, "equity": eq, "floor": round(floor, 2)}
-        d.setdefault("events", []).append(ev)
-        fired.append(ev)
+        peak = max(d.get("peak_equity", 0.0), eq)
+        d["peak_equity"] = peak
 
-    # --- target hit: alert, stop new entries (via paused=True), cash out, hand off to next phase ---
-    if eq >= p["target_usd"]:
-        ev = {"ts": now, "type": "target_hit", "phase": phase, "equity": eq, "target": p["target_usd"]}
-        d.setdefault("events", []).append(ev)
-        fired.append(ev)
-        d["paused"] = True   # stop taking new trades immediately -- Ali's explicit requirement
-        cashed = min(p["cashout_usd"], eq) if p.get("cashout_usd") is not None else None
-        reseed = p.get("reseed_usd")
-        next_phase = p.get("next")
-        if cashed is not None:
-            # This module tracks and alerts; it does NOT silently move money between books' seeds.
-            # Ali withdraws the cashout amount himself, sets each book's *_SEED_USD in .env to its
-            # share of the reseed total (if any), and calls start_phase(next) to begin tracking the
-            # next phase -- same "explicit, manual, never automatic" convention books.force_reseed()
-            # already uses.
-            note = (f"Target hit on Phase {phase} -- all new entries paused. Ali: withdraw "
-                    f"${cashed:,.0f}, "
-                    + (f"set each book's *_SEED_USD in .env to its share of the remaining "
-                       f"${reseed:,.0f}, then call start_phase({next_phase!r}) to begin tracking it."
-                       if reseed is not None and next_phase
-                       else "this is the final phase -- no further reseed/next phase."))
-            ev2 = {"ts": now, "type": "cashout_recommended", "phase": phase,
-                   "next_phase": next_phase, "cashout_usd": cashed, "reseed_usd": reseed,
-                   "note": note}
-            d.setdefault("events", []).append(ev2)
-            fired.append(ev2)
+        # --- drawdown circuit breaker: pause/resume, never force-closes anything ---
+        floor = peak * p["drawdown_pause_pct"] if peak > 0 else 0.0
+        was_paused = d.get("paused", False)
+        if not was_paused and peak > 0 and eq <= floor:
+            d["paused"] = True
+            ev = {"ts": now, "type": "drawdown_pause", "phase": phase, "equity": eq,
+                  "peak_equity": peak, "floor": round(floor, 2)}
+            d.setdefault("events", []).append(ev)
+            fired.append(ev)
+        elif was_paused and eq > floor:
+            d["paused"] = False
+            ev = {"ts": now, "type": "drawdown_resume", "phase": phase, "equity": eq, "floor": round(floor, 2)}
+            d.setdefault("events", []).append(ev)
+            fired.append(ev)
 
-    _save(d)
+        # --- target hit: alert, stop new entries (via paused=True), cash out, hand off to next phase ---
+        if eq >= p["target_usd"]:
+            ev = {"ts": now, "type": "target_hit", "phase": phase, "equity": eq, "target": p["target_usd"]}
+            d.setdefault("events", []).append(ev)
+            fired.append(ev)
+            d["paused"] = True   # stop taking new trades immediately -- Ali's explicit requirement
+            cashed = min(p["cashout_usd"], eq) if p.get("cashout_usd") is not None else None
+            reseed = p.get("reseed_usd")
+            next_phase = p.get("next")
+            if cashed is not None:
+                note = (f"Target hit on Phase {phase} -- all new entries paused. Ali: withdraw "
+                        f"${cashed:,.0f}, "
+                        + (f"set each book's *_SEED_USD in .env to its share of the remaining "
+                           f"${reseed:,.0f}, then call start_phase({next_phase!r}) to begin tracking it."
+                           if reseed is not None and next_phase
+                           else "this is the final phase -- no further reseed/next phase."))
+                ev2 = {"ts": now, "type": "cashout_recommended", "phase": phase,
+                       "next_phase": next_phase, "cashout_usd": cashed, "reseed_usd": reseed,
+                       "note": note}
+                d.setdefault("events", []).append(ev2)
+                fired.append(ev2)
+        return d
+
+    d = state.get_value(PHASE_KEY)
+    if not (isinstance(d, dict) and d.get("current") in PHASES):
+        return {"active": False, "fired": []}
+
+    state.atomic_update(PHASE_KEY, _mutate)
     return {**status(now), "fired": fired}
 
 

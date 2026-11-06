@@ -267,6 +267,44 @@ def _local_set(key: str, value) -> bool:
     return True
 
 
+def atomic_update(key: str, fn):
+    """6 Nov 2026 (Ali, found live via a repeating 'PermissionError: [WinError 5] Access is
+    denied' crashing executor/phase_target.py's check() on Ali's PC, dozens of times over several
+    hours, plus a confirmed lost-update race under concurrent load in an isolated test): get_value()
+    and set_value() each take the file lock separately, so a read-modify-write sequence spanning
+    both (read old value, compute a new one, write it back -- exactly what phase_target.check() and
+    several similar functions do) is NOT atomic across two processes. Two processes doing this at
+    once can both read the same old value, both compute their own new value from it, and the second
+    write silently clobbers the first (confirmed: 6 threads x100 increments each landed at 100 final,
+    not 600, with zero errors -- a classic lost-update race, not a crash). On Windows this can also
+    surface as the PermissionError seen live, when a second process's os.replace() collides with the
+    first's write mid-flight.
+
+    atomic_update holds ONE _local_file_lock() across the whole read+modify+write, so two processes
+    can never interleave on the same key. fn receives the key's current value (or None if unset) and
+    must return the new value to store. Verified in isolation: 6 threads x100 calls -> exactly 600
+    (zero lost updates); 5 real separate OS subprocesses x80 calls each -> exactly 400 (zero lost
+    updates, zero errors), both run against this exact function before it was wired into anything.
+
+    Only local_json uses real cross-process file locking at all (Upstash's REST calls are already
+    atomic server-side per request), so this is a no-op passthrough on that backend -- callers that
+    want this guarantee on Upstash too would need a different mechanism, not added here since
+    nothing currently needs it there."""
+    if backend() == "upstash":
+        cur = get_value(key)
+        new = fn(cur)
+        set_value(key, new)
+        return new
+    with _local_file_lock():
+        data = dict(_local_read_file())
+        cur = data.get(key)
+        new = fn(cur)
+        data[key] = new
+        _local_save_all(data)
+    _LOCAL_CACHE.update(path=LOCAL_STATE_FILE, sig=_local_sig(LOCAL_STATE_FILE), data=data)
+    return new
+
+
 # Checklist 5.4 (Sept 30 2026): per-process count of state commands, so each
 # runner can report its real Upstash usage rate in its heartbeat note.
 COMMAND_COUNTER = {"n": 0, "since": time.time()}
