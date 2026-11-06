@@ -150,6 +150,18 @@ def main() -> None:
         import threading
         threading.Thread(target=_radar_loop, name="radar", daemon=True).start()
         print(f"[local_runner] radar thread started (every {int(radar_interval_s() // 60)} min)", flush=True)
+    # 7 Nov 2026 (Ali): periodic state snapshot -- so a reset/crash/bad script can never again
+    # permanently erase trade history the way the real $100->$4,100 (344-trade) run was lost on
+    # 6 Nov 2026 (its only surviving record ended up being a chat screenshot). Own daemon thread,
+    # read-only against the live state file (see state_snapshot.py's own docstring), disabled the
+    # same way every other thread here is: an env var.
+    if os.environ.get("LOCAL_RUNNER_SNAPSHOT", "true").strip().lower() != "false":
+        import threading as _threading_snap
+        import state_snapshot
+        _snap_interval = int(os.environ.get("LOCAL_RUNNER_SNAPSHOT_INTERVAL_S", "600"))
+        _threading_snap.Thread(target=state_snapshot.watch_loop, args=(_snap_interval,), name="snapshot", daemon=True).start()
+        print(f"[local_runner] state snapshot thread started (every {_snap_interval // 60} min)", flush=True)
+
     print("[local_runner] started. Jobs:", [(n, int(iv // 60)) for n, _, iv in schedule()], flush=True)
     while True:
         due = due_jobs(last, time.time())
