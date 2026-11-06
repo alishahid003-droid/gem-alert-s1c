@@ -452,7 +452,10 @@ def act(d: dict, now: Optional[float] = None) -> dict:
     opened, refused = [], []
     for lane in d["lanes"]:
         tier = d.get("tier", "probe")
-        can, reason = books.can_open(lane, strong=tier in ("standard", "conviction") and len(d["confirmations"]) >= 5)
+        # 7 Nov 2026 (Ali): pass chain through so robinhood_chain and base each get their own
+        # position-count slot allowance in this lane, instead of competing for one shared count
+        # (see books.can_open()'s own docstring for the full reasoning and capital-gating note).
+        can, reason = books.can_open(lane, strong=tier in ("standard", "conviction") and len(d["confirmations"]) >= 5, chain=d["chain"])
         stake = books.tier_stake_usd(lane, tier, d.get("mcap")) if can else 0.0
         # 31 Oct 2026 (Ali): removed robinhood_chain from this Oct-13-evidence downweight.
         # That 0.6x was based on a 5-trade, 0-win sample from BEFORE the 28 Oct fix to

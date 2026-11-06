@@ -671,8 +671,16 @@ def module_open_cost(module_id: str) -> float:
                for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
 
 
-def module_open_count(module_id: str) -> int:
-    return sum(1 for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
+def module_open_count(module_id: str, chain: str = None) -> int:
+    # 7 Nov 2026 (Ali): optional chain filter -- lets a book's position-count LIMIT be evaluated
+    # separately per chain (e.g. robinhood_chain and base each get their own slot allowance
+    # within the same book) instead of all chains competing for one shared count. chain=None
+    # (the default, used by every pre-existing caller) is the original, unfiltered behavior --
+    # completely unchanged. Capital gating (module_open_cost/free_equity) is NOT chain-filtered
+    # and stays whole-book real dollars, exactly as before -- only the position-count limit
+    # becomes chain-aware, never how much real capital a book can commit.
+    return sum(1 for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id
+               and (chain is None or p.get("chain") == chain))
 
 
 def module_scoreboard() -> dict:

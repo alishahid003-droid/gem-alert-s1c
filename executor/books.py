@@ -788,9 +788,9 @@ def free_equity(book_id: str) -> float:
     return max(0.0, round(equity(book_id) - committed_usd(book_id), 2))
 
 
-def open_count(book_id: str) -> int:
+def open_count(book_id: str, chain: str = None) -> int:
     from executor import paper_ledger
-    return paper_ledger.module_open_count(book_id)
+    return paper_ledger.module_open_count(book_id, chain=chain)
 
 
 def effective_max_share(book_id: str, now: Optional[float] = None) -> float:
@@ -943,7 +943,7 @@ def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: O
     return round(out, 2) if out >= 5.0 else 0.0
 
 
-def can_open(book_id: str, strong: bool = False) -> tuple:
+def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
     """strong=True (a Standard/Conviction signal with >=5 confirmations) may use BOOK_STRONG_EXTRA_SLOTS (default 2)
     beyond the normal position limit, and when even those are full may swap out the stalest flat position
     (paper_ledger.swap_out) -- at most one swap per book every 5 minutes.
@@ -953,7 +953,17 @@ def can_open(book_id: str, strong: bool = False) -> tuple:
     system does not take any trade" once $10,000 combined is reached) or the drawdown circuit
     breaker tripped (equity fell too far below its own peak this phase). Checked first, for only
     the 4 real books phase_target.py tracks -- fomo/leaderboard/dev_list/solana_* copy and
-    pattern-tracking books are unaffected, same as every other gate in this function."""
+    pattern-tracking books are unaffected, same as every other gate in this function.
+
+    7 Nov 2026 (Ali): optional chain param makes the POSITION-COUNT limit chain-aware -- e.g.
+    robinhood_chain and base each get their own full slot allowance in the same book, so one
+    chain filling its slots never blocks the other (Ali's explicit ask: "an additional slot
+    should be an option... separate for both... so that both are performing at its max
+    utilization"). chain=None (every caller except multichain_sniper.py) is the original,
+    completely unfiltered behavior. Capital gating (free_equity/committed_usd below) is
+    DELIBERATELY left whole-book and chain-blind -- real dollars are real dollars regardless of
+    which chain is using them; only the position-count ceiling becomes per-chain, never the
+    amount of actual capital a book can commit."""
     if book_id in ("sprint", "core1", "core2", "compound"):
         from executor import phase_target
         if phase_target.is_paused():
@@ -968,13 +978,14 @@ def can_open(book_id: str, strong: bool = False) -> tuple:
         return False, f"{book_id} book is empty (${eq:.2f})"
     limit = max_open(book_id, eq)
     extra = int(_f("BOOK_STRONG_EXTRA_SLOTS", 2) or 0) if strong else 0
-    n_open = open_count(book_id)
+    n_open = open_count(book_id, chain=chain)
     need_cash = free_equity(book_id) < 5.0
     if n_open >= limit + extra or (need_cash and strong):
         if strong and _try_swap(book_id):
-            n_open, need_cash = open_count(book_id), free_equity(book_id) < 5.0
+            n_open, need_cash = open_count(book_id, chain=chain), free_equity(book_id) < 5.0
         if n_open >= limit + extra:
-            return False, f"{book_id}: {limit} open position(s) is the limit at ${eq:,.0f}" + (f" (+{extra} for strong signals, all used)" if extra else "")
+            chain_note = f" [{chain}]" if chain else ""
+            return False, f"{book_id}{chain_note}: {limit} open position(s) is the limit at ${eq:,.0f}" + (f" (+{extra} for strong signals, all used)" if extra else "")
     if need_cash:
         return False, f"{book_id}: balance is fully committed (${committed_usd(book_id):,.0f} open)"
     return True, "ok" if n_open < limit else "ok (strong-signal extra slot)"
