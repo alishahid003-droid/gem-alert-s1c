@@ -91,7 +91,22 @@ def _save(d: dict):
 
 def combined_equity() -> float:
     """Sum of equity() across the 4 real books -- the number Ali's targets are measured against."""
-    return round(sum(books.equity(b) for b in REAL_BOOKS), 2)
+    # TEMP DEBUG (6 Nov 2026, Ali): instrumented to find the exact book(s) producing wrong reads
+    # during the recurring equity-flicker investigation. Logs a per-book breakdown to
+    # logs/equity_debug.log ONLY when the total looks suspiciously low (< 300, i.e. clearly not
+    # all 4 books near $100 each), so this stays silent during normal operation. Remove once the
+    # root cause is confirmed and fixed.
+    per_book = {b: books.equity(b) for b in REAL_BOOKS}
+    total = round(sum(per_book.values()), 2)
+    if total < 300:
+        try:
+            import time as _time, os as _os
+            log_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "logs", "equity_debug.log")
+            with open(log_path, "a") as _f:
+                _f.write(f"{_time.time()} pid={_os.getpid()} total={total} per_book={per_book}\n")
+        except Exception:
+            pass
+    return total
 
 
 def start_phase(phase: str, now: Optional[float] = None) -> dict:
