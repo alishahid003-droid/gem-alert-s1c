@@ -277,8 +277,14 @@ def swap_out(module_id: str, now: Optional[float] = None) -> Optional[dict]:
     _sell(pos, pos["remaining"], pos["last_mcap"], "slot_swap", now)
     row = _close(pos, "slot_swap", f"swapped out at {mult:.2f}x to free a slot for a stronger signal", now)
     del book[pid]
-    state.set_value(OPEN_KEY, book)
-    state.set_value(CLOSED_KEY, _dedupe_closed(_closed_raw() + [row])[-MAX_CLOSED_KEPT:])
+    # 6 Nov 2026: OPEN_KEY and CLOSED_KEY must be read, modified, AND written as one atomic unit --
+    # see state.atomic_multi_fn()'s docstring for the full investigation (two separate writes lost
+    # trades to a torn read; even one combined write still lost trades because the NEW closed-list
+    # value was computed from a pre-lock read, so two concurrent closers could clobber each other).
+    def _apply(cur):
+        closed_now_list = cur.get(CLOSED_KEY) or []
+        return {OPEN_KEY: book, CLOSED_KEY: _dedupe_closed(list(closed_now_list) + [row])[-MAX_CLOSED_KEPT:]}
+    state.atomic_multi_fn([OPEN_KEY, CLOSED_KEY], _apply)
     return row
 
 
@@ -597,9 +603,17 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         for _pid, _p in _open().items():
             if _pid not in _orig_ids and _pid not in book:
                 book[_pid] = _p
-        state.set_value(OPEN_KEY, book)
+        # 6 Nov 2026: same fix as the slot-swap close above -- read-modify-write of CLOSED_KEY now
+        # happens INSIDE the lock (via atomic_multi_fn), not before it, so a concurrent closer in
+        # another process can never clobber these closes.
         if closed_now:
-            state.set_value(CLOSED_KEY, _dedupe_closed(_closed_raw() + closed_now)[-MAX_CLOSED_KEPT:])
+            def _apply(cur, _book=book, _closed_now=closed_now):
+                closed_now_list = cur.get(CLOSED_KEY) or []
+                return {OPEN_KEY: _book,
+                        CLOSED_KEY: _dedupe_closed(list(closed_now_list) + _closed_now)[-MAX_CLOSED_KEPT:]}
+            state.atomic_multi_fn([OPEN_KEY, CLOSED_KEY], _apply)
+        else:
+            state.set_value(OPEN_KEY, book)
     return {"open": len(book), "closed_now": len(closed_now)}
 
 

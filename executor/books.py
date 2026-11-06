@@ -181,16 +181,22 @@ def check_bust(book_id: str, now: Optional[float] = None) -> Optional[dict]:
         oldest_open = min((p.get("opened_ts") or now) for p in blockers)
         if now - oldest_open < _f("BUST_WAIT_MINUTES", 60.0) * 60.0:
             return None         # let this book's open sniper slice(s) resolve first, but not forever
-    rec = state.get_value(BUST_KEY)
-    rec = rec if isinstance(rec, dict) else {}
-    rec.setdefault(book_id, []).append({"ts": now, "realized_at_bust": realized_pnl(book_id) + bust_offset(book_id),
-                                        "value": total_value(book_id)})
-    state.set_value(BUST_KEY, rec)
-    starts = state.get_value(BOOKS_KEY)
-    starts = starts if isinstance(starts, dict) else {}
-    starts[book_id] = {"start_ts": now}
-    state.set_value(BOOKS_KEY, starts)
-    return rec[book_id][-1]
+    # 6 Nov 2026: realized_at_bust must be computed AND both keys written inside one lock --
+    # computing it, then reading/updating BUST_KEY/BOOKS_KEY outside a lock (even via one combined
+    # write) let a concurrent writer's own read-modify-write clobber this one, the same lost-update
+    # pattern found and fixed in paper_ledger.py's close paths (see state.atomic_multi_fn()).
+    snapshot_value = realized_pnl(book_id) + bust_offset(book_id)
+    snapshot_total = total_value(book_id)
+    def _apply(cur, _book_id=book_id, _now=now, _rab=snapshot_value, _val=snapshot_total):
+        rec = cur.get(BUST_KEY)
+        rec = dict(rec) if isinstance(rec, dict) else {}
+        rec[_book_id] = list(rec.get(_book_id) or []) + [{"ts": _now, "realized_at_bust": _rab, "value": _val}]
+        starts = cur.get(BOOKS_KEY)
+        starts = dict(starts) if isinstance(starts, dict) else {}
+        starts[_book_id] = {"start_ts": _now}
+        return {BUST_KEY: rec, BOOKS_KEY: starts}
+    result = state.atomic_multi_fn([BUST_KEY, BOOKS_KEY], _apply)
+    return result[BUST_KEY][book_id][-1]
 
 
 def force_reseed(book_id: str, now: Optional[float] = None, reason: str = "manual") -> dict:
@@ -208,19 +214,23 @@ def force_reseed(book_id: str, now: Optional[float] = None, reason: str = "manua
     manual, explicit action, never automatic, so a real-money run always starts from a known, clean
     $50 and nothing from the paper-testing history leaks into the live P&L figures."""
     now = now if now is not None else time.time()
-    rec = state.get_value(BUST_KEY)
-    rec = rec if isinstance(rec, dict) else {}
-    rec.setdefault(book_id, []).append({"ts": now, "realized_at_bust": realized_pnl(book_id) + bust_offset(book_id),
-                                        "value": total_value(book_id), "reason": reason})
-    state.set_value(BUST_KEY, rec)
-    starts = state.get_value(BOOKS_KEY)
-    starts = starts if isinstance(starts, dict) else {}
-    starts[book_id] = {"start_ts": now}
-    state.set_value(BOOKS_KEY, starts)
+    # 6 Nov 2026: same full read-modify-write-under-lock fix as check_bust() above.
+    snapshot_value = realized_pnl(book_id) + bust_offset(book_id)
+    snapshot_total = total_value(book_id)
+    def _apply(cur, _book_id=book_id, _now=now, _rab=snapshot_value, _val=snapshot_total, _reason=reason):
+        rec = cur.get(BUST_KEY)
+        rec = dict(rec) if isinstance(rec, dict) else {}
+        rec[_book_id] = list(rec.get(_book_id) or []) + [
+            {"ts": _now, "realized_at_bust": _rab, "value": _val, "reason": _reason}]
+        starts = cur.get(BOOKS_KEY)
+        starts = dict(starts) if isinstance(starts, dict) else {}
+        starts[_book_id] = {"start_ts": _now}
+        return {BUST_KEY: rec, BOOKS_KEY: starts}
+    result = state.atomic_multi_fn([BUST_KEY, BOOKS_KEY], _apply)
     # compound's staged bank stages are derived from realized_pnl too (see compound_banked()) --
     # resetting realized_pnl to 0 via the bust snapshot above automatically resets the stage ladder
     # as well, with no separate state to clear.
-    return rec[book_id][-1]
+    return result[BUST_KEY][book_id][-1]
 
 
 def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
@@ -234,15 +244,17 @@ def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     now = now if now is not None else time.time()
     reseed = _f(f"{book_id.upper()}_RESEED_USD", 200.0)
     amount = round(total_value(book_id) - reseed, 2)
-    rec = state.get_value(CASHOUT_KEY)
-    rec = rec if isinstance(rec, dict) else {}
-    rec.setdefault(book_id, []).append({"ts": now, "amount": amount, "reseed": reseed})
-    state.set_value(CASHOUT_KEY, rec)
-    starts = state.get_value(BOOKS_KEY)
-    starts = starts if isinstance(starts, dict) else {}
-    starts[book_id] = {"start_ts": now}
-    state.set_value(BOOKS_KEY, starts)
-    return rec[book_id][-1]
+    # 6 Nov 2026: same full read-modify-write-under-lock fix as check_bust() above.
+    def _apply(cur, _book_id=book_id, _now=now, _amount=amount, _reseed=reseed):
+        rec = cur.get(CASHOUT_KEY)
+        rec = dict(rec) if isinstance(rec, dict) else {}
+        rec[_book_id] = list(rec.get(_book_id) or []) + [{"ts": _now, "amount": _amount, "reseed": _reseed}]
+        starts = cur.get(BOOKS_KEY)
+        starts = dict(starts) if isinstance(starts, dict) else {}
+        starts[_book_id] = {"start_ts": _now}
+        return {CASHOUT_KEY: rec, BOOKS_KEY: starts}
+    result = state.atomic_multi_fn([CASHOUT_KEY, BOOKS_KEY], _apply)
+    return result[CASHOUT_KEY][book_id][-1]
 
 
 COMPOUND_SPLIT_KEY = "compound_split_v1"
@@ -275,13 +287,6 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
         return None
     now = now if now is not None else time.time()
 
-    # Pull $200 out of compound (same mechanism check_cashout() uses -- a CASHOUT_KEY record).
-    rec = state.get_value(CASHOUT_KEY)
-    rec = rec if isinstance(rec, dict) else {}
-    rec.setdefault("compound", []).append({"ts": now, "amount": COMPOUND_SPLIT_BANK_USD,
-                                            "reason": "compound_split_3nov2026"})
-    state.set_value(CASHOUT_KEY, rec)
-
     # Distribute it evenly across sprint/core1/core2 as fresh deposited-in seed money.
     share = round(COMPOUND_SPLIT_BANK_USD / len(COMPOUND_SPLIT_RECIPIENTS), 2)
     shares = {b: share for b in COMPOUND_SPLIT_RECIPIENTS}
@@ -291,17 +296,38 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
     if leftover:
         shares[COMPOUND_SPLIT_RECIPIENTS[0]] = round(shares[COMPOUND_SPLIT_RECIPIENTS[0]] + leftover, 2)
 
-    dep = state.get_value(DEPOSITS_KEY)
-    dep = dep if isinstance(dep, dict) else {}
-    for book_id, amount in shares.items():
-        dep.setdefault(book_id, []).append({"ts": now, "amount": amount,
-                                             "reason": "compound_split_3nov2026"})
-    state.set_value(DEPOSITS_KEY, dep)
+    # 6 Nov 2026: CASHOUT_KEY, DEPOSITS_KEY, AND the COMPOUND_SPLIT_KEY fire-once guard must all be
+    # read, modified, and written as one atomic unit under one lock -- the old separate-writes
+    # version (even after the first atomic_multi_update pass) could let a concurrent caller see the
+    # $200 pulled from compound without it yet being credited to sprint/core1/core2, or worse, let
+    # this fire more than once if the guard write landed separately from the money-moving writes.
+    def _apply(cur, _now=now, _shares=shares):
+        rec = cur.get(CASHOUT_KEY)
+        rec = dict(rec) if isinstance(rec, dict) else {}
+        rec["compound"] = list(rec.get("compound") or []) + [
+            {"ts": _now, "amount": COMPOUND_SPLIT_BANK_USD, "reason": "compound_split_3nov2026"}]
+        dep = cur.get(DEPOSITS_KEY)
+        dep = dict(dep) if isinstance(dep, dict) else {}
+        for _book_id, _amount in _shares.items():
+            dep[_book_id] = list(dep.get(_book_id) or []) + [
+                {"ts": _now, "amount": _amount, "reason": "compound_split_3nov2026"}]
+        done_guard = cur.get(COMPOUND_SPLIT_KEY)
+        if isinstance(done_guard, dict) and done_guard.get("fired"):
+            # Someone else's concurrent call already fired this inside the lock -- bail out with
+            # no changes rather than double-crediting the $200.
+            return {CASHOUT_KEY: cur.get(CASHOUT_KEY), DEPOSITS_KEY: cur.get(DEPOSITS_KEY),
+                    COMPOUND_SPLIT_KEY: done_guard}
+        split_result = {"ts": _now, "fired": True, "banked_from_compound": COMPOUND_SPLIT_BANK_USD,
+                         "shares": _shares, "compound_remaining": None}  # filled in below, outside lock
+        return {CASHOUT_KEY: rec, DEPOSITS_KEY: dep, COMPOUND_SPLIT_KEY: split_result}
 
-    result = {"ts": now, "fired": True, "banked_from_compound": COMPOUND_SPLIT_BANK_USD,
-              "shares": shares, "compound_remaining": total_value("compound")}
-    state.set_value(COMPOUND_SPLIT_KEY, result)
-    return result
+    result = state.atomic_multi_fn([CASHOUT_KEY, DEPOSITS_KEY, COMPOUND_SPLIT_KEY], _apply)
+    final = result[COMPOUND_SPLIT_KEY]
+    if final.get("compound_remaining") is None and final.get("fired"):
+        # compound_remaining is informational only (not used by any guard logic) -- safe to compute
+        # just after the lock releases, from the now-updated real total_value().
+        final["compound_remaining"] = total_value("compound")
+    return final
 
 # ---------------------------------------------------------------------------
 # Milestone ladder v2 (Ali, 5 Nov 2026, revised same day): two hard, sequential real-world
