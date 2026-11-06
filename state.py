@@ -221,15 +221,28 @@ def _local_read_file() -> dict:
 
 
 def _local_load_all() -> dict:
-    """Parsed state dict (shared with the cache: treat as read-only)."""
-    sig = _local_sig(LOCAL_STATE_FILE)
-    if sig is None:
-        return {}
-    if _LOCAL_CACHE["path"] == LOCAL_STATE_FILE and _LOCAL_CACHE["sig"] == sig:
-        return _LOCAL_CACHE["data"]
-    data = _local_read_file()
-    _LOCAL_CACHE.update(path=LOCAL_STATE_FILE, sig=_local_sig(LOCAL_STATE_FILE), data=data)
-    return data
+    """Parsed state dict.
+
+    6 Nov 2026 (Ali, found live AFTER the atomic_update/atomic_multi_fn fixes went in tonight):
+    this used to skip re-reading the file when (mtime_ns, file size) matched the last read, to
+    avoid re-parsing a ~1.9MB JSON file on every single get_value() call. Confirmed directly (both
+    on this bridge and reasoned through for Windows, which has coarser filesystem timestamp
+    resolution) that two different writes landing within the same mtime-tick, producing the same
+    byte size, make this signature collide -- the cache then silently serves stale data. This was
+    always possible, but tonight's fixes made every process call atomic_update()/atomic_multi_fn()
+    on every tick, multiplying how often two processes' writes land close enough together to
+    collide. Confirmed live: Ali's own phase_target.check() calls, from the one long-running
+    worker_fast_watch.py process, intermittently read combined_equity as exactly $300 less than
+    the correct, stable value every other process was reading -- a stale cached snapshot from
+    before a write, served instead of the real current file. A fresh process never showed this
+    (it has no stale cache yet); only the long-running process serving from its own in-memory
+    _LOCAL_CACHE did.
+
+    Trading correctness matters far more than shaving a disk read off each tick, so this no longer
+    trusts the cache for correctness -- it re-reads and re-parses the file every call. Measured
+    cost: ~46ms per read for the current ~1.9MB state file (slower bridge disk; native Windows
+    disk I/O should be faster), which is negligible against a 20-60s tick interval."""
+    return _local_read_file()
 
 
 def _local_save_all(data: dict):
