@@ -161,8 +161,33 @@ def _upstash_get_many_raw(keys: List[str]) -> dict:
 import copy
 import contextlib
 import tempfile
+import threading
 
 _LOCAL_CACHE = {"path": None, "sig": None, "data": {}}
+
+# 6 Nov 2026 (Ali, found live): _local_get()/get_value() never took _local_file_lock() at all --
+# only writers did. That meant a plain read (e.g. books.equity() -> ... -> state.get_value())
+# could open and read the state file at the exact instant another process was mid os.replace(),
+# on a razor-thin timing window. Confirmed live: phase_target.check()'s own combined_equity() call,
+# made INSIDE atomic_update()'s held lock (to compute the new peak_equity/paused values), was
+# itself doing fresh, UNLOCKED reads of each book's balance -- so even while this process correctly
+# held the lock for its own write, its own read of the other books' current state had no such
+# protection against a different process's concurrent write. Confirmed by direct evidence: 10
+# isolated reads from a fresh process were correct every time; the one long-running worker_fast_
+# watch.py process intermittently read combined_equity $300 low (exactly one book's worth) on a
+# roughly 2-3 minute cadence while otherwise reading correctly -- the fingerprint of an occasional
+# torn read, not a logic bug (cfg(), BUST_KEY and friends were all individually verified correct).
+#
+# Fix: reads now take the SAME lock writes do, via a per-thread reentrancy counter below, so a
+# read can never land mid-write from another process. The counter (not a plain re-enter guard) is
+# what makes this safe to call from INSIDE atomic_update()/atomic_multi_fn()'s own held lock --
+# without it, a nested call would try to lock a file this same process already holds the lock on,
+# which is exactly the deadlock caused and immediately reverted earlier tonight in a different
+# attempt at this same class of fix. _LOCK_DEPTH is thread-local (not global) because the OS-level
+# lock itself is per-process regardless of thread, but Python's own call stack is per-thread, so a
+# counter keyed by thread correctly tracks "does THIS call path already hold the file lock" without
+# falsely sharing state across unrelated threads in the same process.
+_LOCK_DEPTH = threading.local()
 
 
 def _local_sig(path):
@@ -175,6 +200,17 @@ def _local_sig(path):
 
 @contextlib.contextmanager
 def _local_file_lock(timeout: float = 15.0):
+    depth = getattr(_LOCK_DEPTH, "n", 0)
+    if depth > 0:
+        # Already held by an outer call on this thread/process -- re-entering would deadlock
+        # against ourselves (msvcrt.locking/fcntl.flock are not reentrant). Just track the depth
+        # and yield; the outer call still holds the real OS-level lock for the whole duration.
+        _LOCK_DEPTH.n = depth + 1
+        try:
+            yield
+        finally:
+            _LOCK_DEPTH.n = depth
+        return
     lock_path = LOCAL_STATE_FILE + ".lock"
     fh = open(lock_path, "a+")
     deadline = time.time() + timeout
@@ -195,8 +231,10 @@ def _local_file_lock(timeout: float = 15.0):
                 if time.time() > deadline:
                     break            # proceed unlocked rather than hang the bot forever
                 time.sleep(0.02)
+        _LOCK_DEPTH.n = 1
         yield
     finally:
+        _LOCK_DEPTH.n = 0
         if locked:
             try:
                 if os.name == "nt":
@@ -269,7 +307,16 @@ def _local_save_all(data: dict):
 
 
 def _local_get(key: str):
-    return copy.deepcopy(_local_load_all().get(key))
+    # 6 Nov 2026 (Ali, found live): this used to read via _local_load_all() with NO lock at all --
+    # only writers took _local_file_lock(). Now takes the same lock writers do. Safe to call from
+    # inside an already-locked write (e.g. phase_target.check()'s _mutate(d) calling
+    # combined_equity() -> ... -> get_value() while atomic_update() already holds the lock for
+    # this same process) because _local_file_lock() is reentrant per-thread (see its own comment
+    # above): the nested call just tracks depth and reuses the outer lock rather than deadlocking.
+    # Against a genuinely separate OS process, this read now always waits for that process's write
+    # to finish (or vice versa) instead of landing mid os.replace().
+    with _local_file_lock():
+        return copy.deepcopy(_local_load_all().get(key))
 
 
 def _local_set(key: str, value) -> bool:
@@ -473,8 +520,11 @@ def get_values(keys: List[str]) -> dict:
                     _READ_CACHE[k] = (now, raw)
         return {k: _decode(raw_map.get(k)) for k in keys}
     _count()
-    data = _local_load_all()
-    return {k: copy.deepcopy(data.get(k)) for k in keys}
+    # 6 Nov 2026 (Ali): same unlocked-read gap as _local_get() above -- this used to call
+    # _local_load_all() directly with no lock. Now locked (reentrant-safe) for the same reason.
+    with _local_file_lock():
+        data = _local_load_all()
+        return {k: copy.deepcopy(data.get(k)) for k in keys}
 
 
 def set_value(key: str, value) -> bool:
