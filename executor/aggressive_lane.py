@@ -98,10 +98,16 @@ TARGET_USD = float(os.environ.get("AGGR_TARGET_USD", "20000.0"))
 WINDOW_HOURS = float(os.environ.get("AGGR_WINDOW_HOURS", "48.0"))  # Ali: "stretch this 24 hours target to 48 hours"
 
 # Which real alert-feed entries count as "high conviction enough to paper-buy"
-# -- same conviction markers the live system already treats as its best
-# setups (band A, or a layer15 moonshot tag), read purely off the tags dict
-# the real system already writes into dashboard_alert_feed.
-ELIGIBLE_SCORE_BANDS = {"band a", "band s"}
+# -- 6 Nov 2026 (Ali, revised ~8.6h into the first run): the original filter
+# (band A/S, or a layer15 tag) was checked against real data from this same
+# live feed and almost never fires -- in the most recent 300 real alerts,
+# ZERO were band A/S; band B (score ~50-83) is the real top tier this system
+# actually produces, at meaningful volume (layer0b alone produced it
+# repeatedly). The lane sat at 1 trade in 8.6 hours as a direct result.
+# Widened to band B+ so the lane actually gets enough real shots to mean
+# something over its 48h window, while still only trading the top real
+# conviction tier (never band C, which is most of the feed's volume).
+ELIGIBLE_SCORE_BANDS = {"band a", "band s", "band b"}
 ELIGIBLE_LAYER_PREFIXES = ("layer15",)
 
 # Exit ladder: (mcap_multiple_from_entry, fraction_of_REMAINING_position_to_sell)

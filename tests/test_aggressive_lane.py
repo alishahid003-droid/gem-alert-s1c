@@ -139,3 +139,16 @@ def test_ineligible_alerts_are_skipped(monkeypatch):
     result = al.run_cycle()
 
     assert result["open_positions"] == 0
+
+
+def test_band_b_is_eligible_after_6nov_widening(monkeypatch):
+    """6 Nov 2026 (Ali, revised): band A/S almost never fires in the real
+    feed (confirmed: 0 of the most recent 300 real alerts), so band B --
+    the real top tier this system actually produces -- was added so the
+    lane gets enough real signal volume to mean something over 48h."""
+    st.set_value("dashboard_alert_feed", [_alert("addr1", score="71/100 (band b)", layer="layer0b")])
+    monkeypatch.setattr(al, "fetch_dexscreener_snapshot", lambda chain, addr: {"mcap_usd": 10_000.0})
+
+    result = al.run_cycle()
+
+    assert result["open_positions"] == 1
