@@ -1639,3 +1639,63 @@ The cumulative table above answers a different question. This is the one Ali act
 | 5 | $5,000 (reseed) | $1,000,000 | 23/27/32 | 1.8d/2.1d/2.5d | $241,874/$431,597/$470,304 | none coded yet |
 
 All 1,000/1,000 simulated runs completed all 5 phases. Same source data/caveat as before.
+
+---
+
+## 8 Nov 2026 (FINAL, replaces all prior simulation tables in this file) -- Win-rate scenario sheet: 50% / 55% / 60% / 65%, per-phase AND total
+
+**This table supersedes every earlier simulation table in this file (cumulative, first isolated, single-83.3%-scenario). Use ONLY this one going forward.**
+
+Setup: $100 start, compound-only, real observed win/loss SIZE distribution (avg win ~+70%, avg loss ~-20.6%, from the 6 trades since the 7 Nov liquidity-cap fix ec8abf2), real 50%-of-equity stake sizing (capped 60% max_share), pace ~12.9 trades/day. Win RATE forced to each scenario value (not taken from the thin 6-trade sample) -- answers "what if the rate is more conservative than the current 83.3%." 1,000 simulated runs per scenario; all 1,000/1,000 completed all 5 phases in every scenario (0 busts).
+
+All figures per-phase ISOLATED (each phase fresh from its own reseed) -- p10/median/p90.
+
+### TOTAL across all 5 phases
+| Win rate | Total trades (p10/median/p90) | Total days (p10/median/p90) |
+|---|---|---|
+| 50% | 196/235/283 | 15.2d/18.2d/22.0d |
+| 55% | 168/195/226 | 13.0d/15.1d/17.5d |
+| 60% | 143/165/193 | 11.1d/12.8d/15.0d |
+| 65% | 126/144/163 | 9.8d/11.2d/12.7d |
+
+### Phase 1 ($100 -> $10,000)
+| Win rate | Trades (p10/med/p90) | Days (p10/med/p90) |
+|---|---|---|
+| 50% | 39/57/81 | 3.0d/4.4d/6.3d |
+| 55% | 35/48/64 | 2.7d/3.7d/5.0d |
+| 60% | 31/41/54 | 2.4d/3.2d/4.2d |
+| 65% | 27/36/46 | 2.1d/2.8d/3.6d |
+
+### Phase 2 ($1,500 reseed -> $12,000)
+| Win rate | Trades (p10/med/p90) | Days (p10/med/p90) |
+|---|---|---|
+| 50% | 18/31/48 | 1.4d/2.4d/3.7d |
+| 55% | 16/25/38 | 1.2d/1.9d/2.9d |
+| 60% | 14/21/32 | 1.1d/1.6d/2.5d |
+| 65% | 13/18/27 | 1.0d/1.4d/2.1d |
+
+### Phase 3 ($2,000 reseed -> $12,000, repeat trigger)
+| Win rate | Trades (p10/med/p90) | Days (p10/med/p90) |
+|---|---|---|
+| 50% | 16/26/42 | 1.2d/2.0d/3.3d |
+| 55% | 14/22/35 | 1.1d/1.7d/2.7d |
+| 60% | 12/19/29 | 0.9d/1.5d/2.3d |
+| 65% | 11/17/24 | 0.9d/1.3d/1.9d |
+
+### Phase 4 ($2,000 reseed -> $120,000)
+| Win rate | Trades (p10/med/p90) | Days (p10/med/p90) |
+|---|---|---|
+| 50% | 35/50/74 | 2.7d/3.9d/5.7d |
+| 55% | 29/42/59 | 2.3d/3.3d/4.6d |
+| 60% | 27/36/49 | 2.1d/2.8d/3.8d |
+| 65% | 24/31/42 | 1.9d/2.4d/3.3d |
+
+### Phase 5 ($5,000 reseed -> $1,000,000)
+| Win rate | Trades (p10/med/p90) | Days (p10/med/p90) |
+|---|---|---|
+| 50% | 45/63/88 | 3.5d/4.9d/6.8d |
+| 55% | 38/53/72 | 2.9d/4.1d/5.6d |
+| 60% | 33/44/59 | 2.6d/3.4d/4.6d |
+| 65% | 31/39/52 | 2.4d/3.0d/4.0d |
+
+For reference: at compound's actual current (thin, 6-trade) post-fix win rate of 83.3%, the equivalent TOTAL was ~90-109 trades / ~7.0-8.3 days (median 99 trades / 7.6 days) -- faster than even the 65% row, which is the upside case if the real rate holds near what's been seen since the fix. The 50-65% rows are the more conservative planning range.
