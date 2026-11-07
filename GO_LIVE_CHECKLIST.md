@@ -1571,3 +1571,39 @@ git pull        # already done for commit e5778d2 as of this writing
 # edit .env: add EXECUTION_RHC_PRIVATE_KEY and EXECUTION_BASE_PRIVATE_KEY
 # restart the running process (local_runner.py or however it's normally started/stopped)
 ```
+
+---
+
+## 8 Nov 2026 — CURRENT STATE (S1c memecoin paper-trading, 5-phase target build)
+**This section is the live source of truth for the 5-phase memecoin target work — same content as the Notion "S1c MASTER CHECKLIST" page's "8 Nov 2026 — CURRENT STATE" section. Read this before citing any win rate/equity/phase number for this stream.**
+
+**Per-book status (live):**
+- Combined equity (sprint+core1+core2+compound): $567.14
+- compound: $298.53 equity, 26 trades all-time, net +$524.79 all-time -- only consistently profitable book
+- sprint: $55.81 equity, net -$138.64 all-time -- worst of the three laggards
+- core1: $123.27 equity, net -$95.99 all-time
+- core2: $89.53 equity, net -$132.40 all-time
+
+**Compound liquidity-aware stake cap fix (commit ec8abf2, 7 Nov 2026 08:40 UTC) -- CONFIRMED WORKING, cite THIS number, not the older all-time blend:**
+- Before fix (20 trades): 50.0% win rate, avg loss -47.9%, net +$147.88
+- After fix (6 trades, current): 83.3% win rate, avg loss -20.6%, net +$376.92
+- Caveat: only 6 trades since the fix -- real/current but still a thin sample.
+
+**Why sprint/core1/core2 still lag:** have NOT received compound's liquidity-aware stake cap yet (see recommendation #1 below -- cheapest, most promising untested lever). Losses cluster in: (a) "no pop after X min" small frequent losses, entry/signal-quality related; (b) "liquidity $0" large losses (sprint -$144.26, core2 -$34.49) -- confirmed POST-ENTRY rugs on coins with $27k-30k liquidity at entry (passed the existing $4,000 floor), i.e. a post-entry exposure problem, not an entry-filter gap. The 7 Nov exit-ladder differentiation (commit 7df8870) already lifted win rates (0%->33%/40%/33%) but net $ still negative -- confirms bottleneck is entry/exposure, not exit tuning.
+
+**5-Phase simulation ($100 start, compound-only, real post-fix 6-trade data, includes ladder-rung banking AND phase-boundary cashouts):**
+- Phase1 trigger $10,000 -> cashout $8,500, reseed $1,500; rungs at $250/$600/$1,200/$2,500/$5,000/$8,000 (10/12/15/18/20/22%)
+- Phase2 trigger $12,000 -> cashout $10,000, reseed $2,000; rungs at $2,250/$3,750/$5,250/$7,000/$9,000/$10,800
+- Phase3 trigger $12,000 (same as Phase2, intentional) -> cashout $10,000, reseed $2,000; rungs at $2,750/$4,250/$5,750/$7,500/$9,500/$11,000
+- Phase4 trigger $120,000 -> cashout $115,000, reseed $5,000; rungs at $8,000/$20,000/$40,000/$65,000/$90,000/$108,000
+- Phase5 trigger $1,000,000 -> no auto cash-out coded yet, ladder only; rungs at $20,000/$60,000/$150,000/$350,000/$600,000/$850,000
+- Result (1,000 runs bootstrapped from the 6 post-fix trades, real 50%-of-equity stake sizing, ~13.3 trades/day pace): 100% of runs reached Phase 5 in-sim; trades needed p10=91/median=99/p90=110; time at current pace p10~6.9d/median~7.5d/p90~8.3d.
+- Caveat: bootstrapped from only 6 real trades -- correct method, thin sample. If compound's edge drifts back toward pre-fix levels, this timeline lengthens.
+
+**Recommendations queued for sprint/core1/core2 (none implemented, nothing live touched):**
+1. Apply compound's already-proven liquidity-aware stake cap to sprint/core1/core2 -- test this FIRST alone.
+2. Reduce post-entry single-coin exposure cap (targets "liquidity $0" catastrophic losses).
+3. Test tightening entry confirmation count/age window for sprint/core1/core2.
+4. Re-measure after #1 alone before stacking #2/#3.
+
+**Open decision, not yet made:** run all 4 books, drop sprint only, or go compound-only.
