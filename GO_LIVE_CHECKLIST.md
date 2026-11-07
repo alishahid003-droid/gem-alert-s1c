@@ -1733,3 +1733,24 @@ Even best combo stays net negative -- narrows loss, does not flip to profitable.
 #5 (capital-recycling swap-out): 39.7% of sampled signal events refused on "balance fully committed" (124/312). $ impact depends on which book gets freed capital: +$3,432 upside if scoped to compound (proven +55.4% expectancy/trade) vs -$744 if also opened to sprint/core1/core2 as-is (negative edge compounds faster). DO NOT widen for sprint/core1/core2 until #2/#3 fix their edge, or scope to compound-only meanwhile.
 
 RECOMMENDATION: implement #2 first -> #3 at 5+conf on top -> re-measure. Drop #1 for these 3 books. Hold #5 (or compound-only scope) until sprint/core1/core2 are no longer net-negative. Nothing implemented live yet.
+
+---
+
+## 8 Nov 2026 -- Fix #2 built + chronologically re-backtested (CORRECTED, supersedes earlier +$126.09), #3 layered on top, #5 backtested for compound
+
+Fix #2 written as isolated code (capped_stake_for_shared_coin(), sandboxed, not wired in -- compound excluded by design). 4 unit assertions passed.
+
+Backtest method upgraded to chronological/entry-order-aware (earlier +$126.09 was a less rigorous retroactive-scaling method). Corrected numbers, use going forward:
+
+| Fix | Net P&L (sprint+core1+core2) | Recovered vs -$367.03 | Trades kept |
+|---|---|---|---|
+| Baseline (real) | -$367.03 | -- | 35 |
+| #2 alone (corrected) | -$186.45 | +$180.58 | 35 (trimmed, not refused) |
+| #3 alone (5+conf) | -$306.75 | +$60.27 | 22 |
+| #2+#3 (BEST, corrected) | -$127.52 | +$239.51 | 22 |
+
+Supersedes earlier +$126.09 (#2 alone) / +$160.57 (#2+#3) estimates. 17/35 trades had stake changed by #2; some later-entrant trades on an already-full coin would have been refused entirely (capped to $0), not just sized down -- e.g. the "trauma" coin's sprint re-entry: $145.57 -> $40 stake, pnl -$144.26 -> -$39.64.
+
+Fix #5 (capital-recycling swap-out) backtested for compound: 91 refusals / 67 distinct coins in sampled ~5000 log lines. Compound real post-fix avg stake $128.47, expectancy/trade +55.4%. Estimated upside if widened for compound: +$4,765.10 (upper-bound). Caveat: assumes every missed signal performs like the thin 6-trade sample; at least one missed signal in this window was the "trauma" rug coin that cost sprint/core2 -$173 -- compound avoiding it was a lucky save, not lost profit. Real result will include some losers too.
+
+Nothing wired into the live system. Sandboxed backtest/replay only, pending review before building into books.py/multichain_sniper.py.
