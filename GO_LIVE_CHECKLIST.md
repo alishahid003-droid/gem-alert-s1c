@@ -1707,3 +1707,29 @@ For reference: at compound's actual current (thin, 6-trade) post-fix win rate of
 The 4-item list above only covers sprint/core1/core2 profitability. It did NOT include the separate capital-lock issue affecting ALL 4 books (new signals refused "balance fully committed" because open positions sit for hours before freeing cash) -- raised in chat earlier but never added here. Adding as item #5:
 
 5. Widen the stale-position swap-out (_try_swap in executor/books.py) so it isn't restricted to "strong" (5+ confirmation) signals only -- let a flat/barely-moving position past a certain age get swapped for any new qualified signal. Not yet tested or implemented.
+
+---
+
+## 8 Nov 2026 -- Backtest results: fixes #1/#2/#3 (single + combo) on real 35-trade sprint/core1/core2 history, plus #5 capital-recycling upside/downside
+
+Method: #1/#2/#3 replayed against all 35 real closed sprint/core1/core2 trades (recorded liquidity_usd/confirmations/entry_mcap at entry). #3 is one-sided (shows what a filter would drop, not what it might catch instead). #5 is log-based capital-lock measurement + expectancy-based $ estimate, not a trade replay.
+
+#1 (liquidity-aware stake cap): NO EFFECT -- none of the 35 trades exceeded the 2%-of-liquidity cap. Drop for sprint/core1/core2.
+#2 (cross-book exposure cap @ $40): WORKS, best single fix. 11/35 trades (31%) were the SAME coin hit by 2-3 books at once, tripling damage. Recovers +$126.09 of the -$367.03 baseline.
+#3 (entry confirmation tightening): WORKS but costs volume. 5+conf: +$60.27, keeps 22/35. 6+conf: +$233.70, keeps only 5/35 (shrinks activity, doesn't find a better edge). Still net negative standalone at every threshold.
+
+| Combo | Net P&L | Recovered |
+|---|---|---|
+| #1 alone | -$367.03 | $0 (no-op) |
+| #2 alone | -$240.93 | +$126.09 |
+| #3 alone (5+conf) | -$306.75 | +$60.27 |
+| #1+#2 | -$240.93 | +$126.09 |
+| #1+#3 | -$306.75 | +$60.27 |
+| #2+#3 (BEST) | -$206.46 | +$160.57 |
+| #1+#2+#3 | -$206.46 | +$160.57 |
+
+Even best combo stays net negative -- narrows loss, does not flip to profitable.
+
+#5 (capital-recycling swap-out): 39.7% of sampled signal events refused on "balance fully committed" (124/312). $ impact depends on which book gets freed capital: +$3,432 upside if scoped to compound (proven +55.4% expectancy/trade) vs -$744 if also opened to sprint/core1/core2 as-is (negative edge compounds faster). DO NOT widen for sprint/core1/core2 until #2/#3 fix their edge, or scope to compound-only meanwhile.
+
+RECOMMENDATION: implement #2 first -> #3 at 5+conf on top -> re-measure. Drop #1 for these 3 books. Hold #5 (or compound-only scope) until sprint/core1/core2 are no longer net-negative. Nothing implemented live yet.
