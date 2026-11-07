@@ -826,13 +826,28 @@ def effective_max_share(book_id: str, now: Optional[float] = None) -> float:
     return round(base_share * (1.0 + behind), 4)    # up to 2x base_share
 
 
-def stake_usd(book_id: str, now: Optional[float] = None) -> float:
+def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional[float] = None) -> float:
     """Pace-aware stake for the next entry in this book.
     base = shot_pct of equity, lifted to the fee floor; behind the target path
     by >25% -> x1.25, ahead by >50% -> x0.8 (bank the lead); capped at the book's EFFECTIVE
     max_share of equity (see effective_max_share() -- widens when badly behind pace) minus what
     is already committed, so cumulative open stakes can never drift past the risk ceiling no
     matter how many trades have already opened. Returns 0 when the book is broke.
+
+    7 Nov 2026 (Ali): liquidity_usd, when given, caps the stake so it never exceeds
+    LIQUIDITY_STAKE_CAP_RATIO (default 2%) of the coin's own pool liquidity -- the same ratio
+    threshold executor.compound_scalper._liquidity_impact_penalty() uses before its cost model
+    jumps from ~2% to a 15% price-impact penalty. Real incident that motivated this: a compound
+    stake (50% shot_pct, no liquidity awareness) sized itself at $90.34 against a thin pool,
+    landed in that 15% penalty bracket, and lost 43.6% (-$39.39) on a coin that never even moved
+    -- pure slippage/impact cost, nothing to do with the pick being bad or compound's aggressive
+    shot_pct itself. shot_pct/max_share are left completely untouched by this -- a coin with
+    healthy liquidity for its size gets the exact same stake as before; only a stake that would
+    have landed in the expensive-impact bracket gets trimmed back to just under it, so compound
+    keeps its full aggressive growth on coins with real liquidity to support it, and only a
+    thin-liquidity coin gets a smaller, cost-model-aware bite instead of a full-size one.
+    liquidity_usd=None (every existing caller except multichain_sniper.py's act()) is a complete
+    no-op -- this never changes behavior unless a caller explicitly opts in by passing it.
 
     2 Nov 2026 fix: the cap used to be eq*max_share PER TRADE with no check against the TOTAL
     already committed -- confirmed on real data that this let sprint's 4 open positions commit
@@ -876,6 +891,15 @@ def stake_usd(book_id: str, now: Optional[float] = None) -> float:
     # pool is a capital source, not a profit-sharing split.
     cash_available = free_equity(book_id) + borrow_room_usd(book_id)
     out = min(base, eq * share + borrow_room_usd(book_id), room_left + borrow_room_usd(book_id), cash_available)
+    # 7 Nov 2026 (Ali): liquidity-aware cap, same ratio threshold compound_scalper's own cost
+    # model uses before it jumps into its expensive 15% price-impact penalty bracket (see this
+    # function's docstring for the real incident this closes). Only ever TIGHTENS -- never
+    # widens -- an already-computed stake, and only when liquidity_usd is actually known and
+    # thin relative to the stake; unknown liquidity (None) changes nothing, so every existing
+    # caller that doesn't pass it is completely unaffected.
+    if liquidity_usd and liquidity_usd > 0:
+        liq_cap = liquidity_usd * _f("LIQUIDITY_STAKE_CAP_RATIO", 0.02)
+        out = min(out, liq_cap)
     # 27 Oct 2026: absolute backstop, independent of the equity math above. Every cap until now was
     # RELATIVE to equity() -- exactly the single point of failure a now-fixed accounting bug exploited
     # (a phantom equity reading let a single $100-seed book size a $1,289 stake, all caps "working
@@ -917,11 +941,15 @@ def tier_after_brake(tier: str, book_id: str) -> str:
     return TIER_ORDER[max(0, i - loss_streak(book_id) // 3)]
 
 
-def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: Optional[float] = None) -> float:
+def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: Optional[float] = None,
+                    liquidity_usd: Optional[float] = None) -> float:
     c = cfg(book_id)
     eq = equity(book_id)
     if eq < 5.0 or c["kind"] != "moonshot" or book_id not in TIER_BOOK_SCALE:
-        return stake_usd(book_id, now)
+        # 7 Nov 2026 (Ali): compound (kind="daily", not in TIER_BOOK_SCALE) always falls through
+        # to here -- pass liquidity_usd through so stake_usd()'s liquidity cap actually reaches
+        # compound's real entry path (multichain_sniper.py's act()), not just a theoretical arg.
+        return stake_usd(book_id, now, liquidity_usd=liquidity_usd)
     tier = tier_after_brake(tier, book_id)
     base = eq * TIER_PCT[tier] * TIER_BOOK_SCALE[book_id]
     r = pace(book_id, now).get("ratio_to_path")

@@ -456,7 +456,12 @@ def act(d: dict, now: Optional[float] = None) -> dict:
         # position-count slot allowance in this lane, instead of competing for one shared count
         # (see books.can_open()'s own docstring for the full reasoning and capital-gating note).
         can, reason = books.can_open(lane, strong=tier in ("standard", "conviction") and len(d["confirmations"]) >= 5, chain=d["chain"])
-        stake = books.tier_stake_usd(lane, tier, d.get("mcap")) if can else 0.0
+        # 7 Nov 2026 (Ali): pass liq through so compound's stake can't land in its own cost
+        # model's expensive thin-liquidity penalty bracket (see books.stake_usd()'s docstring
+        # for the real incident -- a $90.34 compound stake lost 43.6% to pure slippage/impact
+        # on a coin that never even moved). No-op for sprint/core1/core2, which size through
+        # tier_stake_usd()'s own mcap-fraction cap already.
+        stake = books.tier_stake_usd(lane, tier, d.get("mcap"), liquidity_usd=d.get("liq")) if can else 0.0
         # 31 Oct 2026 (Ali): removed robinhood_chain from this Oct-13-evidence downweight.
         # That 0.6x was based on a 5-trade, 0-win sample from BEFORE the 28 Oct fix to
         # layer14_revival's dead-on-arrival handling (robinhood_chain's actual problem back
