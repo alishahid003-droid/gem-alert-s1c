@@ -1699,3 +1699,11 @@ All figures per-phase ISOLATED (each phase fresh from its own reseed) -- p10/med
 | 65% | 31/39/52 | 2.4d/3.0d/4.0d |
 
 For reference: at compound's actual current (thin, 6-trade) post-fix win rate of 83.3%, the equivalent TOTAL was ~90-109 trades / ~7.0-8.3 days (median 99 trades / 7.6 days) -- faster than even the 65% row, which is the upside case if the real rate holds near what's been seen since the fix. The 50-65% rows are the more conservative planning range.
+
+---
+
+## 8 Nov 2026 -- Correction: capital-recycling/stale-position swap-out fix was missing from the recommendation list
+
+The 4-item list above only covers sprint/core1/core2 profitability. It did NOT include the separate capital-lock issue affecting ALL 4 books (new signals refused "balance fully committed" because open positions sit for hours before freeing cash) -- raised in chat earlier but never added here. Adding as item #5:
+
+5. Widen the stale-position swap-out (_try_swap in executor/books.py) so it isn't restricted to "strong" (5+ confirmation) signals only -- let a flat/barely-moving position past a certain age get swapped for any new qualified signal. Not yet tested or implemented.
