@@ -356,43 +356,97 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
 # not just the first.
 MILESTONE_LADDER_KEY = "milestone_ladder_v2"
 
-PHASE1_CASHOUT_TRIGGER_USD = 20_000.0   # combined equity must reach THIS before cashout fires
-PHASE1_CASHOUT_USD = 19_000.0           # 5 Nov 2026 (Ali, revised): amount actually cashed OUT is
-                                          # $19,000, not the full $20,000 trigger -- deliberately
-                                          # leaves more ($1,000 base, or the real overshoot above
-                                          # $20,000 if equity cleared the trigger before this ran)
-                                          # behind for the Phase-2 run toward $117,500.
-PHASE1_RESEED_USD = 1_000.0             # left behind to keep running after the cash-out (was $750)
+# 7 Nov 2026 (Ali, revised): superseded the original 2-phase ($20k -> $117,500) structure with
+# a 5-phase target/cash-out ladder, each phase re-seeding the next from its own overshoot-aware
+# reseed floor (same "real overshoot kept, not forced down to a flat number" principle as
+# before). Phase 2 and Phase 3 deliberately share the SAME $12,000 trigger (confirmed
+# intentional by Ali -- repeat the stage twice rather than one bigger phase 2). Phase 5 is the
+# final target ($1,000,000): same as the old phase-2 end-state, no automatic cash-out action is
+# wired for reaching it yet -- it only walks its own ladder; ask Ali what to do once it's
+# actually close, rather than guessing a final cash-out number now.
+#
+# PHASE_DEFS[n] = {
+#   "trigger": combined equity level that fires this phase's hard cash-out (None for phase 5,
+#              which has no coded cash-out yet),
+#   "cashout": fixed USD amount cashed out when the trigger fires (None for phase 5),
+#   "reseed":  USD left behind (floor) after that cash-out, overshoot-aware like before (None
+#              for phase 5),
+#   "ladder":  (combined_equity_level, pct_of_current_combined_equity_to_bank) tuples, same
+#              lighter-protective-banking mechanism as the original PHASE1_LADDER/PHASE2_LADDER,
+#              just rescaled to each phase's own start->trigger span so the rungs land at
+#              sensible checkpoints within the SHORTER climbs Ali specified.
+# }
+PHASE_DEFS: Dict[int, dict] = {
+    1: dict(
+        trigger=10_000.0, cashout=8_500.0, reseed=1_500.0,
+        ladder=(
+            (250.0,   0.10),
+            (600.0,   0.12),
+            (1_200.0, 0.15),
+            (2_500.0, 0.18),
+            (5_000.0, 0.20),
+            (8_000.0, 0.22),
+        ),
+    ),
+    2: dict(
+        trigger=12_000.0, cashout=10_000.0, reseed=2_000.0,
+        ladder=(
+            (2_250.0,  0.10),
+            (3_750.0,  0.12),
+            (5_250.0,  0.15),
+            (7_000.0,  0.18),
+            (9_000.0,  0.20),
+            (10_800.0, 0.22),
+        ),
+    ),
+    3: dict(
+        # Same $12,000 trigger/$10,000 cash-out as Phase 2 -- intentional repeat of the same
+        # stage, confirmed by Ali, not a typo.
+        trigger=12_000.0, cashout=10_000.0, reseed=2_000.0,
+        ladder=(
+            (2_750.0,  0.10),
+            (4_250.0,  0.12),
+            (5_750.0,  0.15),
+            (7_500.0,  0.18),
+            (9_500.0,  0.20),
+            (11_000.0, 0.22),
+        ),
+    ),
+    4: dict(
+        trigger=120_000.0, cashout=115_000.0, reseed=5_000.0,
+        ladder=(
+            (8_000.0,   0.10),
+            (20_000.0,  0.12),
+            (40_000.0,  0.15),
+            (65_000.0,  0.18),
+            (90_000.0,  0.20),
+            (108_000.0, 0.22),
+        ),
+    ),
+    5: dict(
+        # Final target. No automatic cash-out wired yet -- matches the old phase-2 end-state
+        # exactly (ladder only, ask Ali what to do once $1,000,000 is actually close).
+        trigger=1_000_000.0, cashout=None, reseed=None,
+        ladder=(
+            (20_000.0,  0.10),
+            (60_000.0,  0.12),
+            (150_000.0, 0.15),
+            (350_000.0, 0.18),
+            (600_000.0, 0.20),
+            (850_000.0, 0.22),
+        ),
+    ),
+}
 
-# (combined_equity level to cross, fraction of CURRENT combined equity to bank) -- Phase 1 legs,
-# lighter % than v1 so the climb to $20,000 isn't slowed much by its own banking.
-PHASE1_LADDER = (
-    (240.0,    0.10),   # ~2x
-    (600.0,    0.12),   # ~5x
-    (1200.0,   0.15),   # ~10x
-    (2400.0,   0.18),   # ~20x
-    (6000.0,   0.20),   # ~50x
-    (12000.0,  0.22),   # ~100x
-    # The $20,000 trigger itself is handled separately below as the fixed $19,000 cash-out,
-    # not a percentage -- see check_milestone_ladder()'s phase-1 cash-out branch.
-)
-
-# Phase 2 starts fresh from PHASE1_RESEED_USD ($750) toward $117,500 (midpoint of Ali's
-# "$117,000 to $118,000"). Same lighter-banking philosophy, levels scaled off the $750 base
-# roughly matching Phase 1's own multiples (2x, 5x, 10x, 20x, 50x, 100x of the new base).
-PHASE2_TARGET_USD = 117_500.0
-PHASE2_LADDER = (
-    (1_500.0,   0.10),   # ~2x of 750
-    (3_750.0,   0.12),   # ~5x
-    (7_500.0,   0.15),   # ~10x
-    (15_000.0,  0.18),   # ~20x
-    (37_500.0,  0.20),   # ~50x
-    (75_000.0,  0.22),   # ~100x
-    # PHASE2_TARGET_USD ($117,500) is the final goal -- no automatic cash-out is wired for it
-    # yet (no fixed "what's the reseed after this" instruction from Ali for phase 2's own end),
-    # so reaching it just means combined equity has arrived; ask Ali what to do at that point
-    # when it's actually close, rather than guessing a reseed number now.
-)
+# Backward-compat aliases: some older code/tests may still reference these names directly.
+# They now point at Phase 1's numbers under the new 5-phase scheme (Phase 1 is the closest
+# analog to the old "first lever"). New code should read PHASE_DEFS instead.
+PHASE1_CASHOUT_TRIGGER_USD = PHASE_DEFS[1]["trigger"]
+PHASE1_CASHOUT_USD = PHASE_DEFS[1]["cashout"]
+PHASE1_RESEED_USD = PHASE_DEFS[1]["reseed"]
+PHASE1_LADDER = PHASE_DEFS[1]["ladder"]
+PHASE2_TARGET_USD = PHASE_DEFS[2]["trigger"]
+PHASE2_LADDER = PHASE_DEFS[2]["ladder"]
 
 
 def _combined_equity_for_milestones() -> float:
@@ -452,19 +506,24 @@ def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, 
 def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
     """Call once per cycle (can_open() wires this in, same as check_compound_split()).
 
-    PHASE 1 (default, until the $20,000 lever fires): walks PHASE1_LADDER banking a light %
-    of combined equity at each level (same mechanism as before, just lighter percentages), THEN
-    once combined equity reaches PHASE1_CASHOUT_TRIGGER_USD ($20,000), fires a ONE-TIME hard cash-out of
-    exactly that amount (not a %), leaving PHASE1_RESEED_USD ($750) behind, and switches state to
-    phase 2.
+    5-PHASE structure (7 Nov 2026, Ali's revised targets, supersedes the original 2-phase
+    version): each phase (1-4) walks its own light protective-banking ladder on the way up,
+    THEN once combined equity reaches that phase's trigger, fires a ONE-TIME hard cash-out of a
+    fixed amount, leaves that phase's reseed floor behind (real overshoot kept if it's bigger
+    than the floor -- same principle as before), and advances to the next phase. Phase 5 (the
+    final $1,000,000 target) only walks its own ladder -- no automatic cash-out is wired for
+    reaching $1,000,000 itself yet, same as the old code left phase 2's end open.
 
-    PHASE 2 (after the $20,000 lever has fired): same idea, walks PHASE2_LADDER banking a light
-    % of combined equity at each of its own levels, scaled off the $750 restart, toward
-    PHASE2_TARGET_USD ($117,500). No automatic action is wired for reaching $117,500 itself yet.
+    The $-trigger cash-out is ALWAYS checked FIRST, ahead of that phase's own lighter ladder
+    legs, in every phase from 1-4 -- same ordering guarantee as the original code: a big jump
+    that clears both the trigger AND several ladder levels in one cycle must not let the small
+    protective banks fire first and drain equity back under the trigger before the real lever
+    gets a turn.
 
-    Only ONE event (one ladder level, or the phase-1 cash-out) fires per call, same safety
-    property as before -- a big jump across several levels in one cycle still processes them one
-    call at a time. Returns the fired record, or None if nothing new fired this call."""
+    Only ONE event (one ladder level, or one phase cash-out) fires per call, same safety
+    property as before -- a big jump across several levels/phases in one cycle still processes
+    them one call at a time, each call progressing state by exactly one step. Returns the fired
+    record, or None if nothing new fired this call."""
     now = now if now is not None else time.time()
     done = state.get_value(MILESTONE_LADDER_KEY)
     done = done if isinstance(done, dict) else {}
@@ -473,65 +532,70 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
 
     combined = _combined_equity_for_milestones()
 
-    if phase == 1:
-        # The $20,000 hard cash-out is checked FIRST, ahead of the lighter ladder legs below.
+    pdef = PHASE_DEFS.get(phase)
+    if pdef is None:
+        # Defensive: an unknown/corrupted phase number must never crash the trading loop --
+        # just go idle on this feature until/unless state is fixed manually.
+        return None
+
+    pkey = f"p{phase}"
+
+    if phase in (1, 2, 3, 4):
+        # The hard cash-out trigger is checked FIRST, ahead of the lighter ladder legs below.
         # This matters: if the smaller percentage-banks fired first every call, repeatedly
         # bleeding equity off the top before the cashout check ever ran, a big jump that
-        # clears $20,000 AND several ladder levels in one go could drain equity back below
-        # $20,000 purely from its OWN protective banking, before the $20,000 lever -- the
-        # actual priority -- ever got to fire. Ali's instruction was explicit that $20,000 is
-        # "the main lever ... by all means" -- it must never be a casualty of the smaller
-        # banks meant only to protect the climb toward it.
-        if "p1_cashout" not in fired_levels and combined >= PHASE1_CASHOUT_TRIGGER_USD:
-            cashout = _fixed_cashout_combined(PHASE1_CASHOUT_USD, PHASE1_RESEED_USD,
-                                               "phase1_20k_cashout_5nov2026", now)
-            fired_levels.append("p1_cashout")
+        # clears the trigger AND several ladder levels in one go could drain equity back below
+        # the trigger purely from its OWN protective banking, before the real lever -- the
+        # actual priority -- ever got to fire.
+        cashout_key = f"{pkey}_cashout"
+        if cashout_key not in fired_levels and combined >= pdef["trigger"]:
+            cashout = _fixed_cashout_combined(pdef["cashout"], pdef["reseed"],
+                                               f"phase{phase}_cashout_7nov2026", now)
+            fired_levels.append(cashout_key)
             done["fired_levels"] = fired_levels
-            done["phase"] = 2
-            done["phase2_started_ts"] = now
-            result = {"ts": now, "phase": 1, "event": "phase1_cashout",
-                       "cashout_usd": PHASE1_CASHOUT_USD, "reseed_left_usd": PHASE1_RESEED_USD,
+            done["phase"] = phase + 1
+            done[f"phase{phase + 1}_started_ts"] = now
+            result = {"ts": now, "phase": phase, "event": f"phase{phase}_cashout",
+                       "cashout_usd": pdef["cashout"], "reseed_left_usd": pdef["reseed"],
                        **cashout}
-            done["p1_cashout"] = result
+            done[cashout_key] = result
             state.set_value(MILESTONE_LADDER_KEY, done)
             return result
 
-        # Only reached if $20,000 has NOT yet been hit -- safe to bank the lighter protective
-        # percentages on the way up without risking the main lever.
-        for level, pct in PHASE1_LADDER:
-            key = f"p1_{int(level)}"
+        # Only reached if this phase's trigger has NOT yet been hit -- safe to bank the lighter
+        # protective percentages on the way up without risking the main lever.
+        for level, pct in pdef["ladder"]:
+            key = f"{pkey}_{int(level)}"
             if key in fired_levels:
                 continue
             if combined < level:
                 break
-            bank = _bank_combined_pct(pct, f"milestone_p1_{int(level)}_5nov2026", now)
+            bank = _bank_combined_pct(pct, f"milestone_{pkey}_{int(level)}_7nov2026", now)
             fired_levels.append(key)
             done["fired_levels"] = fired_levels
-            result = {"ts": now, "phase": 1, "level": level, "pct": pct, **bank}
+            result = {"ts": now, "phase": phase, "level": level, "pct": pct, **bank}
             done[key] = result
             state.set_value(MILESTONE_LADDER_KEY, done)
             return result
 
         return None
 
-    # phase == 2
-    for level, pct in PHASE2_LADDER:
-        key = f"p2_{int(level)}"
+    # phase == 5 (final target): ladder banking only, no automatic cash-out coded yet.
+    for level, pct in pdef["ladder"]:
+        key = f"{pkey}_{int(level)}"
         if key in fired_levels:
             continue
         if combined < level:
             break
-        bank = _bank_combined_pct(pct, f"milestone_p2_{int(level)}_5nov2026", now)
+        bank = _bank_combined_pct(pct, f"milestone_{pkey}_{int(level)}_7nov2026", now)
         fired_levels.append(key)
         done["fired_levels"] = fired_levels
-        result = {"ts": now, "phase": 2, "level": level, "pct": pct, **bank}
+        result = {"ts": now, "phase": 5, "level": level, "pct": pct, **bank}
         done[key] = result
         state.set_value(MILESTONE_LADDER_KEY, done)
         return result
 
     return None
-
-
 
 def total_value(book_id: str) -> float:
     """Everything the book has made: seed + realized paper P&L (trading balance + banked vault)."""
