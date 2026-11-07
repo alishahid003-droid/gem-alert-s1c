@@ -1607,3 +1607,19 @@ git pull        # already done for commit e5778d2 as of this writing
 4. Re-measure after #1 alone before stacking #2/#3.
 
 **Open decision, not yet made:** run all 4 books, drop sprint only, or go compound-only.
+
+---
+
+## 8 Nov 2026 (correction) -- Fixed 5-Phase table: banked $ was mixing phase boundaries, now clean cumulative
+
+The table above mixed phase-boundary totals, making Phase 1's "banked" figure look larger than the $10,000 trigger itself. Corrected, clean cumulative version (same underlying data: 6 real post-liquidity-fix compound trades, 83.3% win rate, ~13.1 trades/day pace, $100 start, compound-only, 1,000 simulated runs):
+
+| Phase | Target | Trades needed (cumulative p10/median/p90) | Days (cumulative p10/median/p90) | $ Banked by end of phase (cumulative p10/median/p90) |
+|---|---|---|---|---|
+| 1 | $10,000 | 20/25/30 | 1.5d/1.9d/2.3d | $10,469/$12,428/$12,698 |
+| 2 | $12,000 | 33/38/44 | 2.5d/2.9d/3.4d | $25,628/$27,836/$30,383 |
+| 3 | $12,000 (repeat) | 44/50/57 | 3.4d/3.8d/4.4d | $41,050/$43,722/$46,545 |
+| 4 | $120,000 | 64/72/80 | 4.9d/5.5d/6.1d | $198,919/$207,271/$231,084 |
+| 5 | $1,000,000 | 91/99/109 | 7.0d/7.6d/8.3d | $449,456/$638,610/$688,959 |
+
+100% of the 1,000 simulated runs reached full Phase 5. Caveat unchanged: bootstrapped from only 6 real trades, correct method but thin sample.
