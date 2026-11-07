@@ -24,7 +24,10 @@ BOOKS_KEY = "books_v1"
 
 # id -> defaults. seed/target/days overridable via env <ID>_SEED_USD etc.
 BOOKS: Dict[str, dict] = {
-    "sprint": {"name": "Core 1 (Sprint 96h)", "kind": "moonshot", "seed": 100.0, "target": 10_000.0, "days": 4.0,
+    # 7 Nov 2026 (Ali): sprint's 4-day target raised 10k -> 20k, as part of differentiating
+    # sprint/core1/core2's exit behavior (see EARLY_RULES/EARLY_TRAIL_RATCHET in paper_ledger.py) --
+    # previously all three shared an identical exit ladder despite having different targets/horizons.
+    "sprint": {"name": "Core 1 (Sprint 96h)", "kind": "moonshot", "seed": 100.0, "target": 20_000.0, "days": 4.0,
                "shot_pct": 0.30, "max_share": 0.45, "bank_pct": 0.20, "cashout": True},
     "core1": {"name": "Core 2", "kind": "moonshot", "seed": 100.0, "target": 125_000.0, "days": 30.0,
               "shot_pct": 0.20, "max_share": 0.35, "bank_pct": 0.25},

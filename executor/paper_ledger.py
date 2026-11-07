@@ -62,6 +62,22 @@ UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF = _f_env("UNPRICEABLE_MINUTES_BEFORE_WRITE_
 # indexing lag, nowhere near enough to hold a slot hostage on a pool that was never going to resolve.
 NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF = _f_env("NEVER_PRICED_CYCLES_BEFORE_WRITE_OFF", 3.0)
 NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF = _f_env("NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF", 2.0)
+# 7 Nov 2026 (Ali): overnight PumpPortal/DNS outage (websocket reconnects climbed
+# 43 -> 79 across the night, thousands of getaddrinfo failures) caused 16 real
+# robinhood_chain positions to go unpriced simultaneously and get written off as
+# "no longer priceable (delisted/rugged)" within the normal 8-min grace window --
+# net -$268.28 on positions that most likely were never actually rugged, just
+# unreachable because OUR feed was down, not because their pools died. A handful
+# of coins losing their price feed at the same moment as dozens of others is a
+# feed-outage signature; a real rug does not cluster like that. When enough of
+# this cycle's positions come back unpriced at once, treat it as our feed being
+# down and PAUSE the write-off clock (freeze unpriced_cycles/unpriced_since
+# instead of advancing them) for every position this cycle, rather than mark
+# them to zero. A single coin still truly dying on its own (the normal case)
+# never trips this -- it requires both a minimum position count and a minimum
+# fraction of this cycle's book to be unpriced at the same time.
+FEED_OUTAGE_MIN_POSITIONS = int(_f_env("FEED_OUTAGE_MIN_POSITIONS", 3))
+FEED_OUTAGE_UNPRICED_FRACTION = _f_env("FEED_OUTAGE_UNPRICED_FRACTION", 0.6)
 DEAD_LIQUIDITY_USD = 500.0
 EXECUTABLE_CHAINS = {"solana", "bsc", "robinhood_chain"}
 # 3 Nov 2026 (Ali): Base now HAS a real buy path (swap_executor.execute_buy_base) --
@@ -344,10 +360,24 @@ EARLY_RULES = {
     # ~50,000x to reach $1M -- no single realistic coin move gets there, so the fix isn't
     # "ride more of one coin," it's "keep slightly more of every real winner so repeated
     # trades compound faster." See EARLY_TRAIL_RATCHET below for the matching trail change.
-    "sprint": ({1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    # 7 Nov 2026 (Ali): sprint/core1/core2 previously shared this EXACT ladder despite having
+    # different targets/horizons/stake sizes -- same coin, same signal, same exit, so all three
+    # moved together instead of actually differentiating. Ali: "what's the point of having all
+    # these three modules when they have everything identical... There should be some difference
+    # in them." Redesigned each to match its already-stated identity (see BOOKS in executor/books.py):
+    #   sprint (4-day target, now $20k, shot_pct 0.30 -- biggest stakes, fastest horizon): take
+    #     MORE profit earlier so frequent wins compound the book quickly, matching its "sprint" role.
+    #   core1 (30-day, $125k, shot_pct 0.20): kept close to the original balanced ladder --
+    #     the genuine middle ground between sprint's speed and core2's patience.
+    #   core2 (180-day, $1M, shot_pct 0.10 -- smallest/most conservative stakes, lowest
+    #     TIER_BOOK_SCALE 0.6): take LESS profit on the early rungs, reserving more of the
+    #     position for a real moonshot attempt -- see the uncapped carve-out in _manage_early()
+    #     below (core2 only), which lets 20-25% of a position that proves itself past 8x ride with
+    #     NO trailing stop at all, exiting only via the dead-coin/24h-hold safety nets.
+    "sprint": ({1.2: 0.20, 1.6: 0.20, 2.5: 0.15, 5: 0.10}, 0.40, 0.50),
     # lane: (take-profit ladder {mult: fraction of original}, hard stop mult, trail-from-peak mult after 2x -- unused when a ratchet is defined below, kept as the fallback)
-    "core2": ({1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}, 0.35, 0.50),
     "core1": ({1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}, 0.35, 0.50),
+    "core2": ({1.5: 0.05, 3: 0.10, 8: 0.10, 20: 0.10}, 0.45, 0.50),  # tighter hard stop (0.45, not wider) -- small conservative stakes, cut losers fast, reserve risk tolerance for proven winners via the carve-out instead
     "dev_list": ({2: 0.40, 4: 0.25, 10: 0.15}, 0.55, 0.68),
     # FAST module (14 Oct 2026): earlier first slice, trail starts at 1.4x (see EARLY_TRAIL_AFTER), big runner
     "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.65),
@@ -366,10 +396,15 @@ EARLY_TRAIL_AFTER = {"fast_sprint": 1.4, "fast_core": 1.5, "fast_moon": 3.0}    
 # is NOT changed (37% of the sample peaks there and that band is working fine as-is); only runs that
 # prove themselves past 4x get a tighter, ratcheting giveback, so a confirmed real mover keeps more
 # of its gain the higher it climbs, instead of one flat percentage applying everywhere.
+# 7 Nov 2026 (Ali): differentiated to match each book's role (see EARLY_RULES comment above for
+# the full reasoning) -- sprint locks profit tightest (fast-compounding role), core1 unchanged
+# (the genuine middle), core2 gives a proving coin the most early room since its whole point is
+# patience, then hands a slice of anything that clears 8x to the uncapped carve-out below instead
+# of ratcheting it at all past that point.
 EARLY_TRAIL_RATCHET = {
-    "sprint": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
+    "sprint": ((1.8, 0.55), (3.0, 0.65), (6.0, 0.75)),
     "core1": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
-    "core2": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
+    "core2": ((2.5, 0.45), (5.0, 0.55)),   # no 8x+ band -- CORE2_MOONSHOT_CARVEOUT_PCT takes over there instead
 }   # (activation_peak_mult, giveback_lock_pct) bands, checked highest-first; a book not listed keeps its flat trail from EARLY_RULES
 
 
@@ -421,20 +456,56 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
     no_pop_mult = float(os.environ.get("EARLY_NO_POP_MULT", "1.05"))
     if why is None and age_min >= no_pop_min and peak < no_pop_mult and mult < no_pop_mult:
         why = ("stop_loss", f"no pop after {age_min:.1f} min ({mult:.2f}x, never reached {no_pop_mult}x)")
+    # 7 Nov 2026 (Ali): core2 moonshot carve-out -- "20-25% should bypass the ratchet entirely
+    # and aim for that moonshot attempt." Once a core2 position proves itself past
+    # CORE2_MOONSHOT_TRIGGER_MULT (default 8x -- the same point EARLY_TRAIL_RATCHET's old 8x band
+    # used to start tightening for core2), carve CORE2_MOONSHOT_CARVEOUT_PCT (default 22%, i.e.
+    # roughly the 20-25% Ali asked for) of the ORIGINAL position out of the normal trailing-stop
+    # path entirely, one time only (moonshot_carved flag). That carved slice has no trailing stop
+    # at all from this point on -- the only things that can still close it are the existing
+    # dead-coin time-stop and the 24h max-hold safety net below, both unchanged and still real
+    # protection against a position that reverses to zero and never recovers. The rest of the
+    # position (remaining minus the carve-out) keeps being managed by core2's own (tighter, no
+    # 8x+ band) EARLY_TRAIL_RATCHET exactly as before, so a real pullback after 8x still banks
+    # real profit on the non-carved majority of the position.
+    profile = pos.get("exit_profile") or ""
+    if (profile == "core2" and not pos.get("moonshot_carved")
+            and peak >= float(os.environ.get("CORE2_MOONSHOT_TRIGGER_MULT", "8.0"))):
+        carve_pct = min(pos["remaining"], float(os.environ.get("CORE2_MOONSHOT_CARVEOUT_PCT", "0.22")))
+        pos["moonshot_carved"] = True
+        pos["moonshot_carve_pct"] = carve_pct
+        pos["events"].append({"ts": now, "type": "moonshot_carveout", "peak_mult": round(peak, 2), "carved_pct": carve_pct})
+    carved = pos.get("moonshot_carve_pct", 0.0) if pos.get("moonshot_carved") else 0.0
+    fully_carved = carved > 0 and pos["remaining"] - carved <= 1e-6
     if why is None and peak < ta and mult <= stop:
         why = ("stop_loss", f"hard stop at {mult:.2f}x")
     elif peak >= ta and mult <= peak * _ratchet_trail(pos.get("exit_profile") or "", peak, trail):
         _trail = _ratchet_trail(pos.get("exit_profile") or "", peak, trail)
-        why = ("trailing_stop", f"{mult:.1f}x is {int((1 - _trail) * 100)}% below the {peak:.1f}x peak")
+        if carved > 0 and not fully_carved:
+            # Sell only the non-carved portion -- the carved slice rides on, untouched, no trailing stop.
+            _sell(pos, pos["remaining"] - carved, mcap, "trailing_stop (non-carved portion)", now)
+            return False
+        elif carved <= 0:
+            why = ("trailing_stop", f"{mult:.1f}x is {int((1 - _trail) * 100)}% below the {peak:.1f}x peak")
+        # else: fully carved already (remaining == carved) -- no trailing-stop close here; the
+        # dead-coin/24h-hold safety nets just below (checked with "if", not "elif", specifically
+        # so a fully-carved position reaching this branch doesn't skip them) are the only things
+        # that can still close it.
     # 20 Oct 2026: every time_stop exit in 1,090 paper trades fired at exactly
     # ~90 min (never earlier, never later -- it's a hard flush, not catching
     # a real reversal) with a median loss of -35% (range -9% to -67%), zero
     # wins out of 128. Cut the window in half: a coin that hasn't shown signs
     # of life by 45 min isn't going to recover by 90, and leaving it running
     # the extra 45 min only lets the loss drift further before the flush.
-    elif age_min >= float(os.environ.get("EARLY_DEAD_MIN", "45")) and peak < 1.5 and mult < 1.2:
+    # 7 Nov 2026 (Ali): these two safety-net checks were "elif" off the branch above, which made
+    # them UNREACHABLE for a fully-carved core2 position whenever the trailing-stop condition was
+    # also true (peak>=ta is permanent once set, so this was true almost always) -- the 24h
+    # max_hold net could never fire on a carved slice, leaving it able to ride forever with zero
+    # exit path. Changed to independent "if" checks (still only evaluated when why is still None)
+    # so they always run regardless of which branch above matched.
+    if why is None and age_min >= float(os.environ.get("EARLY_DEAD_MIN", "45")) and peak < 1.5 and mult < 1.2:
         why = ("time_stop", f"no move after {age_min:.0f} min")
-    elif age_min >= float(os.environ.get("EARLY_MAX_HOLD_MIN", "1440")):
+    if why is None and age_min >= float(os.environ.get("EARLY_MAX_HOLD_MIN", "1440")):
         why = ("max_hold", "24h hold limit")
     if why:
         _sell(pos, pos["remaining"], mcap, why[0], now)
@@ -477,6 +548,23 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
     batched = _batch_snapshots({k: v for k, v in book.items() if not source_prefix or
                                 str(v.get("source", "")).startswith(source_prefix)}, batch_fn) if batch_fn else None
     closed_now = []
+    # 7 Nov 2026 (Ali): detect a feed-wide outage BEFORE the write-off loop below, by
+    # checking what fraction of this cycle's managed positions came back unpriced at
+    # once. One coin losing its price is normal (a real rug); most/all of them losing
+    # price in the same cycle means OUR feed is down, not that a dozen+ pools all died
+    # in the same 20-second tick. See FEED_OUTAGE_* constants above for the full story.
+    _managed = [pos for pos in book.values()
+                if not source_prefix or str(pos.get("source", "")).startswith(source_prefix)]
+    _n_managed = len(_managed)
+    if _n_managed >= FEED_OUTAGE_MIN_POSITIONS:
+        if batched is not None:
+            _n_unpriced = sum(1 for pos in _managed
+                               if (batched.get((pos["chain"], pos["token"])) or {}).get("mcap_usd") is None)
+        else:
+            _n_unpriced = 0  # snapshot_fn path (tests/fallback) is per-call and already resilient
+        feed_outage = (_n_unpriced / _n_managed) >= FEED_OUTAGE_UNPRICED_FRACTION
+    else:
+        feed_outage = False
     for pid, pos in list(book.items()):
         if source_prefix and not str(pos.get("source", "")).startswith(source_prefix):
             continue
@@ -490,6 +578,16 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         mcap = (snap or {}).get("mcap_usd")
         liq = (snap or {}).get("liquidity_usd")
         if mcap is None:
+            if feed_outage:
+                # Our feed is down for most of the book this cycle -- freeze this
+                # position's write-off clock rather than advance it. The position
+                # stays open, unmanaged, exactly as it was last priced; nothing is
+                # sold, nothing is marked to zero. Once the feed recovers and a real
+                # price comes back, normal management (and the write-off clock, if
+                # it genuinely never recovers) resumes from where it left off.
+                pos.setdefault("feed_outage_paused_cycles", 0)
+                pos["feed_outage_paused_cycles"] += 1
+                continue
             pos["unpriced_cycles"] = pos.get("unpriced_cycles", 0) + 1
             pos.setdefault("unpriced_since", now)
             never_priced = pos.get("last_mcap") is None
@@ -505,6 +603,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         pos["unpriced_cycles"] = 0
         pos["last_mcap"] = mcap          # dashboard shows the live multiple
         pos.pop("unpriced_since", None)
+        pos.pop("feed_outage_paused_cycles", None)
         # Same entry sanity check as real positions (position_state.
         # sanity_rebase_entry): an entry >5x away from the first live read
         # within 20 min is a data-source mismatch, not a trade -- otherwise it

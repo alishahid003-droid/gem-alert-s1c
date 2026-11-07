@@ -33,7 +33,8 @@ def test_core_targets_and_defaults():
     assert c1["target"] == 125_000 and c1["days"] == 30
     assert c2["target"] == 1_000_000 and c2["days"] == 180
     s = books.cfg("sprint")
-    assert s["target"] == 10_000 and s["days"] == 4
+    # 7 Nov 2026 (Ali): sprint target raised $10k -> $20k, see BOOKS in executor/books.py
+    assert s["target"] == 20_000 and s["days"] == 4
     assert books.equity("core1") == 100.0
 
 
@@ -171,12 +172,14 @@ def test_sprint_lane_added_for_strong_early_entry():
 
 
 def test_sprint_cashout_resets_to_reseed(monkeypatch):
+    # 7 Nov 2026 (Ali): sprint's target raised $10k -> $20k (see BOOKS in executor/books.py) as
+    # part of differentiating sprint/core1/core2 -- pnl/amount figures scaled to match.
     from executor import books, paper_ledger
-    monkeypatch.setattr(paper_ledger, "module_rows", lambda *a, **k: [{"pnl_usd": 10_500.0}])
+    monkeypatch.setattr(paper_ledger, "module_rows", lambda *a, **k: [{"pnl_usd": 20_500.0}])
     got = books.check_cashout("sprint", now=1000.0)
-    assert got and got["amount"] == 10_400.0
+    assert got and got["amount"] == 20_400.0
     assert books.total_value("sprint") == 200.0
-    assert books.withdrawn("sprint") == 10_400.0
+    assert books.withdrawn("sprint") == 20_400.0
     assert books.check_cashout("sprint") is None
     assert books.check_cashout("core1") is None   # only the sprint book cashes out
 
