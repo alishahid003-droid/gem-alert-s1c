@@ -1623,3 +1623,19 @@ The table above mixed phase-boundary totals, making Phase 1's "banked" figure lo
 | 5 | $1,000,000 | 91/99/109 | 7.0d/7.6d/8.3d | $449,456/$638,610/$688,959 |
 
 100% of the 1,000 simulated runs reached full Phase 5. Caveat unchanged: bootstrapped from only 6 real trades, correct method but thin sample.
+
+---
+
+## 8 Nov 2026 (second correction) -- Per-phase ISOLATED table (each phase on its own, rung-banking separate from fixed cashout)
+
+The cumulative table above answers a different question. This is the one Ali actually asked for: each phase starting from its OWN reseed (not day 0), how many trades/days to reach that phase's target, and how much the 6 ladder rungs banked DURING that specific climb -- kept separate from the phase's own fixed cashout (already known from PHASE_DEFS, not simulated).
+
+| Phase | Start equity | Target | Trades needed (p10/median/p90) | Days needed (p10/median/p90) | Rungs alone banked during this climb (p10/median/p90) | Fixed cashout at target |
+|---|---|---|---|---|---|---|
+| 1 | $100 | $10,000 | 20/25/30 | 1.5d/1.9d/2.3d | $1,969/$3,928/$4,198 | $8,500 |
+| 2 | $1,500 (reseed) | $12,000 | 10/13/17 | 0.8d/1.0d/1.3d | $4,849/$5,366/$7,928 | $10,000 |
+| 3 | $2,000 (reseed) | $12,000 | 9/12/15 | 0.7d/0.9d/1.2d | $3,491/$5,703/$8,270 | $10,000 |
+| 4 | $2,000 (reseed) | $120,000 | 18/22/27 | 1.4d/1.7d/2.1d | $41,564/$47,398/$71,876 | $115,000 |
+| 5 | $5,000 (reseed) | $1,000,000 | 23/27/32 | 1.8d/2.1d/2.5d | $241,874/$431,597/$470,304 | none coded yet |
+
+All 1,000/1,000 simulated runs completed all 5 phases. Same source data/caveat as before.
