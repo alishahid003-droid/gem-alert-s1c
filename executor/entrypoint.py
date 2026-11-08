@@ -64,6 +64,26 @@ _BUY_FUNCTIONS = {
 }
 
 
+# 8 Nov 2026 (Ali, full-system audit): this entrypoint module is a SEPARATE real-money path
+# from multichain_sniper.py's LIVE_BOOKS-gated hooks (executor/books.is_live_armed) -- it is
+# the glue worker_stonkfun_snipe.py and a future scheduler integration call into, and until
+# today _BUY_FUNCTIONS had no chain-level block of its own: solana/bsc real buys would only
+# have been stopped by swap_executor.execute_buy_*'s own EXECUTION_ENABLED+wallet-key guard,
+# the SAME guard real robinhood_chain/base buys pass. EXECUTION_ENABLED=true is already set in
+# .env on the live machine; the only thing stopping a real solana buy through this path right
+# now is that no solana private key is configured yet and worker_stonkfun_snipe.py isn't
+# launched by any .bat file. Both are operational facts, not code-level gates, and
+# worker_stonkfun_snipe.py is a real file in this repo with a --live flag. Blocking solana/bsc
+# here, at the one chokepoint every handle_*_candidate() funnels through, makes it impossible
+# for this path to ever fire a real solana/bsc trade regardless of which script calls it or
+# what env vars get set later -- matching multichain_sniper.py's own MC_SOLANA_ENABLED
+# reasoning (solana is a measured net loser there too: -$17,404.56 / 972 trades) without
+# touching swap_executor.execute_buy_solana/_bsc themselves, so they stay available if a
+# profitable solana/bsc pattern is ever found and proven (see multichain_sniper.py's own
+# comment on this) and someone deliberately re-enables this specific path later.
+_LIVE_BLOCKED_CHAINS = {"solana", "bsc"}
+
+
 def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float, stage: Optional[str] = None) -> dict:
     """Actually calls the real buy (guarded by EXECUTION_ENABLED -- inert
     by construction until that's turned on, same guard every execute_buy_*
@@ -83,6 +103,11 @@ def _attempt_buy_and_record_fill(chain: str, token: str, usd_amount: float, stag
     docstring for why retrying a persistently-failing token every cycle
     would be its own bug. `stage` is optional only so this function stays
     callable the old way; both real callers below always pass it."""
+    if chain in _LIVE_BLOCKED_CHAINS:
+        reason = f"chain '{chain}' is blocked from real execution on this path (paper only)"
+        if stage is not None:
+            position_state.mark_stage_buy_failed(chain, token, stage, reason=reason)
+        return {"attempted": False, "ok": False, "reason": reason}
     buy_fn = _BUY_FUNCTIONS.get(chain)
     if buy_fn is None:
         reason = f"no buy function wired for chain '{chain}'"
