@@ -314,13 +314,22 @@ def run_one_cycle(limit: int = 25, max_deep_lookups: int = 15, dry_run: bool = T
             print(f"[snipe] {mint} passed candidate check but trigger declined: {decision['reason']}")
             continue
 
-        exec_result = None
-        if not dry_run and execute_buy_solana is not None:
-            exec_result = execute_buy_solana(mint, decision["position_usd"])
-            print(f"[snipe] BUY ATTEMPT {mint}: {exec_result}")
-        else:
+        # 8 Nov 2026 (Ali, full-system audit): this used to call execute_buy_solana() a SECOND
+        # time here, directly, after handle_stage1_candidate() above already attempted the real
+        # buy internally (via entrypoint._attempt_buy_and_record_fill) whenever its own trigger
+        # fired -- decision["buy"] was computed and then silently thrown away, never read. That
+        # meant every live --live run of this worker would try to buy the same token TWICE: once
+        # for real inside handle_stage1_candidate, and once more here, unconditionally, with no
+        # relation to whatever the first attempt did (succeeded, failed, or was refused). Now uses
+        # the ALREADY-COMPUTED real result from the one pipeline that's supposed to own this
+        # (same pipeline Layer 0/1/2 alerts use), instead of a second, independent, redundant
+        # spend attempt that bypassed every chain-level gate that pipeline enforces.
+        exec_result = decision.get("buy")
+        if dry_run:
             print(f"[snipe] DRY RUN -- would buy {mint} for ${decision['position_usd']:.2f} "
                   f"({verdict['reasons']})")
+        else:
+            print(f"[snipe] BUY ATTEMPT {mint}: {exec_result}")
 
         fired.append({"mint": mint, "symbol": detail.get("symbol"), "decision": decision,
                        "exec_result": exec_result, "reasons": verdict["reasons"]})
