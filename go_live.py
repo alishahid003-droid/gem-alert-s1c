@@ -26,6 +26,21 @@ import os
 import sys
 import time
 
+# 8 Nov 2026 (Ali, full-system audit): this script's own STOP-guard below reads
+# SPRINT_SEED_USD/COMPOUND_SEED_USD from os.environ as a deliberate safety check (refusing to
+# reseed to the wrong number) -- but without load_dotenv(), os.environ in THIS process only
+# sees real OS-level environment variables, never what's actually written in .env. Since the
+# script's own printed instructions tell Ali to add those two lines to .env (not export them
+# as shell variables), this would have always printed STOP and refused to run, even after he
+# did exactly what the script told him to do -- caught before this script was ever run live.
+# Same bug class as local_runner.py's 1 Nov 2026 fix and worker_stonkfun_snipe.py's (see those
+# files' own comments).
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 sys.path.insert(0, ".")
 from executor import books  # noqa: E402
 
