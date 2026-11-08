@@ -73,11 +73,12 @@ def test_borrow_room_shrinks_as_pool_capital_gets_committed(monkeypatch):
     """Once the pool's free capital is driven below compound's own extra_allowed ceiling, the POOL
     number (not the per-book cap) becomes the binding constraint, and borrow room tracks it down
     as more capital gets committed -- proves the number reflects real committed state, not a
-    static constant. (compound's own extra_allowed ceiling is eq*share*(MULT-1) = 100*0.6*1 = $60,
-    so the pool must be driven below that to actually observe it shrinking further.)"""
+    static constant. (compound's own extra_allowed ceiling is eq*share*(MULT-1) = 100*0.75*1 = $75
+    -- max_share raised 0.60 -> 0.75 on 8 Nov 2026, see books.py's BOOKS config for why -- so the
+    pool must be driven below that to actually observe it shrinking further.)"""
     from executor import paper_ledger
     room_before = books.borrow_room_usd("compound")
-    assert room_before == 60.0   # capped by compound's own extra_allowed ceiling, pool not yet binding
+    assert room_before == 75.0   # capped by compound's own extra_allowed ceiling, pool not yet binding
     # commit almost all of sprint's, core1's AND core2's capital -- pool must drop well below
     # compound's own $60 ceiling (own_free_equity(compound)=100 stays unused in this calc, so the
     # pool contribution from siblings alone must fall under 60-100=... actually pool_free_usd()

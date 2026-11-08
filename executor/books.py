@@ -33,8 +33,14 @@ BOOKS: Dict[str, dict] = {
               "shot_pct": 0.20, "max_share": 0.35, "bank_pct": 0.25},
     "core2": {"name": "Core 3", "kind": "moonshot", "seed": 100.0, "target": 1_000_000.0, "days": 180.0,
               "shot_pct": 0.10, "max_share": 0.25, "bank_pct": 0.25},
+    # 8 Nov 2026 (Ali): real audit found compound's live equity ($298.53) with committed capital
+    # already OVER its own 60%-of-equity cap (6 real open positions vs max_open=4), causing every
+    # new signal to be refused as "balance fully committed" -- not a bug, a genuine capacity wall.
+    # Raised max_share 0.60 -> 0.75 (still leaves 25% headroom, same direction as the 1 Nov/2 Nov
+    # max_open fixes above) so capacity scales correctly as equity grows; see max_open()'s own
+    # floor bump below for what actually fixes TODAY's real number.
     "compound": {"name": "Compound", "kind": "daily", "seed": 100.0, "target": None, "days": None,
-                 "shot_pct": 0.50, "max_share": 0.60, "daily_goal_pct": 5.0},
+                 "shot_pct": 0.50, "max_share": 0.75, "daily_goal_pct": 5.0},
     "fomo_followers": {"name": "Fomo Followers", "kind": "copy", "seed": 50.0, "target": None, "days": None,
                        "shot_pct": 0.10, "max_share": 0.25},
     "fomo_new": {"name": "Fomo New Wallets", "kind": "copy", "seed": 50.0, "target": None, "days": None,
@@ -743,7 +749,15 @@ def max_open(book_id: str, eq: Optional[float] = None) -> int:
         # when nothing is open yet (avg_open_stake is undefined with zero positions).
         typical_stake = max(avg_open_stake or stake_usd(book_id), 5.0)
         capacity = int((eq * c.get("max_share", 0.6)) / typical_stake) if typical_stake else 4
-        return max(4, capacity)
+        # 8 Nov 2026 (Ali): real audit found compound ALREADY over its old floor of 4 (6 real open
+        # positions, every new signal refused as "balance fully committed") at $298.53 real equity
+        # -- the exact self-starvation pattern the 1 Nov/2 Nov fixes above were written to prevent,
+        # recurring because the floor itself was too low for compound specifically (sprint/core1/
+        # core2 use the "moonshot" branch below with its own separate floor, unaffected). Floor
+        # raised 4 -> 8 for "daily"-kind books (compound) only, so it isn't forced to sit on real,
+        # currently-profitable winners refusing every new signal while waiting for one to close.
+        floor = 8 if c["kind"] == "daily" else 4
+        return max(floor, capacity)
     if c["kind"] == "moonshot":
         # 2 Nov 2026 (Ali audit, Phase A/B/C/D targets): the static step ladder for "moonshot"
         # books (sprint/core1/core2) was ALSO wrong, same class of bug as compound's -- real data

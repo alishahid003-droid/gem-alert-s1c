@@ -266,11 +266,75 @@ def _close(pos: dict, exit_type: str, reason: str, now: float) -> dict:
     return pos
 
 
+EARLY_RUNG_PCT = {
+    "sprint": {1.2: 0.20, 1.6: 0.20, 2.5: 0.15, 5: 0.10},
+    "core1": {1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10},
+    "core2": {1.5: 0.05, 3: 0.10, 8: 0.10, 20: 0.10},
+    "compound": {1.3: 0.25, 2: 0.60, 3: 0.40},
+}  # mirrors EARLY_RULES's ladder (fraction of ORIGINAL stake sold at each rung) -- kept as its
+   # own lookup since EARLY_RULES bundles in stop/trail too and smart_swap_out() only needs this.
+
+
+def _secured_profit_score(pos: dict, module_id: str) -> float:
+    """8 Nov 2026 (Ali, compound cash-lock fix): how much of this position's OWN profit-taking
+    design is already banked, weighted against how far it's giving back from its peak -- Ali's
+    own criterion: 'the swap out should be done to that position which has secured likely the
+    most of the profit... and you are assessing that it will not go any further... a SMART
+    swap out, not just the oldest position.' Higher score = more already secured + more sign
+    of having topped out = safer and more sensible to close now. pct_sold: fraction of the
+    ORIGINAL stake already banked via rungs_fired (a position at the 2x+ rung has only 15-25%
+    of itself still actually at risk/reward, vs 75-100% for one that's only hit its first rung).
+    giveback: how far current price has pulled back from this position's own peak (an actively
+    retracing position has more real evidence of having topped out than one still sitting flat
+    at its high, even though peak_mult alone looks identical for both)."""
+    entry = pos.get("entry_mcap") or 0
+    last = pos.get("last_mcap") or 0
+    peak = pos.get("peak_mcap") or 0
+    if not entry or not last or not peak:
+        return -1.0
+    ladder = EARLY_RUNG_PCT.get(module_id, {})
+    rungs = [float(r) for r in (pos.get("rungs_fired") or [])]
+    pct_sold = sum(ladder.get(r, 0.0) for r in rungs)
+    giveback = max(0.0, (peak - last) / peak) if peak else 0.0
+    # Weighted toward pct_sold (the real, already-locked-in signal) with giveback as a secondary
+    # tiebreaker among positions at the same rung depth -- a position that has given back more
+    # from its peak has more real evidence of having topped out than one still sitting at it.
+    return pct_sold + giveback * 0.25
+
+
+def _smart_swap_candidate(book: dict, module_id: str):
+    """8 Nov 2026 (Ali): picks the single best position to close when NO stale/dead loser
+    qualifies in swap_out()'s original pass -- used for compound only (see swap_out()'s
+    docstring). Ranks every open, non-live, early-strategy position in this module by
+    _secured_profit_score() (highest = most profit already locked in + most sign of having
+    topped out) and returns the single best (pid, pos) tuple, or None if nothing is open.
+    Ali's own words: 'the position which has secured likely the most of the profit... and you
+    are assessing that it will not go any further... a smart swap out, not just the oldest.'"""
+    best = None
+    best_score = None
+    for pid, pos in book.items():
+        if pos.get("strategy") != "early" or _module_of(pos) != module_id or pos.get("live"):
+            continue
+        if not pos.get("last_mcap") or not pos.get("entry_mcap"):
+            continue  # never priced yet -- nothing to score
+        score = _secured_profit_score(pos, module_id)
+        if best_score is None or score > best_score:
+            best, best_score = (pid, pos), score
+    return best
+
+
 def swap_out(module_id: str, now: Optional[float] = None) -> Optional[dict]:
     """Slot swap (Oct 13 2026): frees a slot for a STRONG new signal by closing this module's stalest flat position.
     Only a position that is old (>= SWAP_MIN_AGE_MIN, default 45), never ran (peak < 1.5x) and is not deep in the
     red (>= SWAP_MIN_MULT, default 0.75x -- anything lower is left to its own stop) qualifies; the oldest goes first.
-    The loss is bounded (<= 25% + cost) and the stake goes back to the book. Returns the closed row or None."""
+    The loss is bounded (<= 25% + cost) and the stake goes back to the book. Returns the closed row or None.
+
+    8 Nov 2026 (Ali): for compound ONLY, falls through to smart_swap_out() when no stale/dead loser
+    qualifies above -- compound's real problem is being cash-locked behind several already-
+    profitable positions (all with rungs_fired, which permanently excludes them from the ORIGINAL
+    logic above), not dead coins. sprint/core1/core2 keep the original losers-only behavior
+    unchanged -- they have no separately-proven positive edge yet, so closing a winner early to
+    free a slot for them is not justified the way it is for compound."""
     now = now if now is not None else time.time()
     min_age = float(os.environ.get("SWAP_MIN_AGE_MIN", "45")) * 60.0
     min_mult = float(os.environ.get("SWAP_MIN_MULT", "0.75"))
@@ -286,12 +350,17 @@ def swap_out(module_id: str, now: Optional[float] = None) -> Optional[dict]:
             continue
         if best is None or pos["opened_ts"] < best[1]["opened_ts"]:
             best = (pid, pos)
+    swap_reason = "slot_swap"
+    allow_weak = os.environ.get("COMPOUND_SWAP_ALLOW_WEAK", "1") not in ("0", "false", "False")
+    if best is None and module_id == "compound" and allow_weak:
+        best = _smart_swap_candidate(book, module_id)
+        swap_reason = "smart_slot_swap"
     if best is None:
         return None
     pid, pos = best
     mult = pos["last_mcap"] / pos["entry_mcap"]
-    _sell(pos, pos["remaining"], pos["last_mcap"], "slot_swap", now)
-    row = _close(pos, "slot_swap", f"swapped out at {mult:.2f}x to free a slot for a stronger signal", now)
+    _sell(pos, pos["remaining"], pos["last_mcap"], swap_reason, now)
+    row = _close(pos, swap_reason, f"swapped out at {mult:.2f}x to free a slot for a stronger signal", now)
     del book[pid]
     # 6 Nov 2026: OPEN_KEY and CLOSED_KEY must be read, modified, AND written as one atomic unit --
     # see state.atomic_multi_fn()'s docstring for the full investigation (two separate writes lost
