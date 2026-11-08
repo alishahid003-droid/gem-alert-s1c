@@ -4,6 +4,37 @@ Old versions are archived in docs/archive/ (history only - never read them for s
 UPDATE RULE (Claude, after every change): rewrite THIS file, copy it to the Notion master page, then commit. Ali pushes.
 Legend: [x] done & running | [~] built, under test | [ ] to do | (A)=Ali | (C)=Claude
 
+## CURRENT STATE -- 8 Nov 2026, ~10:05 UTC / 15:05 PKT (READ THIS SECTION FIRST -- everything below is dated history, kept for the record, not current. Any win-rate/simulation figure below this section that conflicts with this one is RETIRED -- use only what's here.)
+
+**Live code**: commit `d259a3b` (pushed and restarted by Ali ~10:01 UTC). Verified live and healthy: state file actively writing (last write 7s old at check time), compound equity growing in real time ($772.01 at last check, started from $100 seed), no stray processes, no hangs.
+
+**What's running right now**:
+- Compound trades ALONE from a $100 seed through Phase 1 of the 5-phase ladder (`PHASE_DEFS` in `executor/books.py`).
+- Compound's stake sizing uses **Curve C**: 50% of equity at $0-600, 35% at $600-10k, 20% at $10k-100k, 10% at $100k-500k, 5% above -- replaces the old flat $300 hard_cap. The taper itself is the risk control: % of equity risked per trade goes DOWN as equity grows, so a $60,000 account trades at 10% ($6,000), never a flat 50% ($30,000).
+- A **one-time-only cascade**: the first time Phase 1's cumulative ladder-banked total crosses $600 (the real rung at $2,500 combined equity, banking 18% = $450, brings the running total to $727), a fixed $300 is peeled off compound and credited to sprint/core1/core2 as fresh equity ($100 each). Fires exactly once for the system's lifetime (`PHASE1_CASCADE_KEY` guard). Currently armed, tracking at **$134.70 of $600** needed -- has NOT fired yet.
+- Every ladder rung's banked amount, at every phase, is removed from tradeable equity into the vault (`banked()`/`CASHOUT_KEY`) -- this was always true, not something the cascade changed. The cascade is one additional one-time transfer on top of that existing rule.
+
+**The ONLY current win-rate figure to use for compound**: **61.3%**, from 31 real closed trades on the live modules (Robinhood + Base chains only), measured 8 Nov 2026. Real current pace: **~19 trades/day** (also Robinhood+Base only).
+
+**RETIRED, do not use**: 57.7%, 59.3%, 83.3%, 83.8%, 85.7%, or 25.6% as compound's win rate. These came from earlier same-session figures that either (a) predated this build and are stale, or (b) in one case (25.6%) were the result of a real filtering bug that accidentally blended in `solana_compound` -- a SEPARATE, NOT-LIVE module. Per Ali (8 Nov 2026): Solana is a separate module currently only used for data-fetching and pattern identification -- it is not live trading and must never be mixed into compound's real performance figures. The only live scope for any compound reporting is `module == "compound"` with `chain` in `("robinhood_chain", "base")`, exact match, never a substring match on "compound".
+
+**Full Phase 1-5 table (Curve C, 61.3% win rate, 19 trades/day, $100 compound-only start)**:
+
+| Phase | Trigger | Cashout | Reseed left | Trades | Days | Cumulative Trades | Cumulative Days | Ladder-banked total by trigger |
+|---|---|---|---|---|---|---|---|---|
+| 1 | $10,000 | $8,500 | $1,500 | 60 | 3.2 | 60 | **3.2** | $727 (cascade fires here) |
+| 2 | $12,000 | $10,000 | $2,000 | 28 | 1.5 | 88 | **4.6** | $6,899 |
+| 3 | $12,000 | $10,000 | $2,000 | 25 | 1.3 | 113 | **5.9** | $7,318 |
+| 4 | $120,000 | $115,000 | $5,000 | 81 | 4.3 | 194 | **10.2** | $62,660 |
+| 5 | $1,000,000 | not coded yet | -- | 180 | 9.5 | 374 | **19.7** | $401,700 |
+
+Survivability: 0.2% bust rate across all 5 phases (median of 600 simulated runs). Methodology: bootstrap-resampled real trade-level pnl% (not independent win-rate/magnitude dials), includes real tail risk (one real trade at -99.1%).
+
+**Tests**: full suite regression-checked same day. The 3 previously-reported "pre-existing" `test_router_books.py` failures (`test_bust_reseeds_book_and_counts`, `test_bust_waits_for_fresh_open_position_but_not_forever`, `test_bust_offset_uses_latest_snapshot_not_sum`) were a test-isolation bug only (mocked `get_value`/`set_value` but not `atomic_multi_fn`, which the real bust code writes through) -- production was never affected. Fixed in commit `d259a3b`; `test_router_books.py` now 20/20 passing. One known pre-existing hang remains and is excluded from CI runs: `tests/test_modules.py::test_module_cards_shape_and_routing` (confirmed hangs identically on unmodified code via git stash comparison, unrelated to any of tonight's work, not yet root-caused).
+
+**Nothing pending on Claude's end right now.** Will flag immediately if: the $300 cascade fires, real trade data diverges meaningfully from the 61.3%/19-per-day assumptions above, or any other anomaly shows up in live state.
+
+
 ## 0. STATUS -- 25 Oct 2026, 03:00 PKT (CURRENT -- sections 1-1S below are 13-16 Oct history, kept for the record, not current)
 - Live trading: EXECUTION_ENABLED=true, EARLY_LIVE_LANES=sprint, LIVE_MAX_STAKE_USD=5, LIVE_MAX_OPEN=3, LIVE_DAILY_LOSS_USD=17. BUT logs/live_exec.log's last real fill is 14 Oct -- Sprint has NOT actually fired a live trade in 11 days.
 - ROOT CAUSE found tonight: PumpPortal's per-coin trade-feed subscription needs its linked wallet funded >= 0.02 SOL (~$3.60-4.00 at current prices). Ali confirmed that wallet holds only ~$2 -- under the threshold -- so PumpPortal's own server has been rejecting subscribeTokenTrade/subscribeAccountTrade every cycle (trades_blocked=True in early_stream.py), starving Sprint of the live per-coin confirmations it needs. The API KEY itself is fine (present, correct length, loads OK) -- this is purely a funding-threshold gap, not a key problem. ACTION NEEDED (A): top up that linked PumpPortal wallet to ~0.04 SOL (0.02 threshold + buffer for $5 stakes + tx fees). This is the single blocker between the code and Sprint actually firing live.
@@ -1574,6 +1605,15 @@ git pull        # already done for commit e5778d2 as of this writing
 
 ---
 
+## RETIRED SECTIONS BELOW (8 Nov 2026 tables through the Curve A/C comparison) -- superseded
+Everything from here through the start of the final '8 Nov 2026 (FINAL, LIVE)' section is the
+RAW HISTORY of how tonight's numbers were derived (including early win-rate figures of 57.7%,
+83.3%, 83.8%, 85.7%, and the 25.6% figure that was a real bug from blending in the separate,
+not-live solana_compound module). None of these are current. The single current win rate
+(61.3%), pace (19 trades/day), and Phase 1-5 table live in the 'CURRENT STATE' section at the
+top of this file. Kept here only so the full derivation is auditable, not because any number
+below this line should be used for current status.
+
 ## 8 Nov 2026 — CURRENT STATE (S1c memecoin paper-trading, 5-phase target build)
 **This section is the live source of truth for the 5-phase memecoin target work — same content as the Notion "S1c MASTER CHECKLIST" page's "8 Nov 2026 — CURRENT STATE" section. Read this before citing any win rate/equity/phase number for this stream.**
 
@@ -1862,3 +1902,51 @@ Survivability: Curve A busted (hit near-zero equity) in 5/1500 runs (0.3%); Curv
 **Not yet built**: Ali proposed funding compound only with $100, running it to Phase 5 on Curve A/C, then cascading each phase's banked amount into sprint/core1/core2 funding rather than letting it sit idle. This is a new funding-routing feature, not present in current `PHASE_DEFS`/reseed logic (which currently just reseeds the same book and banks the rest). Not built yet -- awaiting Ali's go-ahead since it touches book funding logic.
 
 **Lesson logged**: the "25.6% win rate / 100% bust" scare earlier this same session was caused by filtering on `'compound' in module` (substring match), which silently included the separate `solana_compound` module (55 trades, 5.5% win rate, not live). Exact-match filtering (`module == 'compound'`, chain in robinhood_chain/base) is the correct scope for all live compound reporting going forward.
+
+## 8 Nov 2026 (FINAL, LIVE) -- Full Phase 1-5 checklist, Curve C implemented and running
+
+**Status**: Curve C and the Phase-1-ladder cascade are LIVE as of commits `1af9975` and `d259a3b`
+(pushed and restarted by Ali, confirmed ~08:43 UTC / 13:43 PKT). Compound starts from $100, runs
+alone through Phase 1; the $100 cascades to sprint/core1/core2 partway through Phase 1 (see
+below), after which all 4 books contribute to the combined-equity Phase 2-5 climb.
+
+**Basis**: real compound trade data (31 trades, Robinhood+Base chains only, Solana leg excluded),
+61.3% win rate, ~19 trades/day measured pace, bootstrap-resampled real trade outcomes (includes
+real tail risk, one trade at -99.1%). Curve C stake bands: 50%/35%/20%/10%/5% of equity by
+range ($0-600 / $600-10k / $10k-100k / $100k-500k / $500k+).
+
+| Phase | Trigger | Cashout | Reseed left | Trades | Days | Cumulative Trades | Cumulative Days | Ladder-banked total by trigger |
+|---|---|---|---|---|---|---|---|---|
+| 1 | $10,000 | $8,500 | $1,500 | 60 | 3.2 | 60 | **3.2** | $727 (cascade fires here, see below) |
+| 2 | $12,000 | $10,000 | $2,000 | 28 | 1.5 | 88 | **4.6** | $6,899 |
+| 3 | $12,000 | $10,000 | $2,000 | 25 | 1.3 | 113 | **5.9** | $7,318 |
+| 4 | $120,000 | $115,000 | $5,000 | 81 | 4.3 | 194 | **10.2** | $62,660 |
+| 5 | $1,000,000 | not coded yet | -- | 180 | 9.5 | 374 | **19.7** | $401,700 |
+
+Survivability: 0.2% bust rate across all 5 phases (median of 600 simulated runs).
+
+**Phase-1 ladder cascade (live, one-time-only)**: Phase 1's 6 ladder rungs bank cumulatively as
+equity climbs: $25 (at $250) -> $97 (at $600) -> $277 (at $1,200) -> $727 (at $2,500) -> $1,727
+(at $5,000) -> $3,487 (at $8,000). The FIRST time this running total crosses $600 -- the $2,500
+rung, bringing the total to $727 -- a fixed $300 is peeled off compound and credited as fresh
+deposited seed money to sprint/core1/core2 ($100 each). This fires EXACTLY ONCE for the system's
+lifetime (guarded by `PHASE1_CASCADE_KEY`); every later rung in every later phase banks normally
+with no further redistribution, per Ali's explicit instruction ("only the first one can be given
+to them, remaining bank amount do not need to move it over there").
+
+**Bug fixed same day, before it could matter**: `_phase1_cumulative_banked()` initially also
+summed a stale orphaned ladder record (`p1_240`, left over from the pre-7-Nov 2-phase ladder
+structure) that doesn't match any level in the current `PHASE_DEFS[1]['ladder']`, inflating the
+real running total by $40. Caught and fixed (commit `d259a3b`) before the real total reached the
+$600 cascade trigger, so the live system was never at risk of a corrupted trigger point.
+
+**Also fixed same day**: 3 previously-reported "pre-existing" test failures
+(`test_bust_reseeds_book_and_counts`, `test_bust_waits_for_fresh_open_position_but_not_forever`,
+`test_bust_offset_uses_latest_snapshot_not_sum`) were a test-isolation bug, not a production bug
+-- each mocked `state.get_value`/`set_value` but not `state.atomic_multi_fn`, which the real bust
+code actually writes through, so the mocked read never saw the real write. Production was
+unaffected (both paths share the real backend there). Fixed properly; full `test_router_books.py`
+suite now 20/20 passing.
+
+**Full regression confirmed**: 669+ tests passed across the modified areas, 0 new regressions
+from either commit.
