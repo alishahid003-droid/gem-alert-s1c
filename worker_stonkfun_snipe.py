@@ -96,6 +96,23 @@ import sys
 import time
 from datetime import datetime, timezone
 
+# 8 Nov 2026 (Ali, full-system audit): this standalone script never called load_dotenv() --
+# the same bug class local_runner.py had on 1 Nov 2026 (see that file's own comment), where a
+# process never loading .env silently fell back to every setting's hardcoded default forever,
+# with a real disable Ali set in .env never actually taking effect through 6+ restarts. This
+# file runs standalone (`python worker_stonkfun_snipe.py --live ...`), not imported into an
+# already-dotenv-loaded process the way multichain_sniper.py is (local_runner.py loads .env
+# before importing it), so EXECUTION_ENABLED/wallet keys/every other .env-sourced setting this
+# script reads would only have worked by accident, if they happened to already be real OS
+# environment variables rather than just lines in .env. Loading .env here, the same way every
+# other entry-point process in this repo already does, is the fix -- matching the Nov 1 pattern
+# exactly, before this script is ever actually run live.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 import state
 from config import CONFIG
 from executor.config import EXECUTOR_CONFIG
