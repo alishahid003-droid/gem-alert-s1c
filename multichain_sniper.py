@@ -7,10 +7,25 @@ books Core 1/2/3 + Compound), but fed by price-action instead of wallet data:
 Entry = confirmations on live pool data (buy pressure, unique buyers, velocity, volume vs liquidity,
 freshness, growth since first seen) + GoPlus honeypot/tax gate on EVM chains.
 
-HONEST LIMITS: PAPER ONLY on these chains (no live trade adapter exists for BSC/Base/Robinhood);
-GeckoTerminal only lists a coin once it has a DEX pool, so four.meme / launchpad bonding-curve
-phase BEFORE the pool exists is not seen; new_pools returns the newest ~20 pools per call, so on very
-busy chains some launches are missed. Thresholds are untuned guesses until the 24h data is analysed.
+HONEST LIMITS: GeckoTerminal only lists a coin once it has a DEX pool, so four.meme / launchpad
+bonding-curve phase BEFORE the pool exists is not seen; new_pools returns the newest ~20 pools per
+call, so on very busy chains some launches are missed. Thresholds are untuned guesses until the
+24h data is analysed.
+
+LIVE WIRING (8 Nov 2026, Ali): act() is PAPER ONLY by default -- this has not changed. A real
+buy additionally fires ONLY when ALL of these hold at once: (1) the book/lane is listed in the
+LIVE_BOOKS env var (e.g. LIVE_BOOKS=compound, or LIVE_BOOKS=compound,sprint,core1,core2), (2)
+for sprint/core1/core2 specifically, the Phase-1 $300 cascade live-pause is not set (see
+executor.books.is_cascade_live_paused() / clear_cascade_live_pause() -- auto-set the instant the
+cascade fires, cleared ONLY by Ali's explicit go, no timeout), (3) the coin's chain is
+robinhood_chain or base (the only two chains with a real buy/sell path at all -- solana is
+data/pattern-ID only and is NEVER live-armed, bsc has no real adapter either), and (4)
+executor.config.EXECUTOR_CONFIG.ready_for_chain(chain) passes (EXECUTION_ENABLED=true + the real
+EXECUTION_RHC_PRIVATE_KEY/EXECUTION_BASE_PRIVATE_KEY is set). A real buy's success/failure is
+recorded on the paper position (live, live_attempted, live_ok, live_reason, live_tx,
+live_amount_tokens) via paper_ledger.update_live_fields(); any failure or exception in the real
+path is swallowed and never blocks or breaks the paper trade it mirrors. The matching real sell
+lives in executor.paper_ledger._sell().
 """
 import os, time, json, datetime, threading, traceback
 from collections import deque
@@ -518,6 +533,52 @@ def act(d: dict, now: Optional[float] = None) -> dict:
                                             "confirmations": d["confirmations"], "tier": d.get("tier", "probe"), "safety": why,
                                             "raw": d.get("raw")}, module=lane)
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
+        # 8 Nov 2026 (Ali, live-wiring build): mirror this paper entry with a REAL buy, only if
+        # ALL of the following hold -- books.is_live_armed() alone is never sufficient:
+        #   1. pos was actually opened (never fire a real buy for a paper entry that was refused)
+        #   2. this lane/book is listed in LIVE_BOOKS and (for sprint/core1/core2) the Phase-1
+        #      cascade live-pause is not set (books.is_live_armed(lane))
+        #   3. the chain is one swap_executor actually has a real buy function for -- only
+        #      robinhood_chain and base, per Ali's explicit correction (Solana/bsc are not
+        #      traded for real at all; solana is data/pattern-ID only, bsc has no live adapter
+        #      and is 0% win rate anyway per the docstring above)
+        #   4. executor.config.ready_for_chain(chain) passes -- EXECUTION_ENABLED=true AND the
+        #      real per-chain key (EXECUTION_RHC_PRIVATE_KEY / EXECUTION_BASE_PRIVATE_KEY) is
+        #      set. This is the SAME gate swap_executor's own real buy functions check
+        #      internally via _refuse_unless_ready() -- checked again here, before spending any
+        #      effort building a request, purely so a disarmed system logs nothing extra; the
+        #      real functions still refuse-closed on their own if this check is ever bypassed.
+        # The real buy is best-effort and never allowed to break the paper system: any failure
+        # (including an exception) is recorded on the position and swallowed, never raised --
+        # paper trading must keep working exactly as it does tonight even if live wiring breaks.
+        if pos and d["chain"] in ("robinhood_chain", "base") and books.is_live_armed(lane):
+            try:
+                from executor import config as _execcfg, swap_executor as _swap
+                if _execcfg.EXECUTOR_CONFIG.execution_enabled and _execcfg.EXECUTOR_CONFIG.ready_for_chain(d["chain"]):
+                    _buy_fn = (_swap.execute_buy_robinhood_chain if d["chain"] == "robinhood_chain"
+                               else _swap.execute_buy_base)
+                    _result = _buy_fn(d["addr"], stake)
+                    pos["live_attempted"] = True
+                    pos["live_ok"] = bool(_result.ok)
+                    pos["live_reason"] = _result.reason
+                    pos["live_tx"] = _result.tx_signature
+                    if _result.ok:
+                        pos["live"] = True
+                        pos["live_amount_tokens"] = _result.filled_amount_tokens
+                        # Fixed, NEVER mutated after this -- see paper_ledger._sell()'s own
+                        # comment on why the real-sell size calculation needs an immutable
+                        # original base, separate from live_amount_tokens (which _sell() keeps
+                        # decrementing as a running "what's left" figure for reporting).
+                        pos["live_amount_tokens_original"] = _result.filled_amount_tokens
+                    paper_ledger.update_live_fields(pos)
+            except Exception as _live_exc:  # noqa: BLE001
+                try:
+                    pos["live_attempted"] = True
+                    pos["live_ok"] = False
+                    pos["live_reason"] = f"live buy hook raised: {_live_exc}"
+                    paper_ledger.update_live_fields(pos)
+                except Exception:  # noqa: BLE001
+                    pass
     try:
         state.log_full_alert("early_" + d["lane"], d["chain"], d["name"], d["addr"],
                              f"Multichain early entry ({d['age_min']}m old, ${d['mcap']:,.0f})",

@@ -238,6 +238,32 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
     return pos
 
 
+def update_live_fields(pos: dict) -> bool:
+    """8 Nov 2026 (Ali, live-wiring build): persists the live_* fields (live, live_attempted,
+    live_ok, live_reason, live_tx, live_amount_tokens, live_amount_tokens_original) that
+    multichain_sniper.act()'s real-buy hook sets on a just-opened position's in-memory dict,
+    back onto the SAME position inside OPEN_KEY's book. open_paper() already returns before
+    this hook runs (it has to -- the real buy itself can take a few seconds and must never hold
+    _OPEN_LOCK while a network call is in flight, the same reasoning swap_out()/manage() already
+    follow for their own real-money mirror calls), so this is a second, deliberately separate,
+    short read-modify-write under the same lock. Re-reads the book fresh (not the caller's
+    possibly-stale snapshot) and does nothing if the position is no longer open (closed/evicted
+    between the buy attempt and this call) rather than resurrecting it. True if the update was
+    applied."""
+    with _OPEN_LOCK:
+        book = _open()
+        current = book.get(pos.get("id"))
+        if current is None:
+            return False
+        for field in ("live", "live_attempted", "live_ok", "live_reason", "live_tx",
+                      "live_amount_tokens", "live_amount_tokens_original"):
+            if field in pos:
+                current[field] = pos[field]
+        book[pos["id"]] = current
+        state.set_value(OPEN_KEY, book)
+        return True
+
+
 def _sell(pos: dict, pct_of_original: float, mcap: float, why: str, now: float):
     pct = min(pct_of_original, pos["remaining"])
     if pct <= 0:
@@ -245,11 +271,47 @@ def _sell(pos: dict, pct_of_original: float, mcap: float, why: str, now: float):
     mult = mcap / pos["entry_mcap"]
     proceeds = pos["usd"] * pct * mult * (1.0 - pos["cost_pct"])
     if pos.get("live"):
+        # 8 Nov 2026 (Ali, live-wiring build): FIXED -- this used to always call
+        # pumpportal_exec.sell(), which is Solana/pump.fun-ONLY (gated on PUMPPORTAL_API_KEY).
+        # Every position this hook actually arms is robinhood_chain/base (see
+        # multichain_sniper.act()'s buy-side hook -- solana/bsc are never live-armed), so the
+        # old call silently did nothing for every real position that could ever reach here: no
+        # exception (pumpportal_exec.sell() fails soft with {"ok": False, "reason": "no key"}
+        # rather than raising), so this was never visibly broken, just quietly a no-op. Routed
+        # now through swap_executor.execute_sell(chain, ...), the correct chain-generic real
+        # sell, using a REAL token quantity derived from live_amount_tokens (the actual filled
+        # amount from the buy) rather than the paper position's fractional "remaining" field --
+        # execute_sell() needs real tokens to sell, not a fraction of a paper USD stake.
         try:                                   # mirror the exit on the real position (sell is never blocked by the kill switch)
-            from executor import pumpportal_exec
-            pumpportal_exec.sell(pos["token"], min(100.0, pct / max(pos["remaining"], 1e-9) * 100.0))
-        except Exception:  # noqa: BLE001
-            pass
+            # pct is a fraction of the ORIGINAL stake (same convention _sell() has always used
+            # for the paper usd/proceeds math above) -- so it must be multiplied against the
+            # ORIGINAL real token quantity, never against whatever's currently left. live_amount_tokens
+            # is mutated after every real sell (see below) to track what's CURRENTLY held for
+            # reporting/audit, so it is the wrong number to multiply pct against here -- doing so
+            # (an earlier version of this fix did exactly that) silently oversold every rung after
+            # the first, scaling each fraction against an already-shrunk base instead of the fixed
+            # original one. live_amount_tokens_original is set once by the buy hook and NEVER
+            # mutated again, specifically so this calculation always has the correct fixed base.
+            live_tokens_original = pos.get("live_amount_tokens_original")
+            if live_tokens_original and pos["chain"] in ("robinhood_chain", "base"):
+                tokens_to_sell = float(live_tokens_original) * pct
+                if tokens_to_sell > 0:
+                    from executor import swap_executor
+                    _result = swap_executor.execute_sell(pos["chain"], pos["token"], tokens_to_sell, why)
+                    pos["live_last_sell_ok"] = bool(_result.ok)
+                    pos["live_last_sell_reason"] = _result.reason
+                    if _result.ok and _result.filled_amount_tokens:
+                        # live_amount_tokens tracks what's CURRENTLY held, for reporting only --
+                        # never read back into this calculation (see live_tokens_original above).
+                        current_held = pos.get("live_amount_tokens")
+                        if current_held is not None:
+                            pos["live_amount_tokens"] = max(0.0, float(current_held) - float(_result.filled_amount_tokens))
+        except Exception as _live_sell_exc:  # noqa: BLE001
+            try:
+                pos["live_last_sell_ok"] = False
+                pos["live_last_sell_reason"] = f"live sell hook raised: {_live_sell_exc}"
+            except Exception:  # noqa: BLE001
+                pass
     pos["proceeds_usd"] += proceeds
     pos["remaining"] = max(0.0, pos["remaining"] - pct)
     pos["events"].append({"ts": now, "why": why, "pct": round(pct, 4), "mult": round(mult, 3),

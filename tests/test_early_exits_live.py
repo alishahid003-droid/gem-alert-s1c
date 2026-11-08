@@ -4,7 +4,7 @@ import time
 import pytest
 
 import state
-from executor import paper_ledger, pumpportal_exec
+from executor import paper_ledger, pumpportal_exec, swap_executor
 from early_recorder import Recorder
 from layers.layer17_early_entry import EarlyTracker
 
@@ -93,19 +93,62 @@ def test_live_gating_and_kill_switch(monkeypatch):
     assert pumpportal_exec.allowed("core2", 20) == (False, "KILL SWITCH on", 0.0)
 
 
-def test_live_sell_is_mirrored(monkeypatch):
-    calls = []
-    monkeypatch.setattr(pumpportal_exec, "sell", lambda m, pct: calls.append((m, round(pct))) or {"ok": True})
-    # 7 Nov 2026: moved to core1 for the same reason as test_take_profits_then_trailing_stop above --
-    # core2's ladder was redesigned by the differentiation work (1.5x rung at 5%, not 1.3x at 10%).
-    # core1's ladder is untouched: {1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10}.
-    _open(lane="core1", live=True)
-    # One tick to 2.1x fires both the 1.3x and 2x rungs in the same cycle. Each rung sells its
-    # fraction of the ORIGINAL stake as a pct of what's CURRENTLY remaining when it fires: the 1.3x
-    # rung fires first at 100% remaining -> sells 10% of that (round(pct)=10); the 2x rung then fires
-    # against the new 90% remaining -> sells 0.15/0.90 = ~16.7% of what's left (round=17).
+def test_live_solana_sell_is_never_mirrored(monkeypatch):
+    """8 Nov 2026 (Ali, live-wiring build): REPLACES the old test_live_sell_is_mirrored, which
+    asserted the BUG this build fixed -- paper_ledger._sell()'s old pos.get("live") branch always
+    called pumpportal_exec.sell() (Solana/pump.fun-only) regardless of the position's actual
+    chain. Every position _open()'s own helper opens is on "solana" (see _open() above), and
+    Solana is explicitly data/pattern-ID only in this system -- there is no real Solana execution
+    path at all (Ali's explicit correction: "we are only trading Robinhood and Base"). The fixed
+    _sell() now checks pos["chain"] in ("robinhood_chain", "base") before ever touching a real
+    executor, so a live=True position on solana must call NEITHER pumpportal_exec.sell() NOR
+    swap_executor.execute_sell() -- this is the correct, intentional behavior, not a regression."""
+    pumpportal_calls = []
+    swap_calls = []
+    monkeypatch.setattr(pumpportal_exec, "sell", lambda m, pct: pumpportal_calls.append((m, round(pct))) or {"ok": True})
+    monkeypatch.setattr(swap_executor, "execute_sell", lambda chain, token, amount, reason: swap_calls.append((chain, token, amount)))
+    pos = _open(lane="core1", live=True)
+    pos["live_amount_tokens"] = 1000.0
+    pos["live_amount_tokens_original"] = 1000.0
+    paper_ledger.update_live_fields(pos)
     _run(10500, 1010)
-    assert calls == [("MINT1", 10), ("MINT1", 17)]
+    assert pumpportal_calls == [], "a live solana position must never call the Solana-only pump.fun sell path either -- there's no real position behind it"
+    assert swap_calls == [], "a live solana position must never reach the real RHC/Base sell path"
+
+
+def test_live_robinhood_chain_sell_is_mirrored(monkeypatch):
+    """8 Nov 2026 (Ali, live-wiring build): the CORRECT real-sell mirror, for the chains that
+    actually have a real buy/sell path (robinhood_chain/base) and the field (live_amount_tokens)
+    the real buy hook in multichain_sniper.act() actually sets. Mirrors
+    test_take_profits_then_trailing_stop's exact core1 ladder sequence (1.3x then 2x rungs firing
+    in the same cycle), but on robinhood_chain with live=True, confirming swap_executor.execute_sell
+    is called with the correct REAL token amount at each rung -- not a dead pumpportal_exec call."""
+    swap_calls = []
+    def _fake_execute_sell(chain, token, amount_tokens, reason):
+        swap_calls.append({"chain": chain, "token": token, "amount_tokens": round(amount_tokens, 4)})
+        class _R:
+            ok = True
+            filled_amount_tokens = amount_tokens
+        return _R()
+    monkeypatch.setattr(swap_executor, "execute_sell", _fake_execute_sell)
+    pos = paper_ledger.open_paper("robinhood_chain", "0xTOKEN", "early_core1", "early_core1", 20.0, 5000.0,
+                                  strategy="early", exit_profile="core1", now=1000.0,
+                                  live=True)
+    # live_amount_tokens_original is the FIXED base (set once, never mutated) that each rung's
+    # pct-of-original fraction multiplies against; live_amount_tokens tracks what's currently
+    # held and is what the real buy hook sets alongside it (see multichain_sniper.act()).
+    pos["live_amount_tokens"] = 1000.0
+    pos["live_amount_tokens_original"] = 1000.0
+    paper_ledger.update_live_fields(pos)  # persist both onto the stored position, same as the real buy hook does
+    # One tick to 2.1x fires both the 1.3x (10%) and 2x (15%) rungs in the same manage() cycle.
+    # Both rungs are a pct of the ORIGINAL 1000 tokens: 1.3x rung sells 10% = 100 tokens; 2x rung
+    # sells 15% = 150 tokens -- NOT 15% of what's left after the first sell (900), which would be
+    # a double-discount bug (confirmed caught in this exact test before this fix landed).
+    _run(10500, 1010)
+    assert swap_calls == [
+        {"chain": "robinhood_chain", "token": "0xTOKEN", "amount_tokens": 100.0},
+        {"chain": "robinhood_chain", "token": "0xTOKEN", "amount_tokens": 150.0},
+    ], f"unexpected real-sell calls: {swap_calls}"
 
 
 def test_daily_loss_cap(monkeypatch):

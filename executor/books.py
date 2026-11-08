@@ -376,6 +376,69 @@ PHASE1_CASCADE_MIN_BANKED_USD = 600.0   # fires once cumulative Phase-1 ladder b
 PHASE1_CASCADE_AMOUNT_USD = 300.0       # fixed amount peeled off and cascaded
 PHASE1_CASCADE_RECIPIENTS = ("sprint", "core1", "core2")
 
+# 8 Nov 2026 (Ali, live-wiring build): which books are allowed to fire REAL-money buys/sells
+# through executor.swap_executor, read fresh from the environment on every check (no restart
+# needed to re-arm/disarm -- same reasoning as EXECUTION_ENABLED itself being read live rather
+# than cached). Comma-separated book ids, e.g. "compound" or "compound,sprint,core1,core2".
+# Deliberately independent of EXECUTION_ENABLED/the per-chain key check in
+# executor.config.ready_for_chain() -- THIS only decides which BOOK is allowed to go live; the
+# chain-level gate still decides whether the wallet/key/kill-switch allow it at all. Both must
+# pass. An unknown/misspelled book id in this list is simply never armed (never raises) --
+# fails closed, consistent with every other gate in this file.
+LIVE_BOOKS_ENV = "LIVE_BOOKS"
+
+# Set to True automatically the instant the Phase-1 cascade fires (see
+# _maybe_fire_phase1_cascade below) -- Ali's explicit requirement (8 Nov 2026 AskUserQuestion):
+# "Auto-live, but notify you first with a pause window" + "No timeout -- stays paused until you
+# explicitly say go". This pause applies ONLY to sprint/core1/core2 (the cascade recipients) --
+# compound is not gated by this at all, since compound going live is controlled purely by
+# LIVE_BOOKS and isn't tied to the cascade firing. Cleared only by clear_cascade_live_pause()
+# below, which Ali must call himself (or ask for it to be called) once he's reviewed the
+# cascade and is ready -- nothing in this codebase clears it on its own.
+CASCADE_LIVE_PAUSE_KEY = "phase1_cascade_live_pause_v1"
+
+
+def _live_books_from_env() -> set:
+    raw = os.environ.get(LIVE_BOOKS_ENV, "").strip()
+    if not raw:
+        return set()
+    return {b.strip().lower() for b in raw.split(",") if b.strip()}
+
+
+def is_cascade_live_paused() -> bool:
+    """True once the Phase-1 cascade has fired and Ali has not yet explicitly cleared the
+    pause. Only meaningful for sprint/core1/core2 -- see CASCADE_LIVE_PAUSE_KEY's comment.
+    The stored record's own "paused" field is the single source of truth (not just "is there
+    a record at all"), since clear_cascade_live_pause() below replaces the SAME key with a
+    record that has paused=False rather than deleting it -- keeping one key with a clear
+    history is simpler than a delete-to-mean-cleared convention, and avoids ever treating a
+    missing key (e.g. before the cascade has fired at all) as anything other than not-paused."""
+    rec = state.get_value(CASCADE_LIVE_PAUSE_KEY)
+    return bool(isinstance(rec, dict) and rec.get("paused"))
+
+
+def clear_cascade_live_pause(reason: str = "manual_go") -> dict:
+    """The ONLY way the cascade live-pause is lifted -- must be called explicitly (by Ali, or
+    on his explicit instruction), never automatically and never on a timeout. Returns a record
+    of when/why it was cleared, for the audit trail."""
+    rec = {"paused": False, "cleared": True, "ts": time.time(), "reason": reason}
+    state.set_value(CASCADE_LIVE_PAUSE_KEY, rec)
+    return rec
+
+
+def is_live_armed(book_id: str) -> bool:
+    """True only if book_id is listed in LIVE_BOOKS AND (for sprint/core1/core2 specifically)
+    the cascade live-pause is not currently set. Does NOT check EXECUTION_ENABLED or the
+    chain's real key -- that is executor.config.ready_for_chain()'s job, checked separately
+    and additionally by the caller before any real buy/sell is attempted. Both gates must
+    pass; this function alone is never sufficient to fire a real trade."""
+    book_id = (book_id or "").lower()
+    if book_id not in _live_books_from_env():
+        return False
+    if book_id in PHASE1_CASCADE_RECIPIENTS and is_cascade_live_paused():
+        return False
+    return True
+
 # 7 Nov 2026 (Ali, revised): superseded the original 2-phase ($20k -> $117,500) structure with
 # a 5-phase target/cash-out ladder, each phase re-seeding the next from its own overshoot-aware
 # reseed floor (same "real overshoot kept, not forced down to a flat number" principle as
@@ -589,7 +652,19 @@ def _maybe_fire_phase1_cascade(now: float) -> Optional[dict]:
         return {CASHOUT_KEY: rec, DEPOSITS_KEY: dep, PHASE1_CASCADE_KEY: cascade_result}
 
     result = state.atomic_multi_fn([CASHOUT_KEY, DEPOSITS_KEY, PHASE1_CASCADE_KEY], _apply)
-    return result[PHASE1_CASCADE_KEY]
+    fired_now = result[PHASE1_CASCADE_KEY]
+    # 8 Nov 2026 (Ali, live-wiring build): the moment the cascade genuinely fires for the first
+    # time (not a repeat call hitting the already-fired guard above), auto-set the live-pause
+    # for sprint/core1/core2 -- this is the "notify, then pause with no timeout" gate Ali asked
+    # for. Only set it if this call is the one that actually fired it (fired_now.get("fired")
+    # and fired_now.get("ts") == now), so a later, unrelated call to this function (which will
+    # just return the stored guard record every time after the first fire) never re-arms an
+    # already-cleared pause.
+    if isinstance(fired_now, dict) and fired_now.get("fired") and fired_now.get("ts") == now:
+        if not isinstance(state.get_value(CASCADE_LIVE_PAUSE_KEY), dict):
+            state.set_value(CASCADE_LIVE_PAUSE_KEY, {"paused": True, "ts": now,
+                                                      "reason": "phase1_cascade_fired_8nov2026"})
+    return fired_now
 
 
 def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
