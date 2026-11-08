@@ -524,18 +524,25 @@ def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, 
 
 
 def _phase1_cumulative_banked() -> float:
-    """Sum of every Phase-1 ladder rung's banked amount recorded so far (the real `amount` field
-    inside each milestone_p1_* CASHOUT_KEY entry), i.e. the running total Ali refers to as
-    '$600, $700 plus' by the time the $2,500 rung fires. Reads MILESTONE_LADDER_KEY's own fired
-    records rather than re-deriving from CASHOUT_KEY directly, since CASHOUT_KEY mixes Phase-1
-    ladder banking with every other cashout source (check_cashout, check_compound_split, the
-    phase cash-out itself) -- this stays scoped to exactly the Phase 1 ladder rungs."""
+    """Sum of every Phase-1 ladder rung's banked amount recorded so far. 8 Nov 2026 fix (caught
+    live right after deploy): the live state carries a genuine orphaned record, 'p1_240', left
+    over from an OLDER ladder version that predates the 7 Nov 2026 5-phase PHASE_DEFS revision --
+    same shape as a real rung but its level (240.0) is not in the CURRENT PHASE_DEFS[1]['ladder']
+    (250, 600, 1200, 2500, 5000, 8000). A naive shape-based filter silently summed it in anyway
+    ($40 extra), which would have corrupted the cascade trigger. Scoped now to exactly the levels
+    PHASE_DEFS[1] defines."""
     done = state.get_value(MILESTONE_LADDER_KEY)
     done = done if isinstance(done, dict) else {}
+    real_levels = {float(level) for level, _pct in PHASE_DEFS[1]["ladder"]}
     total = 0.0
     for key, rec in done.items():
-        if isinstance(rec, dict) and rec.get("phase") == 1 and "level" in rec and "banked_total" in rec:
-            total += float(rec.get("banked_total") or 0.0)
+        if not isinstance(rec, dict) or rec.get("phase") != 1:
+            continue
+        if "level" not in rec or "banked_total" not in rec:
+            continue
+        if float(rec["level"]) not in real_levels:
+            continue
+        total += float(rec.get("banked_total") or 0.0)
     return round(total, 2)
 
 

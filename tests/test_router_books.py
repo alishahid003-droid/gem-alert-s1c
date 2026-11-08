@@ -192,6 +192,19 @@ def test_bust_reseeds_book_and_counts(monkeypatch):
     store = {}
     monkeypatch.setattr(books.state, "get_value", lambda k, d=None: store.get(k, d))
     monkeypatch.setattr(books.state, "set_value", lambda k, v: store.__setitem__(k, v))
+    # 8 Nov 2026 fix: check_bust()/check_cashout() etc. write through state.atomic_multi_fn, not
+    # state.get_value/set_value directly -- without patching this too, those calls fell through
+    # to the REAL local-file backend (invisible to this test's in-memory `store`), so a bust that
+    # genuinely fired was never visible to this test's own books.busts()/total_value() calls,
+    # which correctly read from the patched `store`. This was a test-isolation bug only -- in real
+    # production both paths go through the same real backend, so this mismatch never happens live.
+    def _fake_atomic_multi_fn(keys, fn, _store=store):
+        cur = {k: _store.get(k) for k in keys}
+        new_vals = fn(cur)
+        for k, v in new_vals.items():
+            _store[k] = v
+        return new_vals
+    monkeypatch.setattr(books.state, "atomic_multi_fn", _fake_atomic_multi_fn)
     assert books.total_value("sprint") == 5.0
     ok, why = books.can_open("sprint")
     assert len(books.busts("sprint")) == 1
@@ -208,6 +221,19 @@ def test_bust_waits_for_fresh_open_position_but_not_forever(monkeypatch):
     store = {}
     monkeypatch.setattr(books.state, "get_value", lambda k, d=None: store.get(k, d))
     monkeypatch.setattr(books.state, "set_value", lambda k, v: store.__setitem__(k, v))
+    # 8 Nov 2026 fix: check_bust()/check_cashout() etc. write through state.atomic_multi_fn, not
+    # state.get_value/set_value directly -- without patching this too, those calls fell through
+    # to the REAL local-file backend (invisible to this test's in-memory `store`), so a bust that
+    # genuinely fired was never visible to this test's own books.busts()/total_value() calls,
+    # which correctly read from the patched `store`. This was a test-isolation bug only -- in real
+    # production both paths go through the same real backend, so this mismatch never happens live.
+    def _fake_atomic_multi_fn(keys, fn, _store=store):
+        cur = {k: _store.get(k) for k in keys}
+        new_vals = fn(cur)
+        for k, v in new_vals.items():
+            _store[k] = v
+        return new_vals
+    monkeypatch.setattr(books.state, "atomic_multi_fn", _fake_atomic_multi_fn)
     now = 100_000.0
 
     # Fresh open position (5 minutes old): bust-reseed should still wait, as before.
@@ -237,6 +263,19 @@ def test_bust_offset_uses_latest_snapshot_not_sum(monkeypatch):
     store = {}
     monkeypatch.setattr(books.state, "get_value", lambda k, d=None: store.get(k, d))
     monkeypatch.setattr(books.state, "set_value", lambda k, v: store.__setitem__(k, v))
+    # 8 Nov 2026 fix: check_bust()/check_cashout() etc. write through state.atomic_multi_fn, not
+    # state.get_value/set_value directly -- without patching this too, those calls fell through
+    # to the REAL local-file backend (invisible to this test's in-memory `store`), so a bust that
+    # genuinely fired was never visible to this test's own books.busts()/total_value() calls,
+    # which correctly read from the patched `store`. This was a test-isolation bug only -- in real
+    # production both paths go through the same real backend, so this mismatch never happens live.
+    def _fake_atomic_multi_fn(keys, fn, _store=store):
+        cur = {k: _store.get(k) for k in keys}
+        new_vals = fn(cur)
+        for k, v in new_vals.items():
+            _store[k] = v
+        return new_vals
+    monkeypatch.setattr(books.state, "atomic_multi_fn", _fake_atomic_multi_fn)
 
     rows = [{"pnl_usd": -95.0}]
     monkeypatch.setattr(books, "_rows", lambda b: rows)
