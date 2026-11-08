@@ -362,6 +362,20 @@ def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
 # not just the first.
 MILESTONE_LADDER_KEY = "milestone_ladder_v2"
 
+# 8 Nov 2026 (Ali, Phase-1-ladder cascade): once the Phase 1 ladder has cumulatively banked
+# roughly $600-700 on the way up (the real rung at combined-equity=$2,500 banks 18% = $450,
+# bringing the running total to $727 -- the first rung that clears Ali's stated "$600, $700
+# plus" threshold), peel off a FIXED $300 from that banked total and credit it as fresh
+# deposited-in seed money to sprint/core1/core2 ($100 each), via the same deposits()/
+# DEPOSITS_KEY mechanism check_compound_split() already uses for its $200 split. Fires EXACTLY
+# ONCE across the whole system's lifetime (guarded by PHASE1_CASCADE_KEY), regardless of how
+# much more gets banked later in Phase 1-5 -- Ali's exact words: "only the first one can be
+# given to them... remaining bank amount do not need to move it over there."
+PHASE1_CASCADE_KEY = "phase1_ladder_cascade_v1"
+PHASE1_CASCADE_MIN_BANKED_USD = 600.0   # fires once cumulative Phase-1 ladder banking clears this
+PHASE1_CASCADE_AMOUNT_USD = 300.0       # fixed amount peeled off and cascaded
+PHASE1_CASCADE_RECIPIENTS = ("sprint", "core1", "core2")
+
 # 7 Nov 2026 (Ali, revised): superseded the original 2-phase ($20k -> $117,500) structure with
 # a 5-phase target/cash-out ladder, each phase re-seeding the next from its own overshoot-aware
 # reseed floor (same "real overshoot kept, not forced down to a flat number" principle as
@@ -509,6 +523,68 @@ def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, 
             "combined_equity_after": _combined_equity_for_milestones()}
 
 
+def _phase1_cumulative_banked() -> float:
+    """Sum of every Phase-1 ladder rung's banked amount recorded so far (the real `amount` field
+    inside each milestone_p1_* CASHOUT_KEY entry), i.e. the running total Ali refers to as
+    '$600, $700 plus' by the time the $2,500 rung fires. Reads MILESTONE_LADDER_KEY's own fired
+    records rather than re-deriving from CASHOUT_KEY directly, since CASHOUT_KEY mixes Phase-1
+    ladder banking with every other cashout source (check_cashout, check_compound_split, the
+    phase cash-out itself) -- this stays scoped to exactly the Phase 1 ladder rungs."""
+    done = state.get_value(MILESTONE_LADDER_KEY)
+    done = done if isinstance(done, dict) else {}
+    total = 0.0
+    for key, rec in done.items():
+        if isinstance(rec, dict) and rec.get("phase") == 1 and "level" in rec and "banked_total" in rec:
+            total += float(rec.get("banked_total") or 0.0)
+    return round(total, 2)
+
+
+def _maybe_fire_phase1_cascade(now: float) -> Optional[dict]:
+    """8 Nov 2026 (Ali): one-time-only. See PHASE1_CASCADE_KEY's docstring above for the full
+    spec. Mirrors check_compound_split()'s atomic CASHOUT_KEY+DEPOSITS_KEY+guard pattern exactly
+    so this can never double-fire or half-apply under concurrent calls."""
+    guard = state.get_value(PHASE1_CASCADE_KEY)
+    if isinstance(guard, dict) and guard.get("fired"):
+        return None
+    if _phase1_cumulative_banked() < PHASE1_CASCADE_MIN_BANKED_USD:
+        return None
+
+    share = round(PHASE1_CASCADE_AMOUNT_USD / len(PHASE1_CASCADE_RECIPIENTS), 2)
+    shares = {b: share for b in PHASE1_CASCADE_RECIPIENTS}
+    leftover = round(PHASE1_CASCADE_AMOUNT_USD - sum(shares.values()), 2)
+    if leftover:
+        shares[PHASE1_CASCADE_RECIPIENTS[0]] = round(shares[PHASE1_CASCADE_RECIPIENTS[0]] + leftover, 2)
+
+    def _apply(cur, _now=now, _shares=shares):
+        done_guard = cur.get(PHASE1_CASCADE_KEY)
+        if isinstance(done_guard, dict) and done_guard.get("fired"):
+            return {CASHOUT_KEY: cur.get(CASHOUT_KEY), DEPOSITS_KEY: cur.get(DEPOSITS_KEY),
+                    PHASE1_CASCADE_KEY: done_guard}
+        rec = cur.get(CASHOUT_KEY)
+        rec = dict(rec) if isinstance(rec, dict) else {}
+        # 8 Nov 2026 fix (caught in sandboxed test before going live): the $300 must come OUT of
+        # compound alone -- compound is the book whose own Phase-1 ladder banking produced this
+        # money in the first place. Pulling it proportionally across all 4 books (the first draft
+        # of this patch) double-counted: sprint/core1/core2 would lose their own cashout AND gain
+        # the deposit at the same time, inflating their net equity by more than the intended $100
+        # each (confirmed in sandbox: sprint/core1/core2 gained $50-75 extra beyond the clean
+        # $100). Single-book deduction keeps this a clean transfer: compound -$300, recipients
+        # +$100 each, net zero across the whole system.
+        rec["compound"] = list(rec.get("compound") or []) + [
+            {"ts": _now, "amount": PHASE1_CASCADE_AMOUNT_USD, "reason": "phase1_ladder_cascade_8nov2026"}]
+        dep = cur.get(DEPOSITS_KEY)
+        dep = dict(dep) if isinstance(dep, dict) else {}
+        for _book_id, _amount in _shares.items():
+            dep[_book_id] = list(dep.get(_book_id) or []) + [
+                {"ts": _now, "amount": _amount, "reason": "phase1_ladder_cascade_8nov2026"}]
+        cascade_result = {"ts": _now, "fired": True, "cascaded_usd": PHASE1_CASCADE_AMOUNT_USD,
+                           "shares": _shares}
+        return {CASHOUT_KEY: rec, DEPOSITS_KEY: dep, PHASE1_CASCADE_KEY: cascade_result}
+
+    result = state.atomic_multi_fn([CASHOUT_KEY, DEPOSITS_KEY, PHASE1_CASCADE_KEY], _apply)
+    return result[PHASE1_CASCADE_KEY]
+
+
 def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
     """Call once per cycle (can_open() wires this in, same as check_compound_split()).
 
@@ -582,6 +658,8 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
             result = {"ts": now, "phase": phase, "level": level, "pct": pct, **bank}
             done[key] = result
             state.set_value(MILESTONE_LADDER_KEY, done)
+            if phase == 1:
+                _maybe_fire_phase1_cascade(now)
             return result
 
         return None
@@ -1002,7 +1080,46 @@ def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional
     # correctly" relative to the wrong number). This ceiling is pinned to the book's actual SEED, not
     # its current (possibly wrong) equity, so no future bug anywhere upstream of this line can ever
     # again produce a single stake many times the book's real size.
-    hard_cap = _f(f"{book_id.upper()}_MAX_STAKE_USD", None) or c["seed"] * _f("MAX_STAKE_SEED_MULT", 3.0)
+    # 8 Nov 2026 (Ali, "Curve C"): compound's absolute hard_cap used to be a FLAT seed*3.0 ($300)
+    # regardless of how big compound's equity grew -- fine near $100-300 equity, but once equity
+    # climbs into the thousands a flat $300 either strangles growth (if share-based sizing above
+    # already wanted less) or, more importantly, a flat equity-SHARE with no taper (50% of a
+    # $30,000 equity = $15,000 on one trade) becomes genuinely dangerous. Backtested tonight
+    # against compound's real 31-trade live history (Robinhood+Base, 61.3% win rate, real -99.1%
+    # tail loss included via bootstrap): a taper that steps DOWN as equity grows survives 99.6%+
+    # of simulated runs through Phase 1-4 while reaching every phase target faster than the old
+    # flat-$300 model (which effectively made Phase 5 unreachable). Three candidate curves (A/B/C)
+    # were compared; Ali picked Curve C for best combination of speed to Phase 1-4 and
+    # survivability (Curve A: 14.3 cumulative days to Phase 4, 0.3% bust rate; Curve C: 10.3
+    # days, 0.4% bust rate -- the two are statistically indistinguishable on safety, C is
+    # meaningfully faster). compound ONLY -- sprint/core1/core2 keep their own separate
+    # TIER_MAX_SHARE/hard_cap path in tier_stake_usd() below, completely untouched by this.
+    if book_id == "compound":
+        _CURVE_C_BANDS = (
+            (0.0,        600.0,     0.50),
+            (600.0,      10_000.0,  0.35),
+            (10_000.0,   100_000.0, 0.20),
+            (100_000.0,  500_000.0, 0.10),
+            (500_000.0,  float("inf"), 0.05),
+        )
+        _curve_c_pct = _CURVE_C_BANDS[-1][2]
+        for _lo, _hi, _pct in _CURVE_C_BANDS:
+            if _lo <= eq < _hi:
+                _curve_c_pct = _pct
+                break
+        # 8 Nov 2026 (Ali, final): Curve C's whole purpose is that ITS OWN banded percentage is
+        # the risk control -- as equity grows, the % of equity risked on one trade comes DOWN
+        # (50% -> 35% -> 20% -> 10% -> 5%), which is what keeps one trade from ever being an
+        # oversized bite of a large account (Ali's exact concern: a flat 50% on $60,000 equity
+        # would open a $30,000 position -- Curve C's real 10% band at that equity instead caps
+        # it at $6,000). No separate absolute-dollar ceiling belongs on top of this -- layering
+        # one back in (either a flat $300 or a phase-anchored figure, both tried and rejected
+        # tonight) either kills the curve's whole purpose above ~$860 equity or reintroduces a
+        # workaround Ali explicitly didn't ask for. The banded percentage itself, applied to the
+        # real eq at call time, IS the hard_cap.
+        hard_cap = _f("COMPOUND_MAX_STAKE_USD", None) or max(5.0, eq * _curve_c_pct)
+    else:
+        hard_cap = _f(f"{book_id.upper()}_MAX_STAKE_USD", None) or c["seed"] * _f("MAX_STAKE_SEED_MULT", 3.0)
     out = min(out, hard_cap)
     return round(max(0.0, out), 2) if out >= 5.0 else 0.0
 

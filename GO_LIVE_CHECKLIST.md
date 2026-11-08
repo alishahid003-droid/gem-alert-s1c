@@ -1827,3 +1827,38 @@ taskkill /F /IM python.exe
 tasklist | findstr python     (confirm empty -- no stray python.exe left)
 start_local_mode.bat
 ```
+
+## 8 Nov 2026 (CORRECTED) -- Phase 1-4 timeline, Curve A vs Curve C, real compound-only data
+
+**Important correction to this file's 8 Nov FINAL simulation table above**: that table used win-rate/magnitude figures that did not reflect (a) the real $300 absolute `hard_cap` in live `stake_usd()`, and in a later same-night re-check, a data-blending bug briefly mixed in a separate, not-yet-live `solana_compound` leg (5.5% win rate) with the real live `compound` module (Robinhood+Base chains, 61.3% win rate), producing a corrupted 25.6% blended win rate and a false "100% bust" result. That blended number was WRONG and should not be used. This section replaces it with the corrected, verified numbers below.
+
+**Corrected real data used (compound module, Robinhood + Base chains ONLY, Solana leg excluded as it is not live):**
+- n = 31 closed trades (as of 8 Nov 2026, ~08:58 UTC)
+- Real win rate: **61.3%** (Robinhood: 18 trades/55.6%, Base: 13 trades/69.2%)
+- Real current trade pace: **~19 trades/day** (measured over the 1.63-day span of this sample)
+- Real trade-level pnl% distribution resampled directly (bootstrap), not separated into independent win-rate/magnitude dials -- includes the real tail risk (one trade at -99.1%)
+- Stake sizing: real Curve A and Curve C banded equity-share functions (no aggressive/high variant -- Ali explicitly rejected widening the early-equity band)
+- `PHASE_DEFS` triggers/reseeds used: Phase1 10k/1.5k reseed, Phase2 12k/2k, Phase3 12k/2k, Phase4 120k/5k (Phase 5 not included in this run per Ali's request -- not a near-term concern)
+
+**Phase 1-4 results (median of 1500 simulated runs per curve, starting from $100 compound-only):**
+
+| | Trades | Days | Cumulative trades | Cumulative days |
+|---|---|---|---|---|
+| **CURVE A** (50%/30%/15%/8%/4% bands) | | | | |
+| Phase 1 | 71 | 3.7 | 71 | 3.7 |
+| Phase 2 | 41 | 2.2 | 112 | 5.9 |
+| Phase 3 | 37 | 1.9 | 149 | 7.8 |
+| Phase 4 | 123 | 6.5 | 272 | **14.3** |
+| **CURVE C** (50%/35%/20%/10%/5% bands) | | | | |
+| Phase 1 | 61 | 3.2 | 61 | 3.2 |
+| Phase 2 | 30 | 1.6 | 91 | 4.8 |
+| Phase 3 | 25 | 1.3 | 116 | 6.1 |
+| Phase 4 | 79 | 4.2 | 195 | **10.3** |
+
+Survivability: Curve A busted (hit near-zero equity) in 5/1500 runs (0.3%); Curve C in 6/1500 (0.4%). Both are solid at the real 61.3% win rate.
+
+**Recommendation**: Curve C is faster through every phase (10.3 days cumulative through Phase 4 vs 14.3 for Curve A) at effectively the same survivability. Ali's priority is Phase 1+2 speed (debt-plan pressure window) -- both curves land Phase 1 alone inside the 2-4 day target (3.2-3.7 days); Phase 1+2 combined lands just outside it (4.8-5.9 days). Curve C recommended as the pick; Curve A as the more conservative fallback if Ali wants extra margin once equity is larger (Phase 3+).
+
+**Not yet built**: Ali proposed funding compound only with $100, running it to Phase 5 on Curve A/C, then cascading each phase's banked amount into sprint/core1/core2 funding rather than letting it sit idle. This is a new funding-routing feature, not present in current `PHASE_DEFS`/reseed logic (which currently just reseeds the same book and banks the rest). Not built yet -- awaiting Ali's go-ahead since it touches book funding logic.
+
+**Lesson logged**: the "25.6% win rate / 100% bust" scare earlier this same session was caused by filtering on `'compound' in module` (substring match), which silently included the separate `solana_compound` module (55 trades, 5.5% win rate, not live). Exact-match filtering (`module == 'compound'`, chain in robinhood_chain/base) is the correct scope for all live compound reporting going forward.

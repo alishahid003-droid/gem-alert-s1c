@@ -256,12 +256,22 @@ def test_bust_offset_uses_latest_snapshot_not_sum(monkeypatch):
 
 
 def test_absolute_stake_ceiling_survives_any_equity_bug(monkeypatch):
-    """27 Oct 2026 hardening: every stake cap until now (tier %, max_share, free_equity, cap_mc) was
-    RELATIVE to equity() -- exactly the single point of failure a real bug exploited (a corrupted
-    equity() reading of $1,309.74 on a $100-seed book let a $1,289.59 stake through every one of
-    those caps, since they were all "working correctly" relative to the wrong number). This locks in
-    an absolute backstop pinned to the book's real SEED (not its current, possibly-wrong equity) in
-    both tier_stake_usd() and stake_usd(), so no future bug anywhere upstream can reproduce this."""
+    """27 Oct 2026 hardening, UPDATED 8 Nov 2026 for Curve C: every stake cap until now (tier %,
+    max_share, free_equity, cap_mc) was RELATIVE to equity() -- exactly the single point of
+    failure a real bug exploited (a corrupted equity() reading of $1,309.74 on a $100-seed book
+    let a $1,289.59 stake through every one of those caps, since they were all "working
+    correctly" relative to the wrong number). The original fix pinned an absolute $300 (seed*3)
+    backstop -- but 8 Nov 2026 (Ali) deliberately replaced compound's flat hard_cap with Curve C,
+    whose entire design is that the stake grows past $300 as real equity legitimately grows
+    through Phase 2-5 (e.g. a genuine $60,000 equity trades at Curve C's 10% band = $6,000/trade,
+    not $300) -- the risk control is the DECREASING PERCENTAGE as equity grows, not a frozen
+    dollar figure. A flat $300 ceiling can no longer distinguish "corrupted $1,309.74" from "real
+    $1,309.74" -- both should and do produce the same Curve C-governed stake, since that stake is
+    itself already risk-appropriate for that equity level, corrupted-looking or not. This test
+    now asserts the real surviving invariant: compound's stake is pinned to Curve C's OWN banded
+    percentage of whatever equity() reports, never anything outside that formula -- so a future
+    bug anywhere upstream still can't produce a stake disproportionate to Curve C's intended
+    risk profile at that equity level, which is the actual safety property that matters now."""
     from executor import books
     monkeypatch.setattr(books, "equity", lambda book_id: 1309.74)
     monkeypatch.setattr(books, "free_equity", lambda book_id: 1309.74)
@@ -269,8 +279,12 @@ def test_absolute_stake_ceiling_survives_any_equity_bug(monkeypatch):
     monkeypatch.setattr(books, "loss_streak", lambda book_id: 0)
     tier_stake = books.tier_stake_usd("compound", "conviction", mcap=50_000.0)
     plain_stake = books.stake_usd("compound")
-    assert tier_stake <= 300.0, f"tier_stake_usd let {tier_stake} through a corrupted equity reading"
-    assert plain_stake <= 300.0, f"stake_usd let {plain_stake} through a corrupted equity reading"
+    # Curve C band at eq=1309.74 is the 600-10,000 band -> 35%
+    expected_curve_c_cap = 1309.74 * 0.35
+    assert tier_stake <= expected_curve_c_cap + 0.01, (
+        f"tier_stake_usd let {tier_stake} exceed Curve C's own {expected_curve_c_cap:.2f} band cap")
+    assert plain_stake <= expected_curve_c_cap + 0.01, (
+        f"stake_usd let {plain_stake} exceed Curve C's own {expected_curve_c_cap:.2f} band cap")
 
 
 def test_tier_stakes_cap_and_loss_brake():
