@@ -396,13 +396,25 @@ class Scanner:
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
                     "lanes": ["core1"], "lane": "core1", "potential": "momentum",
                     "tier": "standard" if len(conf) >= 5 else "probe", "raw": raw_snapshot}
-        lanes = ["core1"]
-        if len(conf) >= 4 and age_min <= 15:
+        # 8 Nov 2026 (Ali, backtest-confirmed): real closed-trade history showed sprint/core1/
+        # core2 letting in entries at as few as 3 confirmations (core1) or 4 (sprint/core2), and
+        # those low-confirmation entries were a real, measured drag -- backtesting a 5+
+        # confirmation floor against the real 35-trade sprint/core1/core2 history recovered
+        # +$60.27 on its own (net -$306.75 vs the real -$367.03), and +$239.51 combined with the
+        # cross-book exposure cap in books.stake_usd() (net -$127.52). compound is untouched --
+        # its own entry path below (the `if len(conf) >= 3 and "compound" not in lanes` line)
+        # keeps its existing 3+ floor, since compound already has a separately-proven positive
+        # edge and was not part of what this backtest fixed.
+        EARLY_LANES_MIN_CONF = int(_f("EARLY_LANES_MIN_CONF", 5))
+        lanes = ["core1"] if len(conf) >= EARLY_LANES_MIN_CONF else []
+        if len(conf) >= max(4, EARLY_LANES_MIN_CONF) and age_min <= 15:
             lanes.append("core2")
             if age_min <= 10:
                 lanes.append("sprint")
         if len(conf) >= 3 and "compound" not in lanes:
             lanes.append("compound")
+        if not lanes:
+            return None
         return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                 "liq": liq, "age_min": round(age_min, 1), "confirmations": conf, "lanes": lanes, "lane": lanes[0],
                 "potential": "100x+" if "core2" in lanes else "10x-50x", "tier": tier_of(conf), "raw": raw_snapshot}
@@ -461,7 +473,12 @@ def act(d: dict, now: Optional[float] = None) -> dict:
         # for the real incident -- a $90.34 compound stake lost 43.6% to pure slippage/impact
         # on a coin that never even moved). No-op for sprint/core1/core2, which size through
         # tier_stake_usd()'s own mcap-fraction cap already.
-        stake = books.tier_stake_usd(lane, tier, d.get("mcap"), liquidity_usd=d.get("liq")) if can else 0.0
+        # 8 Nov 2026 (Ali, fix #2 backtest-confirmed): pass chain/addr through so the cross-book
+        # exposure cap in books.tier_stake_usd() can actually see which coin this is and cap
+        # sprint/core1/core2's stake when another of those 3 books already has capital on the
+        # same coin. No-op for compound (books.EXPOSURE_CAP_BOOKS deliberately excludes it).
+        stake = books.tier_stake_usd(lane, tier, d.get("mcap"), liquidity_usd=d.get("liq"),
+                                      chain=d["chain"], addr=d["addr"]) if can else 0.0
         # 31 Oct 2026 (Ali): removed robinhood_chain from this Oct-13-evidence downweight.
         # That 0.6x was based on a 5-trade, 0-win sample from BEFORE the 28 Oct fix to
         # layer14_revival's dead-on-arrival handling (robinhood_chain's actual problem back

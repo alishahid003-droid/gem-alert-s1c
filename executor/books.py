@@ -890,7 +890,8 @@ def effective_max_share(book_id: str, now: Optional[float] = None) -> float:
     return round(base_share * (1.0 + behind), 4)    # up to 2x base_share
 
 
-def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional[float] = None) -> float:
+def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional[float] = None,
+              already_committed_usd: Optional[float] = None) -> float:
     """Pace-aware stake for the next entry in this book.
     base = shot_pct of equity, lifted to the fee floor; behind the target path
     by >25% -> x1.25, ahead by >50% -> x0.8 (bank the lead); capped at the book's EFFECTIVE
@@ -964,6 +965,23 @@ def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional
     if liquidity_usd and liquidity_usd > 0:
         liq_cap = liquidity_usd * _f("LIQUIDITY_STAKE_CAP_RATIO", 0.02)
         out = min(out, liq_cap)
+    # 8 Nov 2026 (Ali, backtest-confirmed): cross-book exposure cap for sprint/core1/core2 ONLY
+    # (compound explicitly excluded -- real data showed compound shares coin exposure with
+    # these 3 books in 14 historical cases and often wins big exactly where they lose, e.g. one
+    # coin: compound +$100.38 while core2 only made +$1.25 on the identical pick, so capping
+    # compound's own stake on a shared coin would cut into its separately-proven edge). Real
+    # closed-trade audit found 31% of sprint/core1/core2's 35 real trades (11 of 35) were the
+    # SAME coin hit by 2-3 of these 3 books at once, tripling the damage of one bad pick.
+    # Chronologically backtested (entry-order-aware: whichever book enters a shared coin FIRST
+    # gets exposure room, later entrants get trimmed or refused) against the real 35-trade
+    # history: recovered +$180.58 on its own (net -$186.45 vs real -$367.03), +$239.51 combined
+    # with the 5+ confirmation floor in multichain_sniper.py's lane routing (net -$127.52).
+    # already_committed_usd=None (every caller except multichain_sniper.py's act(), and act()
+    # itself for compound) is a complete no-op -- this never changes behavior unless a caller
+    # explicitly opts in by passing it, same pattern as the liquidity cap directly above.
+    if book_id in ("sprint", "core1", "core2") and already_committed_usd is not None:
+        cap_room = max(0.0, _f("CROSS_BOOK_EXPOSURE_CAP_USD", 40.0) - already_committed_usd)
+        out = min(out, cap_room)
     # 27 Oct 2026: absolute backstop, independent of the equity math above. Every cap until now was
     # RELATIVE to equity() -- exactly the single point of failure a now-fixed accounting bug exploited
     # (a phantom equity reading let a single $100-seed book size a $1,289 stake, all caps "working
@@ -1005,15 +1023,41 @@ def tier_after_brake(tier: str, book_id: str) -> str:
     return TIER_ORDER[max(0, i - loss_streak(book_id) // 3)]
 
 
+EXPOSURE_CAP_BOOKS = ("sprint", "core1", "core2")  # compound deliberately excluded, see below
+
+
+def _exposure_committed_for_coin(book_id: str, chain: Optional[str], addr: Optional[str]) -> Optional[float]:
+    """8 Nov 2026 (Ali, fix #2 backtest-confirmed): cross-book exposure cap for sprint/core1/core2
+    ONLY (compound explicitly excluded -- real data showed compound shares coin exposure with
+    these 3 books in 14 historical cases and often wins big exactly where they lose, e.g. one real
+    coin: compound +$100.38 while core2 only made +$1.25 on the identical pick, so capping
+    compound's own stake on a shared coin would cut into its separately-proven edge). Real
+    closed-trade audit found 31% of sprint/core1/core2's 35 real trades (11 of 35) were the SAME
+    coin hit by 2-3 of these 3 books at once, tripling the damage of one bad pick. Chronologically
+    backtested (entry-order-aware: whichever book enters a shared coin FIRST gets exposure room,
+    later entrants get trimmed or refused) against the real 35-trade history: recovered +$180.58
+    on its own (net -$186.45 vs real -$367.03), +$239.51 combined with the 5+ confirmation floor
+    in multichain_sniper.py's lane routing (net -$127.52). Returns None (no-op, caller must not
+    cap) when book_id/chain/addr don't make this applicable -- same opt-in-only pattern as the
+    liquidity cap in stake_usd()."""
+    if book_id not in EXPOSURE_CAP_BOOKS or not chain or not addr:
+        return None
+    from executor import paper_ledger
+    by_book = paper_ledger.committed_usd_by_book_for_coin(chain, addr)
+    return round(sum(v for b, v in by_book.items() if b in EXPOSURE_CAP_BOOKS), 2)
+
+
 def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: Optional[float] = None,
-                    liquidity_usd: Optional[float] = None) -> float:
+                    liquidity_usd: Optional[float] = None, chain: Optional[str] = None,
+                    addr: Optional[str] = None) -> float:
     c = cfg(book_id)
     eq = equity(book_id)
     if eq < 5.0 or c["kind"] != "moonshot" or book_id not in TIER_BOOK_SCALE:
         # 7 Nov 2026 (Ali): compound (kind="daily", not in TIER_BOOK_SCALE) always falls through
         # to here -- pass liquidity_usd through so stake_usd()'s liquidity cap actually reaches
         # compound's real entry path (multichain_sniper.py's act()), not just a theoretical arg.
-        return stake_usd(book_id, now, liquidity_usd=liquidity_usd)
+        return stake_usd(book_id, now, liquidity_usd=liquidity_usd,
+                          already_committed_usd=_exposure_committed_for_coin(book_id, chain, addr))
     tier = tier_after_brake(tier, book_id)
     base = eq * TIER_PCT[tier] * TIER_BOOK_SCALE[book_id]
     r = pace(book_id, now).get("ratio_to_path")
@@ -1035,6 +1079,10 @@ def tier_stake_usd(book_id: str, tier: str, mcap: Optional[float] = None, now: O
     # equity() and all of them "passed" because equity() itself was wrong.
     hard_cap = _f(f"{book_id.upper()}_MAX_STAKE_USD", None) or c["seed"] * _f("MAX_STAKE_SEED_MULT", 3.0)
     out = min(out, hard_cap)
+    already_committed = _exposure_committed_for_coin(book_id, chain, addr)
+    if already_committed is not None:
+        cap_room = max(0.0, _f("CROSS_BOOK_EXPOSURE_CAP_USD", 40.0) - already_committed)
+        out = min(out, cap_room)
     return round(out, 2) if out >= 5.0 else 0.0
 
 
@@ -1075,8 +1123,21 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
     extra = int(_f("BOOK_STRONG_EXTRA_SLOTS", 2) or 0) if strong else 0
     n_open = open_count(book_id, chain=chain)
     need_cash = free_equity(book_id) < 5.0
-    if n_open >= limit + extra or (need_cash and strong):
-        if strong and _try_swap(book_id):
+    # 8 Nov 2026 (Ali, backtest-confirmed): compound-ONLY widening of the swap-out trigger beyond
+    # strong-only. Real log audit (sampled window) found 91 entry refusals for compound tracing to
+    # 67 distinct missed coins, almost all blocked by capital being stuck in stale, already-flat
+    # positions rather than by a genuinely full strong-signal book. compound's own real post-fix
+    # (liquidity cap, commit ec8abf2) expectancy is +55.4%/trade at an avg stake of $128.47, so a
+    # refused entry on compound is a real, measured cost -- unlike sprint/core1/core2, which have
+    # no separately-proven positive edge yet and are deliberately left on the original strong-only
+    # gate (widening their swap-out before fixes #2/#3 are proven live risks locking in more
+    # capital behind a currently-negative edge). COMPOUND_SWAP_ALLOW_WEAK=True (default) lets
+    # compound try a swap purely on cash pressure (need_cash), with no confirmations floor,
+    # capped to the same one-swap-per-5-minutes pace as every other book via _try_swap() itself.
+    compound_widened_swap = (book_id == "compound" and need_cash
+                              and _f("COMPOUND_SWAP_ALLOW_WEAK", 1.0))
+    if n_open >= limit + extra or (need_cash and strong) or compound_widened_swap:
+        if (strong or compound_widened_swap) and _try_swap(book_id):
             n_open, need_cash = open_count(book_id, chain=chain), free_equity(book_id) < 5.0
         if n_open >= limit + extra:
             chain_note = f" [{chain}]" if chain else ""

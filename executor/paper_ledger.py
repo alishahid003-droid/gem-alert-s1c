@@ -770,6 +770,26 @@ def module_open_cost(module_id: str) -> float:
                for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
 
 
+def committed_usd_by_book_for_coin(chain: str, addr: str) -> dict:
+    """8 Nov 2026 (Ali, fix #2 backtest-confirmed): per-coin committed USD broken down by book, for
+    the cross-book exposure cap in books.tier_stake_usd()/stake_usd(). Real audit found 11 of 35
+    sprint/core1/core2 real closed trades (31%) were the SAME coin hit by 2-3 of those 3 books at
+    once, tripling the damage of one bad pick. Only strategy!="runner" positions count (matches
+    module_open_cost's own exclusion) -- a runner split-off is risk already counted once under its
+    parent entry. compound is deliberately NOT excluded here (this just reports real committed $
+    per book for a coin); the CALLER (tier_stake_usd/stake_usd) decides compound is exempt from the
+    cap itself, same separation as every other book-scoped rule in this file."""
+    out: dict = {}
+    for p in _open().values():
+        if p.get("strategy") == "runner":
+            continue
+        if p.get("chain") != chain or p.get("addr") != addr:
+            continue
+        b = _module_of(p)
+        out[b] = out.get(b, 0.0) + float(p.get("usd") or 0) * float(p.get("remaining", 1.0))
+    return {b: round(v, 2) for b, v in out.items()}
+
+
 def module_open_count(module_id: str, chain: str = None) -> int:
     # 7 Nov 2026 (Ali): optional chain filter -- lets a book's position-count LIMIT be evaluated
     # separately per chain (e.g. robinhood_chain and base each get their own slot allowance
