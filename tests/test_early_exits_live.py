@@ -11,7 +11,22 @@ from layers.layer17_early_entry import EarlyTracker
 
 @pytest.fixture(autouse=True)
 def iso(tmp_path, monkeypatch):
-    monkeypatch.setenv("GEM_ALERT_STATE_FILE", str(tmp_path / "s.json"))
+    # 8 Nov 2026 (Ali, live-wiring audit): state.LOCAL_STATE_FILE is read from
+    # GEM_ALERT_STATE_FILE ONCE at module-import time (state.py line 31), not re-read per call.
+    # Setting only the env var here does nothing after the first test in a pytest process has
+    # imported state.py -- every later test in the same run silently shares whichever file the
+    # FIRST test happened to set, defeating this fixture's whole purpose and explaining the
+    # test-order-dependent flakiness seen in this file (test_daily_loss_cap and
+    # test_sub_2x_rung_fires_and_banks_profit_before_a_reversal passed or failed depending on
+    # what ran before them, with real position data leaking between tests via the shared file).
+    # Patching state.LOCAL_STATE_FILE directly fixes this at the only point that actually
+    # matters -- every one of state.py's 8 real usages reads the module attribute live at call
+    # time, so this redirects all of them correctly, with zero change to state.py or any
+    # production code path (production never changes this env var mid-process, so this bug
+    # never manifested outside tests).
+    state_file = str(tmp_path / "s.json")
+    monkeypatch.setenv("GEM_ALERT_STATE_FILE", state_file)
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", state_file)
     monkeypatch.chdir(tmp_path)
     for k in ("EXECUTION_ENABLED", "PUMPPORTAL_API_KEY", "EARLY_LIVE_LANES"):
         monkeypatch.delenv(k, raising=False)
