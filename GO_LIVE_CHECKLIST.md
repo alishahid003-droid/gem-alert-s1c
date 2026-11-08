@@ -1754,3 +1754,76 @@ Supersedes earlier +$126.09 (#2 alone) / +$160.57 (#2+#3) estimates. 17/35 trade
 Fix #5 (capital-recycling swap-out) backtested for compound: 91 refusals / 67 distinct coins in sampled ~5000 log lines. Compound real post-fix avg stake $128.47, expectancy/trade +55.4%. Estimated upside if widened for compound: +$4,765.10 (upper-bound). Caveat: assumes every missed signal performs like the thin 6-trade sample; at least one missed signal in this window was the "trauma" rug coin that cost sprint/core2 -$173 -- compound avoiding it was a lucky save, not lost profit. Real result will include some losers too.
 
 Nothing wired into the live system. Sandboxed backtest/replay only, pending review before building into books.py/multichain_sniper.py.
+
+---
+
+## 8 Nov 2026 -- Fixes #2, #3, #5 BUILT INTO LIVE CODE (Ali's explicit "Yes do it")
+
+Following the corrected chronological backtest results (see the "corrected
+chronological backtest" section above: #2 alone +$180.58, #2+#3 +$239.51 net
+-$127.52, #5-for-compound upper-bound +$4,765.10), Ali authorized building
+all three into the live system. Commit: `c55a287`.
+
+**What was built:**
+
+1. **Fix #3 -- 5+ confirmation floor (sprint/core1/core2 only).**
+   `multichain_sniper.py`'s lane-routing now requires `EARLY_LANES_MIN_CONF`
+   (default 5, up from the old 3-4) confirmations before a coin enters
+   sprint/core1/core2's lanes. compound's own separate 3+ entry line is
+   untouched -- it already has a separately-proven positive edge and was not
+   part of what this backtest fixed.
+
+2. **Fix #2 -- cross-book exposure cap (sprint/core1/core2 only, compound
+   excluded).** New `CROSS_BOOK_EXPOSURE_CAP_USD` (default $40) caps how much
+   total capital sprint+core1+core2 combined can have committed to the SAME
+   coin at once. compound is deliberately excluded (`EXPOSURE_CAP_BOOKS =
+   ("sprint", "core1", "core2")`) -- real data showed compound shares coin
+   exposure with these 3 books in 14 historical cases and often wins big
+   exactly where they lose (e.g. one real coin: compound +$100.38 while core2
+   only made +$1.25 on the identical pick). New
+   `paper_ledger.committed_usd_by_book_for_coin(chain, addr)` reports real
+   per-book committed USD on a given coin; `books._exposure_committed_for_coin()`
+   sums it across the 3 capped books and feeds both `tier_stake_usd()`
+   (sprint/core1/core2's real sizing path) and `stake_usd()` (compound's
+   path, where it's a guaranteed no-op). `multichain_sniper.py`'s `act()` now
+   passes `chain`/`addr` through so the cap can see which coin is actually
+   being sized -- without this wiring the cap would silently never fire.
+
+3. **Fix #5 -- widened swap-out, compound only.** `can_open()`'s stale-position
+   swap-out (`_try_swap()`) now also triggers for compound on cash pressure
+   alone (`need_cash`), not just on a strong (5+ confirmation) signal, via
+   `COMPOUND_SWAP_ALLOW_WEAK` (default on). sprint/core1/core2 are
+   deliberately left on the original strong-only gate -- they have no
+   separately-proven positive edge yet, and widening their swap-out before
+   fixes #2/#3 are proven live risks locking in more capital behind a
+   currently-negative edge. Still capped to the same one-swap-per-5-minutes
+   pace as every book, via the existing `_try_swap()` timer.
+
+**Testing performed (in order, per the standing discipline):**
+
+- Isolated sanity checks (sandboxed in-memory `state`, never touching the
+  live `.gem_alert_state.json`): confirmed
+  `committed_usd_by_book_for_coin()` sums per-book committed $ correctly for
+  a shared coin, confirmed the exposure helper correctly excludes compound
+  by construction, confirmed it's a true no-op with no chain/addr. All 4
+  assertions passed.
+- Full regression suite, run in chunks (98 test files, ~1,100+ individual
+  tests): **zero new failures or hangs**. Two issues found were verified
+  identical on the unmodified baseline (`git stash` / re-run / `git stash
+  pop`) and are pre-existing, unrelated to this change:
+  - 3 failures in `test_router_books.py` (bust-reseed snapshot tests --
+    `test_bust_reseeds_book_and_counts`, `test_bust_waits_for_fresh_open_position_but_not_forever`,
+    `test_bust_offset_uses_latest_snapshot_not_sum`)
+  - 1 hang in `test_modules.py::test_module_cards_shape_and_routing`
+    (unrelated dashboard/module-cards test, times out identically with none
+    of this change present)
+
+**Status: built, tested, committed. NOT YET pushed or restarted -- Ali runs
+`git push` himself. Push + restart steps, in order, once Ali is ready:**
+
+```
+git push
+taskkill /F /IM python.exe
+tasklist | findstr python     (confirm empty -- no stray python.exe left)
+start_local_mode.bat
+```
