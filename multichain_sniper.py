@@ -411,18 +411,20 @@ class Scanner:
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
                     "lanes": ["core1"], "lane": "core1", "potential": "momentum",
                     "tier": "standard" if len(conf) >= 5 else "probe", "raw": raw_snapshot}
-        # 8 Nov 2026 (Ali, backtest-confirmed): real closed-trade history showed sprint/core1/
-        # core2 letting in entries at as few as 3 confirmations (core1) or 4 (sprint/core2), and
-        # those low-confirmation entries were a real, measured drag -- backtesting a 5+
-        # confirmation floor against the real 35-trade sprint/core1/core2 history recovered
-        # +$60.27 on its own (net -$306.75 vs the real -$367.03), and +$239.51 combined with the
-        # cross-book exposure cap in books.stake_usd() (net -$127.52). compound is untouched --
-        # its own entry path below (the `if len(conf) >= 3 and "compound" not in lanes` line)
-        # keeps its existing 3+ floor, since compound already has a separately-proven positive
-        # edge and was not part of what this backtest fixed.
-        EARLY_LANES_MIN_CONF = int(_f("EARLY_LANES_MIN_CONF", 5))
-        lanes = ["core1"] if len(conf) >= EARLY_LANES_MIN_CONF else []
-        if len(conf) >= max(4, EARLY_LANES_MIN_CONF) and age_min <= 15:
+        # 9 Nov 2026 (Ali): REVERTED the 8 Nov 2026 5+ confirmation floor (EARLY_LANES_MIN_CONF)
+        # for sprint/core1/core2. That change was backtested against historical closed-trade data
+        # and projected a real recovery (+$60.27 alone, +$239.51 combined with the exposure cap
+        # below), but measured against LIVE trades opened after it deployed, all three books got
+        # measurably WORSE, not better: core1 win rate 41.2% -> 14.3%, core2 28.6% -> 18.2%,
+        # sprint 50.0% -> 0.0% (small sample). The backtest did not hold on fresh live signals.
+        # Restored to the exact pre-8-Nov thresholds: core1 took any candidate reaching this point
+        # (its own earlier MC_MIN_CONF floor of 3 already applied), core2/sprint required 4+. Left
+        # as a tunable env var (now defaulting to the restored value) rather than a hardcoded
+        # literal, so a future attempt at raising this can be tested via env override without a
+        # code change, and because EARLY_LANES_MIN_CONF already named this exact value.
+        EARLY_LANES_MIN_CONF = int(_f("EARLY_LANES_MIN_CONF", 4))
+        lanes = ["core1"]
+        if len(conf) >= EARLY_LANES_MIN_CONF and age_min <= 15:
             lanes.append("core2")
             if age_min <= 10:
                 lanes.append("sprint")

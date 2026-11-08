@@ -1336,19 +1336,22 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
     extra = int(_f("BOOK_STRONG_EXTRA_SLOTS", 2) or 0) if strong else 0
     n_open = open_count(book_id, chain=chain)
     need_cash = free_equity(book_id) < 5.0
-    # 8 Nov 2026 (Ali, backtest-confirmed): compound-ONLY widening of the swap-out trigger beyond
-    # strong-only. Real log audit (sampled window) found 91 entry refusals for compound tracing to
-    # 67 distinct missed coins, almost all blocked by capital being stuck in stale, already-flat
-    # positions rather than by a genuinely full strong-signal book. compound's own real post-fix
-    # (liquidity cap, commit ec8abf2) expectancy is +55.4%/trade at an avg stake of $128.47, so a
-    # refused entry on compound is a real, measured cost -- unlike sprint/core1/core2, which have
-    # no separately-proven positive edge yet and are deliberately left on the original strong-only
-    # gate (widening their swap-out before fixes #2/#3 are proven live risks locking in more
-    # capital behind a currently-negative edge). COMPOUND_SWAP_ALLOW_WEAK=True (default) lets
-    # compound try a swap purely on cash pressure (need_cash), with no confirmations floor,
-    # capped to the same one-swap-per-5-minutes pace as every other book via _try_swap() itself.
+    # 9 Nov 2026 (Ali): REVERTED the 8 Nov 2026 compound-only swap-out widening. That change was
+    # backtested against a sampled window of past refusals (91 refusals / 67 missed coins) and
+    # projected a real recovery at compound's then-measured +55.4%/trade expectancy -- but
+    # measured against LIVE trades opened after it deployed, compound's own win rate dropped
+    # 65.6% -> 44.2% and swung from +$857.44 to -$85.89 in the post-deploy window. Letting
+    # compound swap out of an existing open position purely on cash pressure, with NO
+    # confirmation-strength requirement, meant it could (and evidently did) close a genuinely
+    # still-developing winner to free cash for an unproven new candidate -- the backtest measured
+    # the value of the freed-up entries it would capture, not the cost of the winners it would
+    # cut short, and live trading showed that cost was real and larger. Restored to strong-signal-
+    # only swaps, matching sprint/core1/core2's original, never-changed gate. Left as a tunable
+    # env var (now defaulting off) rather than deleted, in case a future, more carefully-scoped
+    # version (e.g. only swapping out positions already flat/negative, not any open position) is
+    # worth trying later.
     compound_widened_swap = (book_id == "compound" and need_cash
-                              and _f("COMPOUND_SWAP_ALLOW_WEAK", 1.0))
+                              and _f("COMPOUND_SWAP_ALLOW_WEAK", 0.0))
     if n_open >= limit + extra or (need_cash and strong) or compound_widened_swap:
         if (strong or compound_widened_swap) and _try_swap(book_id):
             n_open, need_cash = open_count(book_id, chain=chain), free_equity(book_id) < 5.0
