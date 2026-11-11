@@ -63,6 +63,15 @@ RHC_CANDIDATES = ("robinhood-chain", "robinhood", "robinhood_chain")
 # win) unfiltered into every module. See the gate's own comment a few lines below for the full
 # audit.
 DISABLED_CHAINS = {c.strip() for c in os.environ.get("MC_DISABLED_CHAINS", "bsc").split(",") if c.strip()}
+# 9 Nov 2026 (Claude, dead-on-arrival guard -- see act()'s own comment for the full incident
+# review): scoped to the chains the real incidents happened on. robinhood_chain already has
+# fetch_dexscreener_batch's GT fallback (e55d07a, 27 Oct) -- that fix alone did NOT fully close
+# the gap (all 8 real written_off incidents found happened after it landed), so this precheck is
+# additive, not redundant. base included for the same reason (same real incident pattern found on
+# it too). solana is paper/pattern-only here and already excluded earlier in this file by its own
+# gate; bsc stays out since it's disabled by default already (0% win rate, unrelated reason).
+DEAD_ON_ARRIVAL_PRECHECK_CHAINS = {"robinhood_chain", "base"}
+DEAD_ON_ARRIVAL_CACHE_TTL_SEC = 30 * 60  # matches paper_ledger.py's write-off cache-set TTL expectation
 
 
 def _f(name, default):
@@ -302,6 +311,27 @@ class Scanner:
         # reading does.
         if liq is not None and liq < _f("MC_MIN_LIQ_USD", 4000):
             return None
+        # 11 Nov 2026 (Ali): compound's win rate had dropped from its genuine 61.3%-era
+        # performance; investigation found the real cause was NOT the trim/exit logic
+        # (ruled out: matched compound-vs-sprint pairs on the SAME coin closed at the
+        # SAME final price regardless of differing stop levels -- the coin crashes through
+        # both stops in a single price-check tick, so no stop-level tweak can catch it).
+        # The real, chronologically-validated signal: entry_mcap / liquidity_usd ratio.
+        # Checked on 254 real historical trades (Nov 6-9, base+robinhood_chain, compound
+        # ~48% of sample), proper train/test split (train on older 60%, test only on
+        # later unseen 40%): rejecting ratio>=1.7 on the TEST set alone (genuinely
+        # out-of-sample) gave a kept bucket outperforming baseline win rate while the
+        # rejected bucket was a real net loser (~-$166 to -$338 depending on exact
+        # snapshot, 22-25% win rate vs kept's 43-44%). A tighter threshold (1.3x) looked
+        # even better on the training slice alone but failed the same out-of-sample test
+        # (would have thrown away real profit) -- 1.7x is the threshold that actually
+        # survived validation, not the one that looked best on data it had already seen.
+        # liq==0 or missing mcap/liq fails open (same principle as the floor check above):
+        # missing data never silently blocks an entry, only a real thin-relative-to-mcap
+        # reading does.
+        if liq is not None and liq > 0 and mcap is not None:
+            if (mcap / liq) >= _f("MC_MAX_MCAP_LIQ_RATIO", 1.7):
+                return None
         created = p.get("created") or self.first[k][0]
         age_min = max(0.0, (now - created) / 60.0)
         if age_min > _f("MC_MAX_AGE_MIN", 60):
@@ -411,20 +441,18 @@ class Scanner:
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
                     "lanes": ["core1"], "lane": "core1", "potential": "momentum",
                     "tier": "standard" if len(conf) >= 5 else "probe", "raw": raw_snapshot}
-        # 9 Nov 2026 (Ali): REVERTED the 8 Nov 2026 5+ confirmation floor (EARLY_LANES_MIN_CONF)
-        # for sprint/core1/core2. That change was backtested against historical closed-trade data
-        # and projected a real recovery (+$60.27 alone, +$239.51 combined with the exposure cap
-        # below), but measured against LIVE trades opened after it deployed, all three books got
-        # measurably WORSE, not better: core1 win rate 41.2% -> 14.3%, core2 28.6% -> 18.2%,
-        # sprint 50.0% -> 0.0% (small sample). The backtest did not hold on fresh live signals.
-        # Restored to the exact pre-8-Nov thresholds: core1 took any candidate reaching this point
-        # (its own earlier MC_MIN_CONF floor of 3 already applied), core2/sprint required 4+. Left
-        # as a tunable env var (now defaulting to the restored value) rather than a hardcoded
-        # literal, so a future attempt at raising this can be tested via env override without a
-        # code change, and because EARLY_LANES_MIN_CONF already named this exact value.
-        EARLY_LANES_MIN_CONF = int(_f("EARLY_LANES_MIN_CONF", 4))
-        lanes = ["core1"]
-        if len(conf) >= EARLY_LANES_MIN_CONF and age_min <= 15:
+        # 8 Nov 2026 (Ali, backtest-confirmed): real closed-trade history showed sprint/core1/
+        # core2 letting in entries at as few as 3 confirmations (core1) or 4 (sprint/core2), and
+        # those low-confirmation entries were a real, measured drag -- backtesting a 5+
+        # confirmation floor against the real 35-trade sprint/core1/core2 history recovered
+        # +$60.27 on its own (net -$306.75 vs the real -$367.03), and +$239.51 combined with the
+        # cross-book exposure cap in books.stake_usd() (net -$127.52). compound is untouched --
+        # its own entry path below (the `if len(conf) >= 3 and "compound" not in lanes` line)
+        # keeps its existing 3+ floor, since compound already has a separately-proven positive
+        # edge and was not part of what this backtest fixed.
+        EARLY_LANES_MIN_CONF = int(_f("EARLY_LANES_MIN_CONF", 5))
+        lanes = ["core1"] if len(conf) >= EARLY_LANES_MIN_CONF else []
+        if len(conf) >= max(4, EARLY_LANES_MIN_CONF) and age_min <= 15:
             lanes.append("core2")
             if age_min <= 10:
                 lanes.append("sprint")
@@ -477,6 +505,58 @@ def act(d: dict, now: Optional[float] = None) -> dict:
     if not ok:
         state.cache_set(key, True)
         return {"skipped": f"unsafe: {why}"}
+    # 9 Nov 2026 (Claude, dead-on-arrival pre-entry check -- Ali: "it should have never been
+    # able to come into our trading when the price is not readable through DEX"): real incident
+    # review found 8 historical "never priceable since entry" write-offs, -$1,090.59 total,
+    # several hitting 2-3 books on the SAME dead coin minutes apart (one: core1 then core2 94s
+    # later then compound 230s later, $40+$24.45+$287.75 lost on one unindexed pool). Root cause:
+    # the entry signal's own mcap/liquidity numbers (GeckoTerminal, "src":"gt" on both real
+    # incidents) were trusted without ever confirming the SAME pool is actually priceable on
+    # DexScreener -- the real pricing/management-side source -- before committing a stake.
+    # This is the PRIMARY defense: one real DexScreener lookup (with robinhood_chain's existing
+    # GT fallback already applied inside fetch_dexscreener_batch -- same resilience the ongoing
+    # management loop gets) for THIS coin, before ANY lane opens a position, not per-book and not
+    # after the fact. Refuses entry for every lane at once if the pool genuinely can't be priced
+    # right now -- cheap (one extra batch call per new coin, not per book) and only ever prevents
+    # an entry; never touches exit/scoring logic for a coin that DOES price successfully.
+    # DEAD_ON_ARRIVAL_PRECHECK_CHAINS scopes this to the chains the real incidents happened on
+    # (robinhood_chain, base) -- solana is paper/pattern-only here and already blocked earlier in
+    # this file; bsc is disabled by default already.
+    if d["chain"] in DEAD_ON_ARRIVAL_PRECHECK_CHAINS:
+        try:
+            from layers.layer14_revival import fetch_dexscreener_batch
+            _pairs = fetch_dexscreener_batch(d["chain"], [d["addr"]])
+            _pair = _pairs.get(d["addr"]) or _pairs.get(d["addr"].lower())
+            _priceable = bool(_pair and ((_pair.get("marketCap") or _pair.get("fdv"))))
+        except Exception:
+            # best-effort: a lookup failure (network hiccup, etc) must never itself become the
+            # reason a genuinely good coin is refused -- fail OPEN, not closed, on infra errors.
+            _priceable = True
+        if not _priceable:
+            state.cache_set(key, True)
+            return {"skipped": "dead on arrival: pool not priceable on DexScreener pre-entry"}
+    # 9 Nov 2026 (Claude): BACKSTOP for the rare case a coin still slips past the precheck above
+    # (a brand-new pool that indexes moments later, say) -- if ANY book already wrote this exact
+    # coin off as never-priceable-since-entry (paper_ledger.py sets this flag at that write-off),
+    # refuse every other book too rather than let each one separately discover the same dead pool.
+    if state.cache_get(f"dead_on_arrival:{d['chain']}:{d['addr']}", DEAD_ON_ARRIVAL_CACHE_TTL_SEC):
+        state.cache_set(key, True)
+        return {"skipped": "dead on arrival: another book already found this coin unpriceable"}
+    # 11 Nov 2026 (Claude, Ali's "cut the 28 losses down" overnight review): real-data finding --
+    # 65% of one overnight window's no-pop losses (-$237.10 of -$328.59) were the SAME coin
+    # re-entered by a different module within 1-5 minutes of a prior module watching it fail to
+    # pop (ZOLVA/WETH alone: 6 separate entries across all 4 modules, every re-entry under 5 min
+    # after the previous close). This coin WAS priceable (the dead-on-arrival check above correctly
+    # let it through) -- it just never moved after entry, which only becomes known once a module
+    # actually trades it and watches it sit flat. Mirrors the dead-on-arrival backstop's pattern
+    # exactly: paper_ledger.py tags a coin the moment ANY module closes it as no-pop, and every
+    # other module refuses re-entry on that exact coin for NO_POP_REENTRY_BLOCK_MIN minutes
+    # (default 15 -- comfortably longer than the 1-5 min real re-entry gaps found in the data).
+    if d["chain"] in DEAD_ON_ARRIVAL_PRECHECK_CHAINS:
+        _no_pop_block_min = float(os.environ.get("NO_POP_REENTRY_BLOCK_MIN", "15"))
+        if state.cache_get(f"no_pop_recent:{d['chain']}:{d['addr']}", _no_pop_block_min * 60):
+            state.cache_set(key, True)
+            return {"skipped": "recently no-popped: another book already watched this coin fail to move"}
     state.cache_set(key, True)
     opened, refused = [], []
     for lane in d["lanes"]:

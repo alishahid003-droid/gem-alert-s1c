@@ -31,6 +31,11 @@ import state
 from executor import exit_rules
 from executor.moonbag import DEFAULT_TRIM_LADDER
 
+# 9 Nov 2026 (Ali, CHANGES_9NOV2026.md item 5): off by default -- opt-in flag, same pattern as
+# every other 9 Nov addition (EARLY_TRIM_MULT, LIQ_VELOCITY_DROP_PCT), so this never changes
+# behavior until explicitly turned on via env var.
+PROBATION_SIZING_ENABLED = os.environ.get("PROBATION_SIZING_ENABLED", "false").lower() == "true"
+
 
 def _f_env(name: str, default: float) -> float:
     try:
@@ -218,7 +223,17 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
     pos = {"id": pid, "module": module, "chain": chain, "token": token, "source": source, "signal": signal,
            "band": band, "tags": tags or {}, "usd": float(usd), "entry_mcap": float(entry_mcap),
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
-           "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
+           # 10 Nov 2026 (Claude, Ali's finding-gap close-out): price_trace -- a capped,
+           # append-only {ts, mult} list sampled once per live management cycle (same cycle
+           # that already updates peak_mcap below, zero extra network/API calls). Fills the
+           # exact data gap found during the EARLY_NO_POP_MIN backtest: entry_mcap/peak_mcap/
+           # close-reason text gave no way to see WHERE a coin's price actually was between
+           # entry and exit, only its whole-life peak and its value at the single cut moment.
+           # Capped at PRICE_TRACE_MAX_POINTS (default 200 -- ~20min of history at the 6s
+           # EARLY_MANAGE_SECONDS cadence, plenty for every observed no-pop/hard-stop cut,
+           # which all closed within 7min) so this can never grow unbounded on a long-lived
+           # core2 moonshot runner. Oldest points drop off the front once the cap is hit.
+           "price_trace": [], "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [],
            "proceeds_usd": 0.0, "cost_pct": _cost_pct(chain, usd, liquidity_usd),
            # 27 Oct 2026: liquidity_usd was accepted as a parameter and used ONCE internally to compute
            # cost_pct, then thrown away -- never saved on the position record itself. Result: every single
@@ -233,6 +248,18 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
     if strategy == "early":
         # pre-early coins: fills are slower/worse than the quoted price (curve moves, priority fee, 1% venue fee)
         pos["cost_pct"] = max(pos["cost_pct"], float(os.environ.get("EARLY_PAPER_COST_PCT", "0.10")))
+    # 9 Nov 2026 (Ali, CHANGES_9NOV2026.md item 5 -- real incident: a robinhood_chain position lost
+    # $416.52 (-99.1%) when liquidity collapsed from $27,472 to $0.2 between two consecutive 6s
+    # management cycles -- confirmed structurally uncatchable by any cycle-based detection, since
+    # the collapse completes before a second reading exists to compare against. Probation sizing
+    # opens new robinhood_chain/base positions at a REDUCED fraction of their intended stake and
+    # tops up to full size only after liquidity reads stable for 2 consecutive cycles (~12s) -- see
+    # probation_sizing.py's own module docstring for the full mechanism and honesty flags. Ali's
+    # explicit design requirement: gradual, evidence-based scale-up, not a permanent haircut, so a
+    # confirmed-good entry still captures full upside from the point it proves itself onward.
+    if PROBATION_SIZING_ENABLED:
+        from probation_sizing import start_probation
+        start_probation(pos, full_usd=pos["usd"])
     book[pid] = pos
     state.set_value(OPEN_KEY, book)
     return pos
@@ -264,7 +291,14 @@ def update_live_fields(pos: dict) -> bool:
         return True
 
 
-def _sell(pos: dict, pct_of_original: float, mcap: float, why: str, now: float):
+def _sell(pos: dict, pct_of_original: float, mcap: float, why: str, now: float, mechanism: Optional[str] = None):
+    # 9 Nov 2026 (Claude, Option1/Option2 test build): optional `mechanism` tag --
+    # "option1_fast_trim" / "option2_liquidity_trigger" / None (baseline/unmodified
+    # behavior) -- recorded on the event so an 8-10h combined live run can be split
+    # into "what Option 1 alone contributed" / "what Option 2 alone contributed" /
+    # the real combined result, all from ONE run. Does not change any dollar math;
+    # every existing call site that doesn't pass mechanism behaves byte-for-byte as
+    # before (mechanism=None, same event shape plus one extra always-present key).
     pct = min(pct_of_original, pos["remaining"])
     if pct <= 0:
         return
@@ -315,7 +349,7 @@ def _sell(pos: dict, pct_of_original: float, mcap: float, why: str, now: float):
     pos["proceeds_usd"] += proceeds
     pos["remaining"] = max(0.0, pos["remaining"] - pct)
     pos["events"].append({"ts": now, "why": why, "pct": round(pct, 4), "mult": round(mult, 3),
-                          "usd": round(proceeds, 2)})
+                          "usd": round(proceeds, 2), "mechanism": mechanism})
 
 
 def _close(pos: dict, exit_type: str, reason: str, now: float) -> dict:
@@ -554,6 +588,9 @@ def _ratchet_trail(exit_profile: str, peak_mult: float, fallback_trail: float) -
     return lock
 
 
+PRICE_TRACE_MAX_POINTS = int(os.environ.get("PRICE_TRACE_MAX_POINTS", "200"))
+
+
 def _manage_early(pos: dict, mcap: float, now: float) -> bool:
     """Exit engine for sniper entries (strategy 'early'): partial take-profits,
     hard stop, trailing stop on the runner after 2x, dead-coin time stop.
@@ -564,9 +601,50 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
     mult = mcap / pos["entry_mcap"]
     peak = pos["peak_mcap"] / pos["entry_mcap"]
     age_min = (now - pos["opened_ts"]) / 60.0
+    # 9 Nov 2026 (Claude, Option 1 test build -- Ali: "smart fix to secure profits" after the
+    # core1/core2/sprint rug-loss review): EARLY_TRIM_MULT multiplies each ladder rung's
+    # take-profit fraction (default 1.0 = baseline, no change -- verified via backtest
+    # sanity check against 167 real trades, $0.33 total diff). Backtested at 2.0 (double
+    # every rung's sell fraction, still capped at what's left of the original stake) across
+    # all 4 books: +$1,090.88 vs baseline $850.68 combined, 24/24 cross-validation splits
+    # agreed in direction. Tagged "option1_fast_trim" only when the multiplier is actually
+    # inflating the sale (>1.0) and it's genuinely selling MORE than the untouched rung would
+    # have -- a baseline-rate sell (trim_mult<=1.0) is never tagged, so turning this on/off
+    # via env var cannot retroactively relabel historical baseline behavior.
+    # 9 Nov 2026 (Claude, after real-data cross-validation): applying EARLY_TRIM_MULT=2.0
+    # uniformly to core2 lost money on at least one real historical moonshot (-$34 on a
+    # +$138.73 trade) -- doubling core2's EARLY rungs (1.5x/3x/8x/20x) sells more of the
+    # position BEFORE it reaches CORE2_MOONSHOT_TRIGGER_MULT (8x default), starving the
+    # carve-out of exactly the position size it's designed to let ride. Ali's call (9 Nov
+    # 2026): apply Option 1 fully on compound/sprint/core1, but on core2 only secure a
+    # little extra profit on the EARLY rungs and leave the moonshot-adjacent rungs alone.
+    # core2's ladder is {1.5: 0.05, 3: 0.10, 8: 0.10, 20: 0.10} -- CORE2_EARLY_TRIM_MULT
+    # (separate, smaller-default knob) applies only to rungs strictly BELOW the moonshot
+    # trigger (default 8.0x, same constant _manage_early() uses for the carve-out below),
+    # so the 8x/20x rungs -- the ones immediately adjacent to/past the carve-out point --
+    # always sell at their original, untouched fraction regardless of this setting.
+    profile_name = pos.get("exit_profile") or ""
+    if profile_name == "core2":
+        # 9 Nov 2026: cross-validated sweep on real data (60 core2 trades, chronological
+        # split) -- 1.0x=no change (halves disagree, net $0), 1.25x=+$34.84 (agrees),
+        # 1.5x=+$46.42 (agrees, best net result that still agrees), 1.75x/2.0x flip to
+        # disagreeing again (the moonshot-conflict problem returns). 1.5 is the default.
+        _trim_mult = float(os.environ.get("CORE2_EARLY_TRIM_MULT", "1.5"))
+        _moonshot_trigger = float(os.environ.get("CORE2_MOONSHOT_TRIGGER_MULT", "8.0"))
+    else:
+        # 9 Nov 2026: default stays 1.0 (safe no-op) in CODE -- Ali's decision ("apply
+        # option 1...compound sprint core1") is deployed via .env (EARLY_TRIM_MULT=2.0),
+        # not by changing this default, so the file itself never silently changes
+        # behavior for ANY profile (including fast_sprint/fast_core/fast_moon/dev_list/
+        # leaderboard, which were never part of this discussion) just by being copied in.
+        _trim_mult = float(os.environ.get("EARLY_TRIM_MULT", "1.0"))
+        _moonshot_trigger = None
     for tier, frac in sorted(ladder.items()):
         if str(tier) not in pos["rungs_fired"] and mult >= tier and pos["remaining"] > 1e-6:
-            _sell(pos, frac, mcap, f"take profit {tier}x", now)
+            _rung_trim = _trim_mult if (_moonshot_trigger is None or tier < _moonshot_trigger) else 1.0
+            sell_frac = min(frac * _rung_trim, pos["remaining"])
+            _mech = "option1_fast_trim" if _rung_trim > 1.0 and sell_frac > frac else None
+            _sell(pos, sell_frac, mcap, f"take profit {tier}x", now, mechanism=_mech)
             pos["rungs_fired"].append(str(tier))
     if pos["remaining"] <= 1e-6:
         _close(pos, "fully_sold", "every slice sold", now)
@@ -587,6 +665,24 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
     no_pop_mult = float(os.environ.get("EARLY_NO_POP_MULT", "1.05"))
     if why is None and age_min >= no_pop_min and peak < no_pop_mult and mult < no_pop_mult:
         why = ("stop_loss", f"no pop after {age_min:.1f} min ({mult:.2f}x, never reached {no_pop_mult}x)")
+        # 11 Nov 2026 (Claude, Ali's "cut the 28 losses down" overnight review): real-data finding
+        # -- of 26 no-pop losses in one overnight window, only 9 were genuinely unique dead coins;
+        # the other 17 (65%, -$237.10 of -$328.59 total no-pop loss) were the SAME coin re-entered
+        # by a DIFFERENT module within 1-5 minutes of the first module watching it fail to pop
+        # (e.g. ZOLVA/WETH entered 6 times across sprint/core1/core2/compound, every single re-entry
+        # under 5 minutes after the prior one's no-pop close). multichain_sniper.act() already has
+        # a cross-book cache for "dead on arrival" (unpriceable) coins -- this extends the same
+        # pattern to "proved itself a no-pop dead coin AFTER a normal priceable entry", a case the
+        # dead-on-arrival check never covers (the coin WAS priceable, it just never moved). Tags the
+        # coin the moment any module closes it as no-pop, so every other module refuses re-entry on
+        # it for NO_POP_REENTRY_BLOCK_MIN minutes -- same TTL style as DEAD_ON_ARRIVAL_CACHE_TTL_SEC,
+        # just shorter by default (these coins are not permanently dead the way an unpriceable pool
+        # is, just unlikely to suddenly move again within the same short window every other book
+        # would otherwise re-enter it in).
+        try:
+            state.cache_set(f"no_pop_recent:{pos['chain']}:{pos['token']}", True)
+        except Exception:
+            pass  # never let cache bookkeeping break the real close path below
     # 7 Nov 2026 (Ali): core2 moonshot carve-out -- "20-25% should bypass the ratchet entirely
     # and aim for that moonshot attempt." Once a core2 position proves itself past
     # CORE2_MOONSHOT_TRIGGER_MULT (default 8x -- the same point EARLY_TRAIL_RATCHET's old 8x band
@@ -684,15 +780,43 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
     # once. One coin losing its price is normal (a real rug); most/all of them losing
     # price in the same cycle means OUR feed is down, not that a dozen+ pools all died
     # in the same 20-second tick. See FEED_OUTAGE_* constants above for the full story.
+    #
+    # 10 Nov 2026 (Ali): REAL INCIDENT -- this outage check was silently disabled for
+    # the entire early_ watcher. worker_early_watch.py calls manage(snap, source_prefix=
+    # "early_") with a per-token snapshot_fn, never batch_fn -- so `batched` was always
+    # None on that path, which made this block fall into its "snapshot_fn path (tests/
+    # fallback) is per-call and already resilient" branch and hardcode _n_unpriced=0,
+    # i.e. feed_outage was ALWAYS False for every early_ position, no matter how bad a
+    # real outage got. That assumption was wrong: snapshot_fn is also a real production
+    # path, not just tests. A real brief feed outage on 10 Nov wrote off 17 long-held
+    # early_ positions (-$1,129.42) that this detector should have frozen instead.
+    # Fix: build a per-token snapshot cache up front (one snapshot_fn call per managed
+    # position, same cost as before -- just moved earlier) so the outage fraction is
+    # computed the same way on BOTH paths, and the loop below reuses the cached snap
+    # instead of calling snapshot_fn a second time.
     _managed = [pos for pos in book.values()
                 if not source_prefix or str(pos.get("source", "")).startswith(source_prefix)]
     _n_managed = len(_managed)
+    _snapshot_cache = None
+    if batched is None and snapshot_fn is not None:
+        _snapshot_cache = {}
+        for pos in _managed:
+            key = (pos["chain"], pos["token"])
+            if key in _snapshot_cache:
+                continue
+            try:
+                _snapshot_cache[key] = snapshot_fn(pos["chain"], pos["token"])
+            except Exception:
+                _snapshot_cache[key] = None
     if _n_managed >= FEED_OUTAGE_MIN_POSITIONS:
         if batched is not None:
             _n_unpriced = sum(1 for pos in _managed
                                if (batched.get((pos["chain"], pos["token"])) or {}).get("mcap_usd") is None)
+        elif _snapshot_cache is not None:
+            _n_unpriced = sum(1 for pos in _managed
+                               if (_snapshot_cache.get((pos["chain"], pos["token"])) or {}).get("mcap_usd") is None)
         else:
-            _n_unpriced = 0  # snapshot_fn path (tests/fallback) is per-call and already resilient
+            _n_unpriced = 0  # no snapshot source at all (shouldn't happen in practice)
         feed_outage = (_n_unpriced / _n_managed) >= FEED_OUTAGE_UNPRICED_FRACTION
     else:
         feed_outage = False
@@ -701,6 +825,8 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             continue
         if batched is not None:
             snap = batched.get((pos["chain"], pos["token"]))
+        elif _snapshot_cache is not None:
+            snap = _snapshot_cache.get((pos["chain"], pos["token"]))
         else:
             try:
                 snap = snapshot_fn(pos["chain"], pos["token"])
@@ -753,6 +879,52 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 pos["entry_mcap_original"] = pos["entry_mcap"]
                 pos["entry_mcap"] = mcap
                 pos["peak_mcap"] = mcap
+        # 9 Nov 2026 (Claude, Option 2 test build -- Ali: "smart fix...detecting this sort of a
+        # rug risk"): the DEAD_LIQUIDITY_USD check below only ever catches a pool AFTER it has
+        # already collapsed below $500 -- a one-shot level check with no memory of the prior
+        # cycle's reading, so it cannot catch a liquidity DROP in progress. Checked feasibility
+        # first (Ali: "check out the scope of our prediction tool...in that 20-second poll
+        # cycle"): fetch_dexscreener_batch() already pulls liquidity_usd every single 20s cycle
+        # regardless of this feature, and 71% of real historical rug_liquidity trades (17/24) had
+        # 153-1,400 seconds of lead time between a sharp liquidity drop and final collapse --
+        # enough cycles for this check to fire before the position is a near-total loss. The
+        # other 29% drop near-instantly and are uncatchable by any cycle-based scheme, Option 2
+        # included -- this does not and cannot claim to catch those.
+        # prev_liquidity_usd is set unconditionally below so the check always has a real prior
+        # reading to compare against from the SECOND cycle a position is managed onward (the
+        # first cycle has nothing to compare to and is skipped, by design -- can't detect a
+        # "drop" with only one data point).
+        _prev_liq = pos.get("prev_liquidity_usd")
+        # 9 Nov 2026 (Ali, CHANGES_9NOV2026.md item 5): per-cycle probation update, BEFORE Option
+        # 2's velocity check -- a position still in probation is already sized smaller, so if this
+        # same cycle's liquidity reading also trips Option 2 or the dead-liquidity floor below,
+        # the loss is naturally capped at the smaller probation size already. Only acts on
+        # positions with pos.get("probation") True (set at open time, see open path above) --
+        # a complete no-op for every position opened before this flag existed or on an
+        # out-of-scope chain.
+        if PROBATION_SIZING_ENABLED and pos.get("probation"):
+            from probation_sizing import update_probation
+            update_probation(pos, liq, _prev_liq, mcap, now=now)
+        _velocity_drop_pct = float(os.environ.get("LIQ_VELOCITY_DROP_PCT", "0.0"))  # 0.0 = disabled (baseline)
+        if (liq is not None and _prev_liq is not None and _prev_liq > 0 and _velocity_drop_pct > 0
+                and liq >= DEAD_LIQUIDITY_USD  # not already caught by the existing dead-liquidity check below
+                and (1.0 - (liq / _prev_liq)) >= _velocity_drop_pct):
+            # Backtested (liq_catch_frac=0.5, modeling "catch roughly halfway through the real
+            # eventual collapse mult rather than riding it all the way down") across all 4 books:
+            # +$595.57 vs baseline $850.68 combined, 24/24 cross-validation splits agreed.
+            # Caution (told to Ali explicitly): this backtest BLENDS the real collapse mult
+            # toward break-even by a fixed fraction -- it does not simulate the exact mcap this
+            # check would have sold at historically, since no cycle-by-cycle liquidity history
+            # was ever recorded until now. Treat the backtest as directionally verified, not as
+            # an exact dollar prediction of this live mechanism's real result.
+            _sell(pos, pos["remaining"], mcap, "liquidity velocity drop", now, mechanism="option2_liquidity_trigger")
+            closed_now.append(_close(pos, "rug_liquidity_early",
+                                      f"liquidity ${_prev_liq:,.0f} -> ${liq:,.0f} ({(1-liq/_prev_liq)*100:.0f}% drop)", now))
+            pos["prev_liquidity_usd"] = liq
+            del book[pid]
+            continue
+        if liq is not None:
+            pos["prev_liquidity_usd"] = liq
         if liq is not None and liq < DEAD_LIQUIDITY_USD:
             # Oct 13 2026: this used to sell at the (glitched) mcap read -- a pool with no liquidity
             # booked a fake +$505 on one sprint coin and inflated every stake after it. A drained pool
@@ -765,6 +937,13 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         if not accept_dict(pos, mcap):
             continue            # data glitch (pair/field switch), not a real move -- see price_sanity
         pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
+        # 10 Nov 2026: see price_trace comment at open time. One append per managed cycle,
+        # same cycle/same lock that already writes peak_mcap -- no new network call, no new
+        # lock, no new state key (rides the existing book write this function already does).
+        trace = pos.setdefault("price_trace", [])
+        trace.append({"ts": round(now, 1), "mult": round(mcap / pos["entry_mcap"], 4)})
+        if len(trace) > PRICE_TRACE_MAX_POINTS:
+            del trace[: len(trace) - PRICE_TRACE_MAX_POINTS]
 
         if pos.get("strategy") == "runner":
             d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,

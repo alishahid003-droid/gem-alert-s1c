@@ -91,22 +91,37 @@ def _save(d: dict):
 
 def combined_equity() -> float:
     """Sum of equity() across the 4 real books -- the number Ali's targets are measured against."""
-    # TEMP DEBUG (6 Nov 2026, Ali): instrumented to find the exact book(s) producing wrong reads
-    # during the recurring equity-flicker investigation. Logs a per-book breakdown to
-    # logs/equity_debug.log ONLY when the total looks suspiciously low (< 300, i.e. clearly not
-    # all 4 books near $100 each), so this stays silent during normal operation. Remove once the
+    # TEMP DEBUG (6 Nov 2026, Ali; widened 10 Nov 2026, Claude): instrumented to find the exact
+    # book(s) producing wrong reads during the recurring equity-flicker investigation. ORIGINAL
+    # trigger was total<300 only -- missed a real incident on 10 Nov (equity misread as $303.27,
+    # just above the <300 cutoff, during a drawdown_pause/resume pair 60s apart with ZERO real
+    # realized-P&L change in any book across the same window -- confirmed directly, not a real
+    # trading event). WIDENED to also log on every actual pause/resume firing itself (regardless
+    # of the total<300 heuristic), via the new `force` param the pause/resume call sites below
+    # now pass -- so the NEXT occurrence of this bug is captured with full per-book detail
+    # instead of being investigated blind again. Still silent on ordinary calls (force=False,
+    # old <300 heuristic unchanged) to avoid spamming the log every poll cycle. Remove once the
     # root cause is confirmed and fixed.
     per_book = {b: books.equity(b) for b in REAL_BOOKS}
     total = round(sum(per_book.values()), 2)
-    if total < 300:
+    if total < 300 or _EQUITY_DEBUG_FORCE.get("on"):
         try:
             import time as _time, os as _os
             log_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "logs", "equity_debug.log")
             with open(log_path, "a") as _f:
-                _f.write(f"{_time.time()} pid={_os.getpid()} total={total} per_book={per_book}\n")
+                _f.write(f"{_time.time()} pid={_os.getpid()} total={total} per_book={per_book} forced={_EQUITY_DEBUG_FORCE.get('on', False)}\n")
         except Exception:
             pass
     return total
+
+
+# 10 Nov 2026 (Claude): simple in-process flag combined_equity() checks above. Set True by the
+# pause/resume mutation below for the single call it makes right before logging that event, so
+# the per-book breakdown lands in the log for exactly the call that triggered a real pause/resume
+# -- not every call (would spam the log every ~6s poll cycle for no benefit). Reset to False
+# immediately after. Module-level dict (not a bare bool) only so a nested/re-entrant call during
+# the same brief window still sees the same mutable object cleanly.
+_EQUITY_DEBUG_FORCE = {"on": False}
 
 
 def start_phase(phase: str, now: Optional[float] = None) -> dict:
@@ -210,7 +225,11 @@ def check(now: Optional[float] = None) -> dict:
         if not phase or phase not in PHASES:
             return d
         p = PHASES[phase]
-        eq = combined_equity()
+        _EQUITY_DEBUG_FORCE["on"] = True
+        try:
+            eq = combined_equity()
+        finally:
+            _EQUITY_DEBUG_FORCE["on"] = False
 
         peak = max(d.get("peak_equity", 0.0), eq)
         d["peak_equity"] = peak

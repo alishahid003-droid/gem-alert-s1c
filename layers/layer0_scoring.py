@@ -33,6 +33,21 @@ from utils.http import get_json, ApiUnreachable, describe_fetch_failure
 import state
 from links import DEXSCREENER_CHAIN_SLUG
 from layers.layer0d_point_in_time import fetch_birdeye_ohlcv, summarize_launch_window
+# 9 Nov 2026 (Ali, CHANGES_9NOV2026.md item 6): robinhood_chain/base pre-entry momentum
+# gate -- see dexscreener_momentum_gate.py module docstring for the full root-cause
+# (Birdeye has no robinhood_chain mapping at all; base shares a starved Birdeye budget).
+# Opt-in flag, same pattern as every other 9 Nov addition -- off by default, never
+# changes behavior until explicitly turned on via env var.
+MOMENTUM_GATE_ENABLED = os.environ.get("MOMENTUM_GATE_ENABLED", "false").lower() == "true"
+try:
+    from dexscreener_momentum_gate import dexscreener_momentum_verdict, MOMENTUM_GATE_CHAINS
+except ImportError:
+    # Module not deployed yet / not on sys.path -- gate silently can't run (same
+    # degrade-gracefully convention as every other optional signal in this file),
+    # never crashes the whole scoring pass just because this file is missing.
+    MOMENTUM_GATE_CHAINS = {"robinhood_chain", "base"}
+    def dexscreener_momentum_verdict(chain, address):
+        return {"drawdown_pct": None, "window_used": None, "reason": "dexscreener_momentum_gate not importable"}
 from executor.rpc_pool import rpc_call
 
 Chain = Literal["solana", "robinhood_chain", "base", "bsc", "ton", "ethereum"]
@@ -1814,22 +1829,41 @@ def signals_from_geckoterminal_pool(item: dict, chain: str,
 
 BIRDEYE_EVM_DAILY_CAP_DEFAULT = 40
 
+# 9 Nov 2026 (Ali, CHANGES_9NOV2026.md item 6): base was found starved of its OWN
+# Birdeye launch-window-drawdown check tonight -- the original single shared pool
+# (solana+bsc+base, 40/day) was confirmed exhausted (40/40) while base and
+# robinhood_chain are the two chains actually going live. Split into two
+# independently-tracked pools so base gets a guaranteed allowance instead of
+# competing with solana (not currently trading) and bsc (lower priority).
+BIRDEYE_BASE_DAILY_CAP_DEFAULT = 40
+BIRDEYE_SOLANA_BSC_DAILY_CAP_DEFAULT = 10
 
-def _birdeye_evm_allowance() -> bool:
-    """Daily cap on Birdeye calls from the Base/BSC path (Sept 30 2026) --
-    Birdeye's free tier is small and the Solana deep-score path shares it,
-    so this can never drain it the way Layer 13 drained fomoapi.io."""
+
+def _birdeye_evm_allowance(chain: str = None) -> bool:
+    """Daily cap on Birdeye calls from the Base/BSC/Solana EVM-style path
+    (Sept 30 2026, split into per-pool budgets 9 Nov 2026 -- see comment
+    above). chain=None (legacy callers) falls back to the old single shared
+    pool key/cap for backward compatibility; pass the real chain to use the
+    split pools."""
     import os
+    if chain == "base":
+        pool_key, cap_env, cap_default = "birdeye_evm_usage_base", "BIRDEYE_BASE_DAILY_CAP", BIRDEYE_BASE_DAILY_CAP_DEFAULT
+    elif chain in ("solana", "bsc"):
+        pool_key, cap_env, cap_default = "birdeye_evm_usage_solana_bsc", "BIRDEYE_SOLANA_BSC_DAILY_CAP", BIRDEYE_SOLANA_BSC_DAILY_CAP_DEFAULT
+    else:
+        # legacy/unspecified -- old shared key+cap, unchanged behavior for any caller
+        # that doesn't pass chain
+        pool_key, cap_env, cap_default = "birdeye_evm_usage", "BIRDEYE_EVM_DAILY_CAP", BIRDEYE_EVM_DAILY_CAP_DEFAULT
     try:
-        cap = int(os.environ.get("BIRDEYE_EVM_DAILY_CAP", str(BIRDEYE_EVM_DAILY_CAP_DEFAULT)))
+        cap = int(os.environ.get(cap_env, str(cap_default)))
     except ValueError:
-        cap = BIRDEYE_EVM_DAILY_CAP_DEFAULT
+        cap = cap_default
     day = time.strftime("%Y-%m-%d", time.gmtime())
-    rec = state.get_value("birdeye_evm_usage") or {}
+    rec = state.get_value(pool_key) or {}
     used = rec.get("used", 0) if rec.get("day") == day else 0
     if used >= cap:
         return False
-    state.set_value("birdeye_evm_usage", {"day": day, "used": used + 1})
+    state.set_value(pool_key, {"day": day, "used": used + 1})
     return True
 
 
@@ -1843,7 +1877,7 @@ def _evm_launch_drawdown(chain: str, item: dict) -> Optional[float]:
     except ValueError:
         return None
     end_ts = int(time.time())
-    if end_ts - start_ts < 15 * 60 or not _birdeye_evm_allowance():
+    if end_ts - start_ts < 15 * 60 or not _birdeye_evm_allowance(chain):
         return None
     ohlcv = fetch_birdeye_ohlcv(chain, item["address"], start_ts, end_ts, interval="15m")
     if not ohlcv.get("ok"):
@@ -1901,11 +1935,45 @@ def score_geckoterminal_pools(chain: str, items: list) -> list:
             ms, detail = robinhood_market_structure(item, (rhc_pairs or {}).get(address))
             sig.market_structure_score, sig.market_structure_detail = ms, detail
         sr = score_token(sig)
+        dd = None
         if sr.band in ("A", "B") and chain in ("bsc", "base", "solana"):
             dd = _evm_launch_drawdown(chain, item)
             if dd is not None:
                 sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
                                                       price_drawdown_from_peak_pct=dd, goplus_data=gp_data)
+                sr = score_token(sig)
+        # 9 Nov 2026 (Ali, CHANGES_9NOV2026.md item 6): robinhood_chain has NO Birdeye
+        # mapping at all (fetch_birdeye_ohlcv returns birdeye_chain=None for it -- a real
+        # network-support limit, not a config gap), so it never got ANY pre-entry
+        # momentum/drawdown check above -- entered purely on structural safety signals.
+        # base DOES get the Birdeye check above, but shares a 40-calls/day budget with
+        # solana+bsc that was confirmed exhausted (40/40) the night this was built, so it
+        # is frequently starved even though the mechanism exists. This fallback uses
+        # DexScreener's own priceChange field (zero extra Birdeye budget, works on both
+        # chains identically) whenever Birdeye didn't already supply a verdict above --
+        # for robinhood_chain that's always (dd is always None, Birdeye never runs for
+        # it); for base it's only when Birdeye's call was skipped/budget-exhausted/failed.
+        # Feeds the SAME price_drawdown_from_peak_pct field and the SAME existing -60%
+        # override in score_token -- no new override logic, just a second, free way to
+        # populate a signal that chain already lacked or was losing to budget starvation.
+        # 10 Nov 2026 (Ali, real-data finding): ORIGINAL condition required sr.band in
+        # ("A","B") before this ever ran -- but a coin that already collapsed 60%+ in the
+        # live market is UNLIKELY to also score clean on every structural signal (holder
+        # concentration, LP lock, authority revocation) at the same time. These are two
+        # largely independent failure modes (rug-risk vs. price-collapse), so gating the
+        # collapse check behind "already looks structurally healthy" meant it almost never
+        # got a chance to run on the coins it exists to catch. Confirmed in state: 110 EVM
+        # band-B scores recorded overnight, zero evidence the collapse override ever fired.
+        # FIX: run the momentum check on ANY band (not just A/B) before Birdeye/DexScreener
+        # could meaningfully improve a bad score anyway -- this only ever moves band DOWN
+        # (same override discipline as everywhere else in this file), so running it
+        # unconditionally cannot make a bad coin look better, only correctly confirm it's bad.
+        if MOMENTUM_GATE_ENABLED and sr.band != "D" and chain in MOMENTUM_GATE_CHAINS and dd is None:
+            mg_verdict = dexscreener_momentum_verdict(chain, address)
+            mg_dd = mg_verdict.get("drawdown_pct")
+            if mg_dd is not None:
+                sig = signals_from_geckoterminal_pool(item, chain, holder_growth_rate_per_hr=growth,
+                                                      price_drawdown_from_peak_pct=mg_dd, goplus_data=gp_data)
                 sr = score_token(sig)
         results.append({
             "chain": chain,
