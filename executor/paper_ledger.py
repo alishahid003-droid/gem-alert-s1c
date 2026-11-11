@@ -220,6 +220,22 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
         module = module or _mods.for_paper(source, signal)
     except Exception:  # noqa: BLE001
         module = module or "own"
+    # 11 Nov 2026 (Claude, Ali's core1/core2 pile-in review): real-data finding -- every single
+    # historical case where core1 AND core2 both opened the exact same coin (4/4 cases, all same
+    # chain+entry_mcap within seconds of each other) ended in either a double loss or a split
+    # result (one side wins small, the other loses) -- never a double win. Unlike sprint+compound's
+    # own frequent same-coin overlap (which is mostly profitable on BOTH sides and is deliberately
+    # left untouched -- see CHANGES_11NOV2026.md), core1/core2 doubling up on each other adds
+    # redundant risk with no offsetting upside in the data so far. This does NOT block sprint or
+    # compound from entering the same coin as anyone, including core1/core2 -- only core1<->core2
+    # mutual pile-ins are blocked, and only for CORE12_MUTUAL_BLOCK_MIN minutes (short -- this is
+    # about the same-instant pile-in case, not a long-lived re-entry ban like NO_POP_REENTRY_BLOCK_MIN).
+    if module in ("core1", "core2"):
+        _other = "core2" if module == "core1" else "core1"
+        _block_min = float(os.environ.get("CORE12_MUTUAL_BLOCK_MIN", "3"))
+        if state.cache_get(f"core12_open_recent:{_other}:{chain}:{token}", _block_min * 60):
+            return None
+        state.cache_set(f"core12_open_recent:{module}:{chain}:{token}", True)
     pos = {"id": pid, "module": module, "chain": chain, "token": token, "source": source, "signal": signal,
            "band": band, "tags": tags or {}, "usd": float(usd), "entry_mcap": float(entry_mcap),
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
