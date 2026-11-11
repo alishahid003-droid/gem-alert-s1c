@@ -1,18 +1,24 @@
-"""Combined-equity phase targets across sprint/core1/core2/compound (Ali, 2 Nov 2026, revised).
+"""Combined-equity phase targets across sprint/core1/core2/compound.
 
-Ali's final, explicit structure (2 Nov 2026, superseding the earlier $100->$10k->$116.5k plan):
+STALE/SUPERSEDED (11 Nov 2026, Claude): this module's PHASES dict (A/B/C/D, $10k/$40k/$40k/$40k)
+is an OLDER, separate 4-phase structure from 2 Nov 2026, never armed (phase_target_v1 state has
+never been initialized -- start_phase() is not called anywhere in the live codebase, confirmed by
+grep), so is_paused() always returns False and this module currently affects nothing live. The
+REAL, actually-tracked 5-phase plan (Ali, "Curve C", 7-8 Nov 2026) lives in executor/books.py as
+PHASE_DEFS + the milestone_ladder_v2 state key -- confirmed live and actively tracking real
+progress (Phase 1 past the $1,200 rung as of 11 Nov 2026). This module's structure below has been
+updated to match that real plan for consistency and to remove a stale reference that caused
+confusion earlier today -- if this module is ever armed via start_phase(), it should track the
+SAME real targets PHASE_DEFS already uses live, not the old 4-phase numbers.
 
-  Phase A: $100     -> $10,000   within 96 hours of going live.
-           On hit: alert, STOP trading. Withdraw $9,000. Leave $1,000 to carry into Phase B.
-  Phase B: $1,000   -> $40,000   -- shares a combined 10-day clock with Phase C (5 days
-           "pacing" each, but the real deadline is 10 days for B+C together: if B finishes
-           early, C gets whatever is left of the 10 days).
-           On hit: alert, STOP trading. Withdraw $37,000. Leave $3,000 to carry into Phase C.
-  Phase C: $3,000   -> $40,000   -- the second half of that same combined 10-day B+C window.
-           On hit: alert, STOP trading. Withdraw $37,000. Leave $3,000 to carry into Phase D.
-  Phase D: $3,000   -> $40,000   -- its OWN separate 15-day window, starting fresh once B+C's
-           withdrawals are both done (not counted against the B+C 10 days).
-           On hit: alert, STOP trading. Withdraw $37,000.
+Ali's confirmed 5-phase structure (7-8 Nov 2026 "Curve C", reseed/cashout amounts per PHASE_DEFS
+in executor/books.py; Phase 5 split confirmed 11 Nov 2026):
+
+  Phase 1: $100     -> $10,000    On hit: withdraw $8,500. Leave $1,500 for Phase 2.
+  Phase 2: $1,500    -> $12,000    On hit: withdraw $10,000. Leave $2,000 for Phase 3.
+  Phase 3: $2,000    -> $12,000    On hit: withdraw $10,000. Leave $2,000 for Phase 4.
+  Phase 4: $2,000    -> $120,000   On hit: withdraw $115,000. Leave $5,000 for Phase 5.
+  Phase 5: $5,000    -> $1,000,000 On hit: withdraw $975,000. Leave $25,000 running.
 
 This is a single combined-equity watcher across sprint+core1+core2+compound together, with a
 hard stop (no book takes a new trade once the current phase's target is hit) and an explicit,
@@ -26,12 +32,8 @@ Works identically in paper mode (now) and live mode (real funds, later) -- it on
 books.equity()/books.can_open(), which already behave uniformly in both modes. Nothing here is
 paper-specific.
 
-B+C combined-window rule (Ali, confirmed): the 10-day clock starts when Phase B starts and does
-NOT reset when B hits and C begins -- it keeps counting through both. Phase D's 15-day window is
-separate and starts fresh when Phase D starts (after C's cashout is done).
-
-Also includes a max-drawdown circuit breaker Ali did NOT explicitly ask for but that this
-session's audit flagged as the missing piece: compound alone has busted to $0 twice in ~36h of
+Also includes a max-drawdown circuit breaker Ali did NOT explicitly ask for but that an earlier
+session's audit flagged as a missing piece: compound alone has busted to $0 twice in ~36h of
 real paper operation. A "trades needed" projection that assumes smooth compounding is not what
 actually happens -- real losing streaks happen. Without a breaker, a bad stretch can erase most
 of the progress toward a target with nobody watching in real time. The breaker does NOT force-
@@ -62,19 +64,29 @@ PHASE_KEY = "phase_target_v1"
 # window_group: phases sharing a window_group share one clock -- the window starts when the FIRST
 # phase in the group starts and does not reset when the next phase in the group begins. A phase
 # with no group (or alone in one) gets its own fresh clock starting at its own start_phase() call.
+# 11 Nov 2026 (Claude): rewritten to match the REAL confirmed 5-phase Curve C plan (see
+# executor/books.py PHASE_DEFS, which is the live, actually-tracked version of these same
+# targets). hours_allowed/drawdown_pause_pct/window_group kept as placeholders consistent with
+# this module's original design; not yet confirmed against PHASE_DEFS, which has no time-window
+# concept at all -- if this module is ever armed, those fields should be reviewed against what
+# Ali actually wants for time limits, separately from the target/cashout/reseed amounts below
+# which ARE the confirmed real numbers.
 PHASES = {
-    "A": {"label": "Phase A: $100 -> $10,000 (96h)", "target_usd": 10_000.0,
-          "cashout_usd": 9_000.0, "reseed_usd": 1_000.0, "hours_allowed": 96.0,
-          "drawdown_pause_pct": 0.50, "next": "B", "window_group": "A"},
-    "B": {"label": "Phase B: $1,000 -> $40,000 (shares 10-day window with C)",
-          "target_usd": 40_000.0, "cashout_usd": 37_000.0, "reseed_usd": 3_000.0,
-          "hours_allowed": 240.0, "drawdown_pause_pct": 0.50, "next": "C", "window_group": "BC"},
-    "C": {"label": "Phase C: $3,000 -> $40,000 (shares 10-day window with B)",
-          "target_usd": 40_000.0, "cashout_usd": 37_000.0, "reseed_usd": 3_000.0,
-          "hours_allowed": 240.0, "drawdown_pause_pct": 0.50, "next": "D", "window_group": "BC"},
-    "D": {"label": "Phase D: $3,000 -> $40,000 (own separate 15-day window)",
-          "target_usd": 40_000.0, "cashout_usd": 37_000.0, "reseed_usd": None,
-          "hours_allowed": 360.0, "drawdown_pause_pct": 0.50, "next": None, "window_group": "D"},
+    "1": {"label": "Phase 1: $100 -> $10,000", "target_usd": 10_000.0,
+          "cashout_usd": 8_500.0, "reseed_usd": 1_500.0, "hours_allowed": 96.0,
+          "drawdown_pause_pct": 0.50, "next": "2", "window_group": "1"},
+    "2": {"label": "Phase 2: $1,500 -> $12,000", "target_usd": 12_000.0,
+          "cashout_usd": 10_000.0, "reseed_usd": 2_000.0, "hours_allowed": 240.0,
+          "drawdown_pause_pct": 0.50, "next": "3", "window_group": "23"},
+    "3": {"label": "Phase 3: $2,000 -> $12,000", "target_usd": 12_000.0,
+          "cashout_usd": 10_000.0, "reseed_usd": 2_000.0, "hours_allowed": 240.0,
+          "drawdown_pause_pct": 0.50, "next": "4", "window_group": "23"},
+    "4": {"label": "Phase 4: $2,000 -> $120,000", "target_usd": 120_000.0,
+          "cashout_usd": 115_000.0, "reseed_usd": 5_000.0, "hours_allowed": 360.0,
+          "drawdown_pause_pct": 0.50, "next": "5", "window_group": "4"},
+    "5": {"label": "Phase 5: $5,000 -> $1,000,000", "target_usd": 1_000_000.0,
+          "cashout_usd": 975_000.0, "reseed_usd": 25_000.0, "hours_allowed": None,
+          "drawdown_pause_pct": 0.50, "next": None, "window_group": "5"},
 }
 
 
