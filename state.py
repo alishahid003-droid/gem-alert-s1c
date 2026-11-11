@@ -283,7 +283,68 @@ def _local_load_all() -> dict:
     return _local_read_file()
 
 
+# 11 Nov 2026 (Ali, found live -- paper_closed_positions silently dropped from 129
+# entries to 3 sometime in a ~10-minute window, with no explanatory traceback found
+# despite a real investigation; a near-identical short-history event already happened
+# once before, 9 Nov 2026, backed up as .gem_alert_state.json.CORRUPTED_20261109_before_restore.
+# Root cause not pinned down to one exact external trigger (leading theory: something
+# outside this process -- OS-level file interference, e.g. a sync/backup tool holding
+# or restoring a stale handle on this file, consistent with the repeated Windows
+# PermissionError traces seen in the same window -- replaced the file wholesale with an
+# old, mostly-empty copy; nothing in this codebase's own write paths can produce that
+# shape of loss, since every writer here only ever appends to these two keys). Since the
+# exact external cause can't be proven, this guards the one chokepoint every local write
+# passes through instead: refuse to WRITE a drastic, implausible shrink of either
+# history-bearing key, no matter what produced the incoming `data`. A real single trade
+# close can never shrink these counts at all (paper_ledger.py only appends) so ANY
+# decrease here is already suspicious; this allows a small decrease (manual edits,
+# dedup drops) but blocks a collapse, and saves the would-be-destructive `data` to a
+# side file for inspection rather than destroying the real history silently.
+_SHRINK_GUARD_KEYS = ("paper_closed_positions", "books_deposits_v1")
+_SHRINK_GUARD_MIN_ABS_DROP = 20   # a drop smaller than this is allowed through unexamined
+_SHRINK_GUARD_MIN_RATIO = 0.5     # a drop to below 50% of the current count is blocked
+
+
+class StateShrinkGuardError(RuntimeError):
+    """Raised when a save would collapse paper_closed_positions (or books_deposits_v1)
+    to a small fraction of its current size. Callers should treat this exactly like any
+    other failed save (the live file is left untouched, same as a PermissionError that
+    exhausts its retries) -- NOT silently swallowed, NOT retried in a loop that could
+    eventually succeed by chance against a real external overwrite."""
+
+
+def _shrink_guard_check(new_data: dict):
+    try:
+        cur_on_disk = _local_read_file()
+    except Exception:
+        return  # can't check against an unreadable file; don't block on top of that
+    for key in _SHRINK_GUARD_KEYS:
+        cur_val = cur_on_disk.get(key)
+        new_val = new_data.get(key)
+        cur_len = len(cur_val) if isinstance(cur_val, (list, dict)) else None
+        new_len = len(new_val) if isinstance(new_val, (list, dict)) else (0 if new_val is None else None)
+        if cur_len is None or new_len is None:
+            continue
+        drop = cur_len - new_len
+        if drop < _SHRINK_GUARD_MIN_ABS_DROP:
+            continue
+        if cur_len > 0 and new_len < cur_len * _SHRINK_GUARD_MIN_RATIO:
+            side_path = LOCAL_STATE_FILE + f".BLOCKED_SHRINK_{int(time.time())}.json"
+            try:
+                with open(side_path, "w", encoding="utf-8") as f:
+                    json.dump(new_data, f)
+            except OSError:
+                side_path = "(could not even write the side file)"
+            raise StateShrinkGuardError(
+                f"refused to save: key {key!r} would shrink from {cur_len} to {new_len} "
+                f"entries ({drop} lost, below {_SHRINK_GUARD_MIN_RATIO:.0%} of current). "
+                f"Live file left untouched. The blocked write was saved to {side_path} "
+                f"for inspection, not applied."
+            )
+
+
 def _local_save_all(data: dict):
+    _shrink_guard_check(data)
     directory = os.path.dirname(os.path.abspath(LOCAL_STATE_FILE))
     fd, tmp = tempfile.mkstemp(prefix=".gem_state_", suffix=".tmp", dir=directory)
     try:
