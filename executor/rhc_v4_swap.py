@@ -49,8 +49,12 @@ fully unit-testable in isolation. Signing and sending it is
 swap_executor.py's job, same as every other chain there. Native-currency
 (RHC ether, address(0)) swaps need no Permit2 step, since the input value
 is sent as the transaction's own msg.value and settled directly -- an
-ERC20-input swap (needed for RHC auto-SELL, not yet built) would need a
-Permit2 approve/permit step first, which this module does not attempt.
+ERC20-input swap (needed for RHC auto-SELL) needs a Permit2 approve/permit
+step first, which this module does not attempt itself: that 2-step
+approval chain lives in executor/swap_executor.py's _sell_robinhood_chain
+(built, tested -- see test_rhc_sell.py). This file's own comment used to
+say that sell path was "not yet built"; that was stale by the 12 Nov 2026
+live-readiness audit and has been corrected here.
 """
 from typing import Optional
 

@@ -62,14 +62,14 @@ above needs no signup, no key, nothing added to the deploy checklist
 (Robinhood Chain's caveat above is a rate-limit note, not a signup
 requirement).
 
-Not yet wired into swap_executor.py -- that module's sign+send steps are
-themselves still unbuilt/untested for all three chains (see its own
-docstring). This is prep work for that build: when execute_buy_solana /
-execute_buy_bsc / execute_buy_robinhood_chain's sign+send steps are
-written, each should call rpc_call(<chain>, ...) here instead of hitting a
-single hardcoded endpoint directly, so the RPC-reliability problem is
-solved for every chain at the same time as the buy paths themselves, not
-bolted on afterward chain by chain.
+WIRED into swap_executor.py: every real send/read on every chain (Solana,
+BSC, Base, Robinhood Chain, buy AND sell) calls rpc_call(<chain>, ...)
+here, confirmed by a full read of swap_executor.py 12 Nov 2026. This
+docstring previously said "not yet wired" / "prep work for that build" --
+that was stale; the wiring was completed sometime after this comment was
+written and never updated. UNTESTED against a live network still applies
+(see swap_executor.py's own status note) -- that is a different claim
+from "not wired," and is the only one still true.
 """
 import os
 import time

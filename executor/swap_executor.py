@@ -955,7 +955,11 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
     confirmed Sept 22, 2026 (see module docstring above). Pays with native
     RHC ether via the transaction's own msg.value, so no Permit2/approve
     step is needed here (that's only required for an ERC20 input, i.e.
-    the sell side -- not yet built).
+    the sell side -- see _sell_robinhood_chain below, which IS built: this
+    comment previously said "not yet built" and was stale by the time of
+    the 12 Nov 2026 live-readiness audit; _sell_robinhood_chain has been
+    complete, with its own 7-test suite in test_rhc_sell.py, since the
+    Permit2 2-step approval chain was added).
 
     Same honest status as every other chain here until a real send
     confirms it: written, guarded, but UNTESTED against a live network.
