@@ -32,14 +32,21 @@ def _seed_closed_trade(module: str, pnl_usd: float, now: float, trade_id: str):
 
 
 def test_phase1_fires_first_light_banking_level_when_nowhere_near_10k():
+    # 12 Nov 2026 (Ali, phase-engine isolation): _combined_equity_for_milestones() now scopes to
+    # compound + sprint ONLY (PHASE_ENGINE_BOOKS) -- core1/core2 run independently after their
+    # one-time cascade seed and no longer count toward the phase climb. Default seed is now
+    # 2 x $100 = $200, not 4 x $100 = $400 -- which sits BELOW the first ladder rung ($250), so
+    # a small bump is needed to actually clear it and exercise the "fires the first light
+    # banking level" behavior this test is about.
     now = time.time()
+    _seed_closed_trade("compound", 100.0, now, "t0")  # $200 default + $100 pnl = $300, clears $250 rung
     combined = books._combined_equity_for_milestones()
-    assert combined == 400.0   # 4 x $100 default seed, nowhere near $10,000
+    assert combined == 300.0
     result = books.check_milestone_ladder(now)
     assert result["phase"] == 1
     assert result["level"] == 250.0
     assert result["pct"] == 0.10
-    assert result["banked_total"] == pytest.approx(400.0 * 0.10, abs=0.01)
+    assert result["banked_total"] == pytest.approx(300.0 * 0.10, abs=0.01)
     assert "event" not in result
 
 

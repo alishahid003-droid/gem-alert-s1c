@@ -621,27 +621,82 @@ PHASE2_TARGET_USD = PHASE_DEFS[2]["trigger"]
 PHASE2_LADDER = PHASE_DEFS[2]["ladder"]
 
 
+# 12 Nov 2026 (Claude, Ali's phase-engine isolation request): the phase 1-5 climb is now scoped
+# to compound + sprint ONLY. core1/core2 were getting crowded to near-zero equity share by
+# Phase 4-5 under the old proportional-to-equity-share split (compound's bigger Curve C stake
+# bands out-grow sprint's in dollar terms every phase, and the old split locked that gap in and
+# widened it phase over phase -- confirmed by simulation: sprint's reseed share fell from $100 in
+# Phase 1 to $0.06 by Phase 5 at a 60% win rate). Ali's decision: core1/core2 keep their existing
+# one-time cascade seed (check_sprint_compound_cascade(), $200 total, unchanged) and then run
+# fully independently from that point on -- their own trades, their own win rate, their own
+# equity, reported separately, never folded into the phase-climb numbers or topped up again by
+# any future phase cashout/reseed. Only compound and sprint count toward phase triggers, and only
+# compound and sprint receive each phase's cashout/reseed, split a FIXED 65% compound / 35%
+# sprint (not proportional to equity share) -- simulation-tested (3000 runs x 3 win-rate
+# scenarios: 55/60/65%) to keep sprint meaningfully active through Phase 5 (cumulative sprint
+# trades by Phase 5 rose from ~98 to ~278 at 60% win rate) while the grand total moves by under
+# 0.1% and the bust rate stays at 0% in every scenario tested.
+PHASE_ENGINE_BOOKS = ("sprint", "compound")
+PHASE_ENGINE_SPLIT = {"compound": 0.65, "sprint": 0.35}
+
+
 def _combined_equity_for_milestones() -> float:
     """Local, self-contained sum -- deliberately NOT importing phase_target.combined_equity()
     here, because phase_target.py already imports THIS module (books.py); importing back would
-    create a circular import. Same 4 real books, same equity() calls, just inlined."""
-    return round(sum(equity(b) for b in ("sprint", "core1", "core2", "compound")), 2)
+    create a circular import. 12 Nov 2026: scoped to PHASE_ENGINE_BOOKS (compound + sprint)
+    only -- core1/core2 no longer count toward phase triggers, see PHASE_ENGINE_BOOKS comment
+    above."""
+    return round(sum(equity(b) for b in PHASE_ENGINE_BOOKS), 2)
+
+
+def _split_fixed_amount_capped(total_usd: float) -> dict:
+    """Splits `total_usd` a FIXED 65/35 (compound/sprint) per PHASE_ENGINE_SPLIT, but never asks
+    a book to pay out more than its own current equity -- any shortfall (a book's target share
+    exceeds what it actually has) spills to the OTHER phase-engine book instead of silently
+    recording a cash-out the book can't cover (equity() floors at 0.0, so an uncapped split would
+    have recorded phantom money -- caught in sandbox testing 12 Nov 2026 via a $20k-pnl-into-
+    compound-only test fixture, where sprint only had $100 but a naive 35% split tried to take
+    $2,975 from it). If BOTH books together can't cover total_usd, pays out everything either
+    book has (same 'take what's real' principle _fixed_cashout_combined already used)."""
+    books_list = list(PHASE_ENGINE_BOOKS)
+    target = {b: round(total_usd * PHASE_ENGINE_SPLIT[b], 2) for b in books_list}
+    # last book absorbs the rounding remainder so the two targets sum to exactly total_usd
+    allocated = sum(target[b] for b in books_list[:-1])
+    target[books_list[-1]] = round(total_usd - allocated, 2)
+
+    avail = {b: equity(b) for b in books_list}
+    final = {}
+    shortfall = 0.0
+    for b in books_list:
+        take = min(target[b], avail[b])
+        shortfall += target[b] - take
+        final[b] = take
+    if shortfall > 0.01:
+        # spill the shortfall to whichever book still has room, largest-remaining-capacity first
+        for b in sorted(books_list, key=lambda x: avail[x] - final[x], reverse=True):
+            room = round(avail[b] - final[b], 2)
+            if room <= 0:
+                continue
+            extra = min(room, shortfall)
+            final[b] = round(final[b] + extra, 2)
+            shortfall = round(shortfall - extra, 2)
+            if shortfall <= 0.01:
+                break
+    return final
 
 
 def _bank_combined_pct(pct: float, reason: str, now: float) -> dict:
-    """Banks `pct` of CURRENT combined equity, proportionally out of each of the 4 real books
-    (same CASHOUT_KEY mechanism check_cashout()/check_compound_split() both already use)."""
+    """Banks `pct` of CURRENT combined equity, split a FIXED 65/35 (compound/sprint) via
+    _split_fixed_amount_capped -- NOT proportional to equity share, and NOT touching core1/core2
+    at all. 12 Nov 2026 change, see PHASE_ENGINE_BOOKS comment above for why."""
     combined = _combined_equity_for_milestones()
     bank_total = round(combined * pct, 2)
-    real_books = ("sprint", "core1", "core2", "compound")
-    book_equities = {b: equity(b) for b in real_books}
     rec = state.get_value(CASHOUT_KEY)
     rec = rec if isinstance(rec, dict) else {}
     per_book_banked = {}
     if bank_total > 0:
-        for b in real_books:
-            share = (book_equities[b] / combined) if combined > 0 else 0.0
-            amount = round(bank_total * share, 2)
+        split = _split_fixed_amount_capped(bank_total)
+        for b, amount in split.items():
             if amount <= 0:
                 continue
             rec.setdefault(b, []).append({"ts": now, "amount": amount, "reason": reason})
@@ -652,19 +707,17 @@ def _bank_combined_pct(pct: float, reason: str, now: float) -> dict:
 
 
 def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, now: float) -> dict:
-    """Hard, fixed-amount cash-out (not a %) off combined equity, pulled proportionally from each
-    of the 4 real books, leaving exactly `reseed_usd` worth of combined equity behind (not a flat
-    reseed per book -- the TOTAL left behind across all 4 books sums to reseed_usd). Mirrors
-    check_cashout()'s own fixed-reseed pattern, scaled to the combined total instead of one book."""
+    """Hard, fixed-amount cash-out (not a %) off combined compound+sprint equity, split a FIXED
+    65/35 (compound/sprint) via _split_fixed_amount_capped -- NOT proportional to equity share,
+    and NOT touching core1/core2 at all. 12 Nov 2026 change, see PHASE_ENGINE_BOOKS comment above
+    for why. Leaves exactly `reseed_usd` worth of combined compound+sprint equity behind, same
+    65/35 split, same real-overshoot-kept and never-take-more-than-a-book-has principles."""
     combined = _combined_equity_for_milestones()
-    real_books = ("sprint", "core1", "core2", "compound")
-    book_equities = {b: equity(b) for b in real_books}
     rec = state.get_value(CASHOUT_KEY)
     rec = rec if isinstance(rec, dict) else {}
     per_book_cashed = {}
-    for b in real_books:
-        share = (book_equities[b] / combined) if combined > 0 else 0.0
-        amount = round(cashout_usd * share, 2)
+    split = _split_fixed_amount_capped(cashout_usd)
+    for b, amount in split.items():
         if amount <= 0:
             continue
         rec.setdefault(b, []).append({"ts": now, "amount": amount, "reason": reason})
