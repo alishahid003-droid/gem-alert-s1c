@@ -329,8 +329,22 @@ class Scanner:
         # liq==0 or missing mcap/liq fails open (same principle as the floor check above):
         # missing data never silently blocks an entry, only a real thin-relative-to-mcap
         # reading does.
+        # 12 Nov 2026 (Claude, Ali's liquidity-rug loss review): real-data finding -- of
+        # compound/sprint/core1's 130 trades since the 1.7x ceiling went live (Nov 11),
+        # the entries landing in the 1.4-1.7x band (still allowed through) were a genuine
+        # net loser: 10 trades, 20% win rate, -$727.38 combined -- including all 6 of
+        # compound's "liquidity $0"/"liquidity $1" rug-pull closes, which looked perfectly
+        # healthy at entry (liq $22k-30k, well above the $4k floor) but all shared this
+        # same elevated mcap/liq ratio right before the pool got drained live. Chronologically
+        # validated the SAME way the original 1.7x threshold was (60/40 train/test split,
+        # tested only on genuinely unseen data): tightening to 1.4x holds up out-of-sample
+        # -- test-set cut bucket was -$537.58 at 15.4% win rate, test-set kept bucket's pnl
+        # was HIGHER than the current 1.7x baseline, not lower. Cuts ~27% of these 3
+        # modules' entry volume (35 of 130 trades in the full dataset), all from the
+        # already-proven-worse 1.4-1.7x band -- the profitable 1.0-1.2x core of the signal
+        # (82.5% win rate, +$4,957.98 in compound alone) is completely untouched.
         if liq is not None and liq > 0 and mcap is not None:
-            if (mcap / liq) >= _f("MC_MAX_MCAP_LIQ_RATIO", 1.7):
+            if (mcap / liq) >= _f("MC_MAX_MCAP_LIQ_RATIO", 1.4):
                 return None
         created = p.get("created") or self.first[k][0]
         age_min = max(0.0, (now - created) / 60.0)

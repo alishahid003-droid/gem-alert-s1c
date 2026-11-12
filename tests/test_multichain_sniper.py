@@ -221,7 +221,11 @@ def test_solana_blocked_by_default_in_multichain_sniper():
 def test_solana_enabled_env_override_restores_old_behavior(monkeypatch):
     monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
     sc = m.Scanner()
-    d = sc.evaluate(_pool(addr="SolAny2", chain="solana", mcap=15_000.0), 10_000.0)
+    # mcap=12_000 against _pool's default liq=9_000 -> ratio 1.33x, safely under the
+    # 12 Nov 2026 MC_MAX_MCAP_LIQ_RATIO tightening (1.7x -> 1.4x) -- this test is about the
+    # MC_SOLANA_ENABLED override, not the liquidity-ratio gate, so the fixture only needs to
+    # clear whatever that gate's current ceiling is, not hit a specific historical value.
+    d = sc.evaluate(_pool(addr="SolAny2", chain="solana", mcap=12_000.0), 10_000.0)
     assert d and d["chain"] == "solana"
 
 
