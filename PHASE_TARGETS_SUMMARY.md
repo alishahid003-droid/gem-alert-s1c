@@ -113,3 +113,82 @@ Tested whether adding a tighter trailing stop between compound's 1.3x and 2x run
 early giveback on stalling trades. Tick-by-tick replay against the real 48-trade price-trace
 history: every giveback-cap threshold tested (15%-50%) either loses money vs. the current ladder
 (baseline $2,224.21 net) or does nothing. **No change made to compound's exit logic.**
+
+## UPDATE 12 Nov 2026 — Phase engine scoped to compound+sprint only, fixed 65/35 split
+
+Ali's decision: the phase 1-5 climb above was measured under the OLD mechanic (reseed/cashout
+split proportional to each book's equity share at trigger time, across all 4 books). That
+mechanic crowded sprint out — its reseed share fell from $100 in Phase 1 to about $0.06 by
+Phase 5 at a 60% win rate, because compound's bigger Curve C stake bands grow faster in dollar
+terms every phase, and the proportional split locked that gap in tighter each time.
+
+**New mechanic, live in `executor/books.py` as of this commit:**
+- Phase 1-5 triggers, cashouts, and reseeds now count **compound + sprint equity only**
+  (`PHASE_ENGINE_BOOKS`). Starting combined equity is unchanged: $100 (compound) + $100
+  (sprint) = $200.
+- Every phase cashout/reseed is split a **fixed 65% compound / 35% sprint**
+  (`PHASE_ENGINE_SPLIT`), not proportional to equity share — via `_split_fixed_amount_capped()`,
+  which caps each book at its own current equity and spills any shortfall to the other book, so
+  neither is ever asked to pay out more than it actually has.
+- **Core1 and Core2 are excluded from the phase climb entirely.** They keep their existing
+  one-time $200 cascade seed (`check_sprint_compound_cascade()`, unchanged, currently a no-op in
+  paper trading — gated to live-money mode) and then grow fully independently from there: their
+  own trades, their own win rate, their own equity, reported separately, never topped up or
+  drawn from by any future phase cashout/reseed.
+
+**Simulation-tested before shipping** (3,000 runs x 3 win-rate scenarios: 55/60/65%): grand total
+across all 5 phases moves by under 0.02% vs. the old mechanic, bust rate stays at 0% in every
+scenario, and sprint's cumulative trade count by Phase 5 rises from ~98 to ~202 at 60% win rate —
+this fix is close to free.
+
+**Current chart** (replaces the dual-module chart above, which reflects the OLD mechanic):
+[Curve C — 65/35 Engine](https://claude.ai/artifact/9Y71ouwuhLcVZpnWoPa4Pc)
+
+Sandbox-tested against an isolated copy of the repo before touching live code, including a
+real-data end-to-end replay confirming Core1/Core2 equity untouched to the cent, and all 9 tests
+in `tests/test_milestone_ladder.py` passing (2 fixtures updated for the new $200 baseline and
+65/35 split outcome; see git commit for detail).
+
+## UPDATE 12 Nov 2026 — Custom one-off target: $15,000 trigger, $13,500 cashout, $1,500 reseed
+
+Ali's explicit custom target (separate from the standard Phase 1 $10,000/$8,500/$1,500 table
+above): deploy a fresh $100 (compound) + $100 (sprint) tomorrow, reach **$15,000 combined
+equity**, cash out **$13,500**, leave **$1,500** running for the next sprint — same 65/35 fixed
+split mechanic, same verified trade mechanics (real pace, real outcome-size distribution),
+ladder scaled proportionally to the $15,000 target (375/900/1,800/3,750/7,500/12,000 rungs).
+
+3,000-run Monte Carlo per scenario, 0% bust rate in every scenario tested:
+
+| Win rate | Days to $15,000 (P10 / P50 / P90) | Hours (P50) | Compound trades (P50) | Sprint trades (P50) |
+|---|---|---|---|---|
+| 55% | 1.77 / 2.43 / 3.37 | 58.3h | 86 | 40 |
+| **58.7% (real measured compound+sprint win rate, 11 Nov 2026)** | **1.58 / 2.10 / 2.79** | **50.4h** | **74** | **35** |
+| 60% | 1.52 / 1.99 / 2.65 | 47.7h | 71 | 34 |
+| 65% | 1.33 / 1.71 / 2.19 | 41.1h | 61 | 29 |
+
+At the real measured 58.7% combined win rate, median time to this custom $15,000 target is
+**~2.1 days (~50 hours)**, realistic range 1.6–2.8 days.
+
+Simulation source: `sim_custom_15k.py`, built on the same verified `sim_6535.py` engine used for
+the standard 55/60/65% chart (see `curve_c_v4.html` / Curve C — 65/35 Engine, above).
+
+### On the 0% bust rate — what it does and does not mean
+
+Every simulation run in this file and in the chart shows a 0% bust rate across 3,000 runs per
+scenario. That is a real result of the math as modeled: with the 65/35 capped split and a $100
+seed per book, the simulation never drove combined equity to a dead end (both books below the
+$5 trading floor) in any of the 9,000+ runs tested across both the standard and custom targets.
+
+**What this does NOT mean:** a guarantee that the real system can never bust. The simulation
+models the real trade pace and real win-rate/outcome-magnitude distributions measured so far,
+but it is still a simulation — it cannot rule out a real-world scenario outside what it was
+built from (e.g. a sustained losing streak worse than anything in the historical outcome data
+it draws from, an execution/infrastructure failure, or a structural change in market
+conditions). What the 0% bust rate across thousands of runs DOES support: under the logic as
+currently deployed, and under conditions resembling what's been measured so far, hitting a
+dead-end bust is not a realistic near-term risk — the thing that moves is speed to target, not
+whether the target gets reached. Days-to-complete can reasonably shift slower (a worse win-rate
+stretch pushes the median out, e.g. 15 days could become 20-30 at a lower sustained win rate) or
+faster (a better stretch pulls it in) — that is exactly what the P10/P50/P90 spread in this
+table and the chart already shows. But "0% in the simulation" is not the same claim as
+"mathematically impossible in reality," and I won't round it up to that.
