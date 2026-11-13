@@ -19,7 +19,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 # host fragment -> (label, per_day, per_minute)
 LIMITS = {
     "madeonsol": ("MadeOnSol", 200, None),
-    "geckoterminal": ("GeckoTerminal", None, 8),   # published 30/min, but measured Oct 13: only ~6 calls/min succeed from Ali's IP
+    "geckoterminal": ("GeckoTerminal", None, 4),   # published 30/min; measured Oct 13 ~6/min succeeded, but by 13 Nov 2026 real-world ceiling had dropped further -- live traffic that day showed ~5 successes/min regardless of attempt rate (6-8/min attempts only burned 429s, 23% of the day's 5,696 calls wasted). Lowered to 4 so the gate (GATE_FRACTION=0.8 -> cap of 3) stays under the real ceiling with near-100% success instead of chasing a published limit the API doesn't actually honor from Ali's IP.
     "dexscreener": ("DexScreener", None, 300),
     "gopluslabs": ("GoPlus", None, 30),
     "birdeye": ("Birdeye", None, 60),

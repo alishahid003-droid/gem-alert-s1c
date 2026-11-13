@@ -807,12 +807,29 @@ def fetch_dexscreener_snapshot(chain: str, address: str) -> Optional[dict]:
     if not slug or not address:
         return None
     result = get_json(f"https://api.dexscreener.com/token-pairs/v1/{slug}/{address}")
-    if not result.get("ok"):
+    pairs = result.get("json") if result.get("ok") else None
+    best = None
+    if isinstance(pairs, list) and pairs:
+        best = max(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
+    if best is None:
+        # 13 Nov 2026 (Ali -- real incident: 17 open positions, including 6 on early_compound,
+        # stuck with last_mcap=None for 2.5-3h straight; root cause confirmed live: DexScreener
+        # hadn't indexed these brand-new robinhood_chain pools yet, and this single-token
+        # position-management path had no second source to try -- unlike
+        # layer14_revival.fetch_dexscreener_batch, which already falls back to GeckoTerminal for
+        # exactly this case via GT_FALLBACK_CHAINS/_gt_token_fallback). Mirrors that same fallback
+        # here so a brand-new/unindexed-on-DexScreener token still gets priced via GeckoTerminal
+        # instead of sitting unpriced until DexScreener catches up or (if feed_outage never
+        # triggers because the REST of the book IS pricing fine) risking a write-off clock.
+        # GT_FALLBACK_CHAINS today = {"robinhood_chain"} -- other chains still return None here,
+        # same fail-closed posture as before this fix.
+        from layers.layer14_revival import GT_FALLBACK_CHAINS, _gt_token_fallback
+        if chain in GT_FALLBACK_CHAINS:
+            gt = _gt_token_fallback(chain, address)
+            if gt is not None:
+                best = gt
+    if best is None:
         return None
-    pairs = result.get("json")
-    if not isinstance(pairs, list) or not pairs:
-        return None
-    best = max(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
     try:
         price_usd = float(best["priceUsd"])
     except (KeyError, TypeError, ValueError):
