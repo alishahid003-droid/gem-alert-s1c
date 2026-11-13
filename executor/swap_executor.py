@@ -474,6 +474,45 @@ def _encode_router_call(router, fn_name: str, args: list) -> str:
     return router.encodeABI(fn_name=fn_name, args=args)  # web3 < 7 fallback
 
 
+def _cap_sell_amount_to_real_balance(chain: str, token_checksum: str, wallet_address: str,
+                                      raw_amount: int) -> "tuple[int, Optional[str]]":
+    """Reads the wallet's REAL on-chain balanceOf for this token and caps raw_amount to
+    it, returning (capped_raw_amount, warning_or_None). Added 14 Nov 2026 after a real
+    failed live RHC sell reverted with Permit2's TRANSFER_FROM_FAILED: the caller passed
+    amount_tokens=121.97133168437847 (a Python float re-derived from an earlier buy's
+    filled_amount_tokens), which re-encodes to 121971331684378476544 raw units -- 9266
+    wei units MORE than the wallet's actual real balance of 121971331684378467278,
+    confirmed directly against the chain. Pure float precision loss (doubles only carry
+    ~15-17 significant digits; 18-decimal token amounts routinely need more), and every
+    real call site in this file (defensive_sell.py, exit_rules.py, paper_ledger.py,
+    compound_scalper.py, moonbag.py, campaign_milestones.py) passes a stored float the
+    same way -- so this isn't specific to one test, it's a standing risk for any real
+    sell of a stored amount. transferFrom reverts on a shortfall of even 1 wei, so
+    rounding the request down to whatever the chain actually shows, rather than trusting
+    the caller's float, fixes the whole class at once: real on-chain state wins over a
+    computed number every time. A request that's already <= the real balance passes
+    through unchanged (no warning); a request that's larger is capped down and flagged
+    so the caller's log line can see it happened, instead of it being silent."""
+    try:
+        from web3 import Web3  # type: ignore
+        balance_calldata = "0x70a08231" + Web3.to_checksum_address(wallet_address)[2:].lower().zfill(64)
+        balance_result = rpc_call(chain, "eth_call", [{"to": token_checksum, "data": balance_calldata}, "latest"])
+        if not balance_result.get("ok"):
+            return raw_amount, None  # can't verify -- proceed with the caller's amount rather than block the sell
+        raw = balance_result.get("result")
+        if not isinstance(raw, str) or not raw.startswith("0x"):
+            return raw_amount, None
+        real_balance = int(raw, 16)
+    except Exception:  # noqa: BLE001 -- a balance check must never itself block a real sell
+        return raw_amount, None
+
+    if real_balance < raw_amount:
+        return real_balance, (f"requested amount exceeded real on-chain balance by "
+                               f"{raw_amount - real_balance} raw units -- capped to the real balance")
+    return raw_amount, None
+
+
+
 def _bnb_price_usd() -> Optional[float]:
     """Live BNB/USD via PancakeSwap's own on-chain getAmountsOut (1 WBNB ->
     USDT), read through the RPC failover pool via eth_call -- same
@@ -786,6 +825,11 @@ def _sell_base(token_address: str, amount_tokens: float) -> ExecutionResult:
     except (TypeError, ValueError):
         return ExecutionResult(False, f"could not parse token decimals from {decimals_result.get('result')}")
     raw_amount = int(amount_tokens * (10 ** decimals))
+    raw_amount, _balance_cap_warning = _cap_sell_amount_to_real_balance("base", token_checksum, account.address, raw_amount)
+    if _balance_cap_warning:
+        print(f"[swap_executor] base sell: {_balance_cap_warning}", flush=True)
+    if raw_amount <= 0:
+        return ExecutionResult(False, f"amount_tokens {amount_tokens} converts to 0 raw units (or wallet holds none) -- refusing")
 
     router_addr = Web3.to_checksum_address(UNISWAP_V2_ROUTER_BASE)
 
@@ -1318,6 +1362,11 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
     except (TypeError, ValueError):
         return ExecutionResult(False, f"could not parse token decimals from {decimals_result.get('result')}")
     raw_amount = int(amount_tokens * (10 ** decimals))
+    raw_amount, _balance_cap_warning = _cap_sell_amount_to_real_balance("bsc", token_checksum, account.address, raw_amount)
+    if _balance_cap_warning:
+        print(f"[swap_executor] bsc sell: {_balance_cap_warning}", flush=True)
+    if raw_amount <= 0:
+        return ExecutionResult(False, f"amount_tokens {amount_tokens} converts to 0 raw units (or wallet holds none) -- refusing")
 
     router_addr = Web3.to_checksum_address(PANCAKESWAP_V2_ROUTER_BSC)
 
@@ -1436,8 +1485,11 @@ def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> Execution
     except (TypeError, ValueError):
         return ExecutionResult(False, f"could not parse token decimals from {decimals_result.get('result')}")
     raw_amount = int(amount_tokens * (10 ** decimals))
+    raw_amount, _balance_cap_warning = _cap_sell_amount_to_real_balance("robinhood_chain", token_checksum, account.address, raw_amount)
+    if _balance_cap_warning:
+        print(f"[swap_executor] robinhood_chain sell: {_balance_cap_warning}", flush=True)
     if raw_amount <= 0:
-        return ExecutionResult(False, f"amount_tokens {amount_tokens} converts to 0 raw units -- refusing")
+        return ExecutionResult(False, f"amount_tokens {amount_tokens} converts to 0 raw units (or wallet holds none) -- refusing")
 
     # Step 1: ERC20 -> Permit2 allowance.
     erc20_allowance_calldata = _encode_router_call(token, "allowance", [account.address, PERMIT2_RHC])
