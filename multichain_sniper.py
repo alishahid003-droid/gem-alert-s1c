@@ -755,7 +755,7 @@ def run_loop(stop: Optional[threading.Event] = None):
                         book.mark_entered(d["chain"], d["addr"])
                     try:
                         print("[multichain] ENTRY", d["chain"], str(d["name"]).encode("ascii", "replace").decode(),
-                              f"mcap=${d['mcap']:,.0f} age={d['age_min']}m", d["confirmations"], res, flush=True)
+                              d["addr"], f"mcap=${d['mcap']:,.0f} age={d['age_min']}m", d["confirmations"], res, flush=True)
                     except Exception:  # noqa: BLE001
                         pass
             if book is not None:
