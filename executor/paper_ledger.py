@@ -236,6 +236,24 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
         if state.cache_get(f"core12_open_recent:{_other}:{chain}:{token}", _block_min * 60):
             return None
         state.cache_set(f"core12_open_recent:{module}:{chain}:{token}", True)
+    # 13 Nov 2026 (Claude, Ali's cross-module rug-pile-in review -- Sakura/inuhao incident):
+    # real-data finding -- when a rug hits one module on a coin, the OTHER modules (including
+    # sprint/compound, which are never blocked by the core1/core2 rule above) were still opening
+    # or holding that same coin seconds later. Confirmed from real timestamps on today's incident:
+    # core1 closed Sakura as rug_liquidity at ts=...572, but compound didn't even OPEN its own
+    # Sakura position until ts=...596 -- 24 seconds after core1 had already seen it collapse.
+    # That gap means a simple "any module saw a confirmed rug on this exact token, block
+    # everyone (including sprint/compound) from entering it" check has real lead time to work
+    # with here, unlike the instant-collapse case probation_sizing.py already documents as
+    # structurally uncatchable. Unlike the core1/core2 mutual block above, this is NOT symmetric
+    # by module pairing -- ANY module's confirmed rug blocks ALL modules (itself included, in
+    # case of a stale/duplicate signal) from re-entering, for RUG_SIBLING_BLOCK_MIN minutes.
+    # This only fires on a CONFIRMED rug close (see the two rug_liquidity close sites in
+    # manage() below) -- never on a routine stop-loss/no-pop exit, which is a normal trade
+    # outcome, not evidence the coin itself is dangerous for other modules to hold.
+    _rug_block_min = float(os.environ.get("RUG_SIBLING_BLOCK_MIN", "10"))
+    if state.cache_get(f"rug_seen:{chain}:{token}", _rug_block_min * 60):
+        return None
     pos = {"id": pid, "module": module, "chain": chain, "token": token, "source": source, "signal": signal,
            "band": band, "tags": tags or {}, "usd": float(usd), "entry_mcap": float(entry_mcap),
            "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
@@ -376,6 +394,45 @@ def _close(pos: dict, exit_type: str, reason: str, now: float) -> dict:
     pos["pnl_pct"] = round(pos["pnl_usd"] / pos["usd"] * 100, 2) if pos["usd"] else 0.0
     pos["win"] = pos["pnl_usd"] > 0
     return pos
+
+
+def _force_close_rug_siblings(book: dict, chain: str, token: str, rugged_module: str, now: float) -> list:
+    """13 Nov 2026 (Claude, Ali's Sakura/inuhao incident review): called the instant any module
+    closes a position as rug_liquidity or rug_liquidity_early. Finds every OTHER module's
+    position still open on this exact (chain, token) in the current book and force-closes it
+    too, instead of leaving it to that module's own independent liquidity check to eventually
+    catch up -- which is exactly what let sprint and compound both ride Sakura/inuhao down after
+    core1 had already seen liquidity collapse to near-zero (confirmed from real timestamps: core1
+    closed Sakura ~24s before compound even opened its own position on it).
+
+    Prices the forced close at the rugged position's OWN entry_mcap * 0.01, the same convention
+    the dead-liquidity rug_liquidity close already uses just above -- a drained pool cannot be
+    sold into for real value, so this does not pretend the sibling got a better exit than the
+    position that actually detected the rug. Tagged exit_type="rug_liquidity_sibling" (distinct
+    from "rug_liquidity"/"rug_liquidity_early") specifically so this is never confused in the
+    data with a position that independently detected its own rug -- it is always clear from the
+    exit_type alone that this close was triggered BY a sibling's rug, not by this position's own
+    liquidity reading.
+
+    HONEST LIMITATION: this only helps when the siblings' entries/exits are spread out enough in
+    time for this to matter (confirmed true for Sakura/inuhao: 9-30s real spread) -- an instant,
+    single-tick collapse that catches every module in the exact same cycle is still uncatchable
+    by this or any other cycle-based mechanism, same limitation probation_sizing.py already
+    documents for the entry side."""
+    closed = []
+    for sibling_pid, sibling_pos in list(book.items()):
+        if sibling_pos.get("chain") != chain or sibling_pos.get("token") != token:
+            continue
+        if sibling_pos.get("module") == rugged_module:
+            continue  # the position that already closed itself above; nothing left to do here
+        fallback_mcap = sibling_pos.get("entry_mcap", 0) * 0.01
+        _sell(sibling_pos, sibling_pos["remaining"], fallback_mcap,
+              f"sibling module '{rugged_module}' saw this token rug", now,
+              mechanism="rug_sibling_force_close")
+        closed.append(_close(sibling_pos, "rug_liquidity_sibling",
+                              f"force-closed: {rugged_module} detected rug on same token", now))
+        del book[sibling_pid]
+    return closed
 
 
 EARLY_RUNG_PCT = {
@@ -938,6 +995,12 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                                       f"liquidity ${_prev_liq:,.0f} -> ${liq:,.0f} ({(1-liq/_prev_liq)*100:.0f}% drop)", now))
             pos["prev_liquidity_usd"] = liq
             del book[pid]
+            # 13 Nov 2026 (Claude, cross-module rug kill switch): mark this token as rugged so
+            # _open_paper_unlocked refuses new entries from any module, AND force-close any
+            # sibling module still holding this exact (chain, token) right now in this same
+            # pass -- see _force_close_rug_siblings below for the real reasoning/caveats.
+            state.cache_set(f"rug_seen:{pos['chain']}:{pos['token']}", True)
+            closed_now.extend(_force_close_rug_siblings(book, pos['chain'], pos['token'], pos['module'], now))
             continue
         if liq is not None:
             pos["prev_liquidity_usd"] = liq
@@ -948,6 +1011,11 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             _sell(pos, pos["remaining"], pos["entry_mcap"] * 0.01, "liquidity collapsed", now)
             closed_now.append(_close(pos, "rug_liquidity", f"liquidity ${liq:,.0f}", now))
             del book[pid]
+            # 13 Nov 2026 (Claude, cross-module rug kill switch): same as the rug_liquidity_early
+            # site above -- mark the token rugged and force-close any sibling module still
+            # holding it, instead of waiting for that module's own independent check to catch up.
+            state.cache_set(f"rug_seen:{pos['chain']}:{pos['token']}", True)
+            closed_now.extend(_force_close_rug_siblings(book, pos['chain'], pos['token'], pos['module'], now))
             continue
         from executor.price_sanity import accept_dict
         if not accept_dict(pos, mcap):
