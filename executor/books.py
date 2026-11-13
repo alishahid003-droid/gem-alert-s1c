@@ -266,75 +266,83 @@ def check_cashout(book_id: str, now: Optional[float] = None) -> Optional[dict]:
     return result[CASHOUT_KEY][book_id][-1]
 
 
-# 11 Nov 2026 (Ali, NEW cascade -- replaces the 3 Nov check_compound_split() $500/$200 split
-# AND the 8 Nov _maybe_fire_phase1_cascade() $600/$300 Phase-1 split below, both retired):
-# compound and sprint are seeded/run independently toward Phase 1-5 at their own pace. The
-# first of the two to bank (via its own banked()) $200 or more in realized, taken-off-the-table
-# profit fires a ONE-TIME $200 cascade, split evenly $100/$100 to core1 and core2, bringing them
-# live. Ali's exact words (11 Nov 2026): "whichever has the rung fired or the ladder leg fired
-# up to a level of $200 or more, it can then automatically distribute that $200 to core one and
-# core two." Fires at most once across the system's lifetime (guarded by SC_CASCADE_KEY) --
-# whichever of compound/sprint crosses $200 banked first triggers it; the other's own banked
-# total is irrelevant to the trigger (not combined/summed).
+# 13 Nov 2026 (Ali, NEW cascade, corrected version -- replaces the 11 Nov
+# check_sprint_compound_cascade() $200-single-source/$200-to-core1+core2 version above, which
+# is itself now fully removed, not just made a no-op, per Ali's explicit instruction ("you
+# have to remove both of them altogether"). Ali's exact words (13 Nov 2026, confirmed via
+# explicit clarifying question after an earlier drafting pass got the recipients wrong):
+# "Compound alone funds it; Sprint, Core1, Core2 each get $100." This matches Ali's real
+# funding plan -- Compound goes live FIRST, alone, with Sprint/Core1/Core2 all still
+# unfunded/paper-only, and this cascade is what brings all three of them online with real
+# seed money the first time Compound's OWN banked vault proves itself out.
+#
+# Mechanics: compound's own banked() (the real bank-vault total -- NOT combined with sprint,
+# since sprint has no funded capital to bank anything from yet at this point in the plan) is
+# checked every cycle. The first time it reaches SC_CASCADE_TRIGGER_USD ($500-600), $300 is
+# pulled OUT of compound and split evenly 3 ways -- $100 each to sprint, core1, and core2 --
+# as fresh deposited-in seed money. Fires at most once across the system's lifetime (guarded
+# by SC_CASCADE_KEY). Once seeded, sprint/core1/core2 trade under the exact same stake_usd()/
+# pool-borrowing rules as any other seeded book, nothing special-cased. Core1/core2 then run
+# fully independently of the phase-target engine (their win rate and equity never feed back
+# into _combined_equity_for_milestones(), which stays scoped to PHASE_ENGINE_BOOKS =
+# compound+sprint only). Sprint, once seeded by this cascade, DOES join compound in chasing
+# the phase targets -- that's the PHASE_ENGINE_BOOKS scope, unchanged by this cascade.
 SC_CASCADE_KEY = "sprint_compound_cascade_v1"
-SC_CASCADE_TRIGGER_USD = 200.0     # EITHER module's own banked() crossing this fires the cascade
-SC_CASCADE_SOURCES = ("compound", "sprint")   # whichever hits $200 banked first is the funder
-SC_CASCADE_RECIPIENTS = ("core1", "core2")    # even two-way split, $100 each
+SC_CASCADE_TRIGGER_USD = 500.0     # compound's OWN banked() crossing this fires the cascade
+SC_CASCADE_BANK_USD = 300.0        # amount pulled out of compound and split 3 ways
+SC_CASCADE_FUNDER = "compound"     # compound alone funds this -- never sprint, never combined
+SC_CASCADE_RECIPIENTS = ("sprint", "core1", "core2")  # even three-way split, $100 each
 COMPOUND_SPLIT_RECIPIENTS = ()  # RETIRED 11 Nov 2026 -- kept as empty tuple, see can_open() below
 
 
 def check_sprint_compound_cascade(now: Optional[float] = None) -> Optional[dict]:
-    """11 Nov 2026 (Ali, NEW): fires ONCE, the first time EITHER compound's or sprint's own
-    banked() (profit already taken off the table via their respective ladder/stage mechanisms)
-    reaches SC_CASCADE_TRIGGER_USD ($200). Pulls that $200 OUT of whichever module crossed the
-    line (not proportionally from both -- the module that actually earned it funds it, same
-    single-source principle as the retired 8 Nov Phase-1 cascade), and credits core1+core2
-    $100 each as fresh deposited-in seed money via deposits()/DEPOSITS_KEY -- they then trade
-    under the exact same stake_usd()/pool-borrowing rules as any other seeded book, nothing
-    special-cased.
+    """13 Nov 2026 (Ali, NEW, corrected): fires ONCE, the first time COMPOUND's own banked()
+    (profit already taken off the table via its own ladder/stage mechanism) reaches
+    SC_CASCADE_TRIGGER_USD ($500). Pulls SC_CASCADE_BANK_USD ($300) entirely out of compound
+    (compound alone funds this -- there is no proportional split with sprint, since sprint has
+    no banked profit of its own to contribute at this stage of the plan) and credits sprint,
+    core1, and core2 $100 each as fresh deposited-in seed money via deposits()/DEPOSITS_KEY.
+    They then trade under the exact same stake_usd()/pool-borrowing rules as any other seeded
+    book, nothing special-cased. Core1/core2 run fully independently from here on -- their win
+    rate and equity never feed into the phase-trigger math. Sprint, once seeded, joins compound
+    in chasing the phase targets (PHASE_ENGINE_BOOKS already covers compound+sprint, unchanged).
 
-    Guarded by SC_CASCADE_KEY so it can never fire twice even if banked totals dip and re-cross
-    $200 later, or if both compound AND sprint happen to cross $200 in the same or a later cycle
-    -- only the first one to cross it, ever, funds the one-time $200 cascade.
+    Guarded by SC_CASCADE_KEY so it can never fire twice even if compound's banked total dips
+    and re-crosses $500 later.
 
-    Call once per cycle for compound and sprint (can_open() wires this in). REPLACES the retired
-    3 Nov check_compound_split() ($500 total_value -> $200 to sprint/core1/core2) and the retired
-    8 Nov _maybe_fire_phase1_cascade() ($600 combined Phase-1 banked -> $300 to sprint/core1/
-    core2) -- both are now permanent no-ops below, kept for history/the existing test file
-    rather than deleted outright.
+    Call once per cycle for compound (can_open() wires this in, same call site the 11 Nov
+    version used). REPLACES the retired 11 Nov check_sprint_compound_cascade() ($200 single-
+    source, either compound-or-sprint -> $100/$100 core1+core2) -- fully removed per Ali's
+    explicit instruction, not left as a no-op -- and the already-retired-as-no-ops 3 Nov
+    check_compound_split() and 8 Nov _maybe_fire_phase1_cascade(), both further below, kept
+    for history only.
 
-    LIVE-ONLY GATE (Ali, 11 Nov 2026): "this should only fire once we deploy live money, not
-    on the paper testing any further." This cascade checks _live_books_from_env() (the exact
-    same LIVE_BOOKS env var is_live_armed() already reads) -- it only fires if the FUNDING
-    module (compound or sprint, whichever crossed $200 banked) is itself listed in LIVE_BOOKS.
-    In today's paper-only run (LIVE_BOOKS unset/empty), this function is a safe no-op on every
-    call, same as before this change existed -- paper trading continues completely undisturbed.
-    The guard (SC_CASCADE_KEY) is only set once it actually fires for a LIVE-armed funder, so
-    a paper-only run crossing $200 banked repeatedly never consumes the one-time trigger -- the
-    real live-money cascade still has its one shot whenever Ali actually arms LIVE_BOOKS."""
+    LIVE-ONLY GATE (unchanged from 11 Nov, Ali never asked to change this part): "this should
+    only fire once we deploy live money, not on the paper testing any further." Checks
+    _live_books_from_env() -- fires only once compound (the sole funder) is listed in
+    LIVE_BOOKS. In today's paper-only run (LIVE_BOOKS unset/empty), this function is a safe
+    no-op on every call -- paper trading continues completely undisturbed. The guard
+    (SC_CASCADE_KEY) is only set once it actually fires with compound live, so a paper-only
+    run crossing $500 banked repeatedly never consumes the one-time trigger."""
     now = now if now is not None else time.time()
     guard = state.get_value(SC_CASCADE_KEY)
     if isinstance(guard, dict) and guard.get("fired"):
         return None
 
     live_books = _live_books_from_env()
-    funder = None
-    for book_id in SC_CASCADE_SOURCES:
-        if book_id not in live_books:
-            continue  # paper-only (or not-yet-armed) module -- never funds the live cascade
-        if banked(book_id) >= SC_CASCADE_TRIGGER_USD:
-            funder = book_id
-            break
-    if funder is None:
+    if SC_CASCADE_FUNDER not in live_books:
+        return None  # compound not yet live-armed -- never fires on paper alone
+
+    if banked(SC_CASCADE_FUNDER) < SC_CASCADE_TRIGGER_USD:
         return None
 
-    share = round(SC_CASCADE_TRIGGER_USD / len(SC_CASCADE_RECIPIENTS), 2)
+    share = round(SC_CASCADE_BANK_USD / len(SC_CASCADE_RECIPIENTS), 2)
     shares = {b: share for b in SC_CASCADE_RECIPIENTS}
-    leftover = round(SC_CASCADE_TRIGGER_USD - sum(shares.values()), 2)
+    leftover = round(SC_CASCADE_BANK_USD - sum(shares.values()), 2)
     if leftover:
         shares[SC_CASCADE_RECIPIENTS[0]] = round(shares[SC_CASCADE_RECIPIENTS[0]] + leftover, 2)
 
-    def _apply(cur, _now=now, _funder=funder, _shares=shares):
+    def _apply(cur, _now=now, _shares=shares):
         done_guard = cur.get(SC_CASCADE_KEY)
         if isinstance(done_guard, dict) and done_guard.get("fired"):
             # Concurrent call already fired this inside the lock -- bail out, no double-credit.
@@ -342,15 +350,15 @@ def check_sprint_compound_cascade(now: Optional[float] = None) -> Optional[dict]
                     SC_CASCADE_KEY: done_guard}
         rec = cur.get(CASHOUT_KEY)
         rec = dict(rec) if isinstance(rec, dict) else {}
-        rec[_funder] = list(rec.get(_funder) or []) + [
-            {"ts": _now, "amount": SC_CASCADE_TRIGGER_USD, "reason": "sprint_compound_cascade_11nov2026"}]
+        rec[SC_CASCADE_FUNDER] = list(rec.get(SC_CASCADE_FUNDER) or []) + [
+            {"ts": _now, "amount": SC_CASCADE_BANK_USD, "reason": "sprint_compound_cascade_13nov2026"}]
         dep = cur.get(DEPOSITS_KEY)
         dep = dict(dep) if isinstance(dep, dict) else {}
         for _book_id, _amount in _shares.items():
             dep[_book_id] = list(dep.get(_book_id) or []) + [
-                {"ts": _now, "amount": _amount, "reason": "sprint_compound_cascade_11nov2026"}]
-        cascade_result = {"ts": _now, "fired": True, "funder": _funder,
-                           "cascaded_usd": SC_CASCADE_TRIGGER_USD, "shares": _shares}
+                {"ts": _now, "amount": _amount, "reason": "sprint_compound_cascade_13nov2026"}]
+        cascade_result = {"ts": _now, "fired": True, "funder": SC_CASCADE_FUNDER,
+                           "cascaded_usd": SC_CASCADE_BANK_USD, "shares": _shares}
         return {CASHOUT_KEY: rec, DEPOSITS_KEY: dep, SC_CASCADE_KEY: cascade_result}
 
     result = state.atomic_multi_fn([CASHOUT_KEY, DEPOSITS_KEY, SC_CASCADE_KEY], _apply)
@@ -549,31 +557,61 @@ def is_live_armed(book_id: str) -> bool:
 #              sensible checkpoints within the SHORTER climbs Ali specified.
 # }
 PHASE_DEFS: Dict[int, dict] = {
+    # 13 Nov 2026 (Ali, NEW targets -- supersedes the 7 Nov 5-phase structure above wholesale):
+    # "my first target is an immediate $3,000 arrangement... once we achieve that, I'm going to
+    # cash out $2,000, and $1,000 is going to be refeed to phase 2... phase 2 target is going to
+    # be $15,000... the split is going to work the same, 65-35 rule... once $15,000 is achieved,
+    # $14,000 is going to be taken out and $1,000 is going to be reseeded for phase 3 target,
+    # which is going to be $12,000... once phase 3 target is achieved, $10,000 is taken out,
+    # $2,000 feeded for the next target of around $105,000... once that is achieved, $100,000
+    # taken out, remaining reseeded to phase 5 target, $1 million." Phase 4 trigger confirmed
+    # as exactly $105,000 (Ali chose this over $110,000 when asked to pin down "around 105 to
+    # 110"), cashout $100,000, reseed $5,000.
+    #
+    # STRUCTURAL CHANGE from the 7 Nov version, also explicit (Ali, 13 Nov 2026): "to reach
+    # these targets for phase one, only compound will [run]... After phase one is reached and
+    # the reseeding happens of $1,000 to phase two target, that has to be split 65-35 to
+    # compound and sprint. From phase two to phase five, compound and sprint both will
+    # collectively work... core1/core2 work separately on their seeded capital [from the
+    # cascade] and will not be included in the win percentage." So PHASE_ENGINE_BOOKS-style
+    # combined-equity/65-35-split logic applies ONLY from phase 2 onward -- phase 1 is
+    # compound-ALONE (see PHASE1_SOLO_BOOK below and its use in check_milestone_ladder()).
+    # Ali also confirmed (explicit clarifying question, 13 Nov 2026): the cascade ($300 pulled
+    # from compound's own banked() once it crosses $500-600, split $100 each to sprint/core1/
+    # core2) MUST fire before phase 1's $3,000 cashout is allowed to complete -- phase 1 is not
+    # "done" until sprint/core1/core2 have already been seeded by that cascade. See
+    # _phase1_gate_cleared() and its use in check_milestone_ladder() below.
+    #
+    # Ladder rungs for every phase rescaled proportionally to each phase's NEW start->trigger
+    # span (same method used when the 5-phase ladder structure was first built 7 Nov 2026,
+    # confirmed with Ali as the right approach for this revision too, 13 Nov 2026) -- phase 5's
+    # rungs are left effectively unchanged in absolute terms (old span $25k->$1M vs new $5k->
+    # $1M converge to nearly the same checkpoints; recomputed directly off the new span rather
+    # than inherited as a fraction, since the old scheme's first rung ($20k) actually sat BELOW
+    # its own old start ($25k) -- a relationship that doesn't carry over as a fraction).
     1: dict(
-        trigger=10_000.0, cashout=8_500.0, reseed=1_500.0,
+        trigger=3_000.0, cashout=2_000.0, reseed=1_000.0,
         ladder=(
-            (250.0,   0.10),
-            (600.0,   0.12),
-            (1_200.0, 0.15),
-            (2_500.0, 0.18),
-            (5_000.0, 0.20),
-            (8_000.0, 0.22),
+            (144.0,   0.10),
+            (246.0,   0.12),
+            (422.0,   0.15),
+            (803.0,   0.18),
+            (1_535.0, 0.20),
+            (2_414.0, 0.22),
         ),
     ),
     2: dict(
-        trigger=12_000.0, cashout=10_000.0, reseed=2_000.0,
+        trigger=15_000.0, cashout=14_000.0, reseed=1_000.0,
         ladder=(
-            (2_250.0,  0.10),
-            (3_750.0,  0.12),
-            (5_250.0,  0.15),
-            (7_000.0,  0.18),
-            (9_000.0,  0.20),
-            (10_800.0, 0.22),
+            (2_000.0,  0.10),
+            (4_000.0,  0.12),
+            (6_000.0,  0.15),
+            (8_333.0,  0.18),
+            (11_000.0, 0.20),
+            (13_400.0, 0.22),
         ),
     ),
     3: dict(
-        # Same $12,000 trigger/$10,000 cash-out as Phase 2 -- intentional repeat of the same
-        # stage, confirmed by Ali, not a typo.
         trigger=12_000.0, cashout=10_000.0, reseed=2_000.0,
         ladder=(
             (2_750.0,  0.10),
@@ -585,30 +623,37 @@ PHASE_DEFS: Dict[int, dict] = {
         ),
     ),
     4: dict(
-        trigger=120_000.0, cashout=115_000.0, reseed=5_000.0,
+        trigger=105_000.0, cashout=100_000.0, reseed=5_000.0,
         ladder=(
-            (8_000.0,   0.10),
-            (20_000.0,  0.12),
-            (40_000.0,  0.15),
-            (65_000.0,  0.18),
-            (90_000.0,  0.20),
-            (108_000.0, 0.22),
+            (4_687.0,  0.10),
+            (15_435.0, 0.12),
+            (33_348.0, 0.15),
+            (55_739.0, 0.18),
+            (78_130.0, 0.20),
+            (94_252.0, 0.22),
         ),
     ),
     5: dict(
-        # Final target. No automatic cash-out wired yet -- matches the old phase-2 end-state
-        # exactly (ladder only, ask Ali what to do once $1,000,000 is actually close).
+        # Final target. No automatic cash-out wired yet -- same as the prior version, ask Ali
+        # what to do once $1,000,000 is actually close.
         trigger=1_000_000.0, cashout=None, reseed=None,
         ladder=(
-            (20_000.0,  0.10),
-            (60_000.0,  0.12),
-            (150_000.0, 0.15),
-            (350_000.0, 0.18),
-            (600_000.0, 0.20),
-            (850_000.0, 0.22),
+            (24_900.0,  0.10),
+            (64_700.0,  0.12),
+            (154_250.0, 0.15),
+            (353_250.0, 0.18),
+            (602_000.0, 0.20),
+            (850_750.0, 0.22),
         ),
     ),
 }
+
+# 13 Nov 2026 (Ali, NEW): phase 1 runs on compound ALONE -- sprint is not yet seeded/running
+# toward the phase targets at this stage (it only joins from phase 2 onward, once the 65/35
+# reseed split brings it in). Used by check_milestone_ladder()/the _combined_*/_split_*/_bank_*/
+# _fixed_cashout_* helpers below to route phase-1-only math to compound alone instead of the
+# PHASE_ENGINE_BOOKS (compound+sprint) pair those helpers use for phase 2 onward.
+PHASE1_SOLO_BOOK = "compound"
 
 # Backward-compat aliases: some older code/tests may still reference these names directly.
 # They now point at Phase 1's numbers under the new 5-phase scheme (Phase 1 is the closest
@@ -627,9 +672,10 @@ PHASE2_LADDER = PHASE_DEFS[2]["ladder"]
 # bands out-grow sprint's in dollar terms every phase, and the old split locked that gap in and
 # widened it phase over phase -- confirmed by simulation: sprint's reseed share fell from $100 in
 # Phase 1 to $0.06 by Phase 5 at a 60% win rate). Ali's decision: core1/core2 keep their existing
-# one-time cascade seed (check_sprint_compound_cascade(), $200 total, unchanged) and then run
-# fully independently from that point on -- their own trades, their own win rate, their own
-# equity, reported separately, never folded into the phase-climb numbers or topped up again by
+# one-time cascade seed (check_sprint_compound_cascade(), $300 total as of 13 Nov 2026, funded
+# entirely by compound) and then run fully independently from that point on -- their own trades,
+# their own win rate, their own equity, reported separately, never folded into the phase-climb
+# numbers or topped up again by
 # any future phase cashout/reseed. Only compound and sprint count toward phase triggers, and only
 # compound and sprint receive each phase's cashout/reseed, split a FIXED 65% compound / 35%
 # sprint (not proportional to equity share) -- simulation-tested (3000 runs x 3 win-rate
@@ -640,16 +686,20 @@ PHASE_ENGINE_BOOKS = ("sprint", "compound")
 PHASE_ENGINE_SPLIT = {"compound": 0.65, "sprint": 0.35}
 
 
-def _combined_equity_for_milestones() -> float:
+def _combined_equity_for_milestones(books: Optional[tuple] = None) -> float:
     """Local, self-contained sum -- deliberately NOT importing phase_target.combined_equity()
     here, because phase_target.py already imports THIS module (books.py); importing back would
     create a circular import. 12 Nov 2026: scoped to PHASE_ENGINE_BOOKS (compound + sprint)
     only -- core1/core2 no longer count toward phase triggers, see PHASE_ENGINE_BOOKS comment
-    above."""
-    return round(sum(equity(b) for b in PHASE_ENGINE_BOOKS), 2)
+    above. 13 Nov 2026 (Ali, NEW): optional `books` override lets phase 1 (compound-ALONE, see
+    PHASE1_SOLO_BOOK) reuse this same function with a one-book tuple instead of duplicating the
+    sum logic -- defaults to PHASE_ENGINE_BOOKS so every pre-13-Nov call site (phases 2-5)
+    behaves exactly as before, unchanged."""
+    return round(sum(equity(b) for b in (books or PHASE_ENGINE_BOOKS)), 2)
 
 
-def _split_fixed_amount_capped(total_usd: float) -> dict:
+def _split_fixed_amount_capped(total_usd: float, books: Optional[tuple] = None,
+                                split: Optional[dict] = None) -> dict:
     """Splits `total_usd` a FIXED 65/35 (compound/sprint) per PHASE_ENGINE_SPLIT, but never asks
     a book to pay out more than its own current equity -- any shortfall (a book's target share
     exceeds what it actually has) spills to the OTHER phase-engine book instead of silently
@@ -657,9 +707,15 @@ def _split_fixed_amount_capped(total_usd: float) -> dict:
     have recorded phantom money -- caught in sandbox testing 12 Nov 2026 via a $20k-pnl-into-
     compound-only test fixture, where sprint only had $100 but a naive 35% split tried to take
     $2,975 from it). If BOTH books together can't cover total_usd, pays out everything either
-    book has (same 'take what's real' principle _fixed_cashout_combined already used)."""
-    books_list = list(PHASE_ENGINE_BOOKS)
-    target = {b: round(total_usd * PHASE_ENGINE_SPLIT[b], 2) for b in books_list}
+    book has (same 'take what's real' principle _fixed_cashout_combined already used).
+
+    13 Nov 2026 (Ali, NEW): optional `books`/`split` override lets phase 1 (compound-ALONE, see
+    PHASE1_SOLO_BOOK) reuse this same capped-spill logic with a one-book 100% split instead of
+    duplicating it -- default (None) is PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT, so every pre-13-
+    Nov call site (phases 2-5) behaves exactly as before, unchanged."""
+    books_list = list(books or PHASE_ENGINE_BOOKS)
+    split = split or PHASE_ENGINE_SPLIT
+    target = {b: round(total_usd * split[b], 2) for b in books_list}
     # last book absorbs the rounding remainder so the two targets sum to exactly total_usd
     allocated = sum(target[b] for b in books_list[:-1])
     target[books_list[-1]] = round(total_usd - allocated, 2)
@@ -685,18 +741,22 @@ def _split_fixed_amount_capped(total_usd: float) -> dict:
     return final
 
 
-def _bank_combined_pct(pct: float, reason: str, now: float) -> dict:
+def _bank_combined_pct(pct: float, reason: str, now: float, books: Optional[tuple] = None,
+                        split: Optional[dict] = None) -> dict:
     """Banks `pct` of CURRENT combined equity, split a FIXED 65/35 (compound/sprint) via
     _split_fixed_amount_capped -- NOT proportional to equity share, and NOT touching core1/core2
-    at all. 12 Nov 2026 change, see PHASE_ENGINE_BOOKS comment above for why."""
-    combined = _combined_equity_for_milestones()
+    at all. 12 Nov 2026 change, see PHASE_ENGINE_BOOKS comment above for why. 13 Nov 2026 (Ali,
+    NEW): optional `books`/`split` override lets phase 1 (compound-ALONE, see PHASE1_SOLO_BOOK)
+    reuse this unchanged -- default (None) is PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT, so phases
+    2-5 behave exactly as before."""
+    combined = _combined_equity_for_milestones(books)
     bank_total = round(combined * pct, 2)
     rec = state.get_value(CASHOUT_KEY)
     rec = rec if isinstance(rec, dict) else {}
     per_book_banked = {}
     if bank_total > 0:
-        split = _split_fixed_amount_capped(bank_total)
-        for b, amount in split.items():
+        split_result = _split_fixed_amount_capped(bank_total, books, split)
+        for b, amount in split_result.items():
             if amount <= 0:
                 continue
             rec.setdefault(b, []).append({"ts": now, "amount": amount, "reason": reason})
@@ -706,18 +766,23 @@ def _bank_combined_pct(pct: float, reason: str, now: float) -> dict:
             "banked_per_book": per_book_banked}
 
 
-def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, now: float) -> dict:
+def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, now: float,
+                             books: Optional[tuple] = None, split: Optional[dict] = None) -> dict:
     """Hard, fixed-amount cash-out (not a %) off combined compound+sprint equity, split a FIXED
     65/35 (compound/sprint) via _split_fixed_amount_capped -- NOT proportional to equity share,
     and NOT touching core1/core2 at all. 12 Nov 2026 change, see PHASE_ENGINE_BOOKS comment above
     for why. Leaves exactly `reseed_usd` worth of combined compound+sprint equity behind, same
-    65/35 split, same real-overshoot-kept and never-take-more-than-a-book-has principles."""
-    combined = _combined_equity_for_milestones()
+    65/35 split, same real-overshoot-kept and never-take-more-than-a-book-has principles.
+
+    13 Nov 2026 (Ali, NEW): optional `books`/`split` override lets phase 1 (compound-ALONE, see
+    PHASE1_SOLO_BOOK) reuse this unchanged with a one-book 100% split -- default (None) is
+    PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT, so phases 2-5 behave exactly as before."""
+    combined = _combined_equity_for_milestones(books)
     rec = state.get_value(CASHOUT_KEY)
     rec = rec if isinstance(rec, dict) else {}
     per_book_cashed = {}
-    split = _split_fixed_amount_capped(cashout_usd)
-    for b, amount in split.items():
+    split_result = _split_fixed_amount_capped(cashout_usd, books, split)
+    for b, amount in split_result.items():
         if amount <= 0:
             continue
         rec.setdefault(b, []).append({"ts": now, "amount": amount, "reason": reason})
@@ -725,7 +790,7 @@ def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, 
     state.set_value(CASHOUT_KEY, rec)
     return {"combined_equity_at_fire": combined, "cashed_out_total": sum(per_book_cashed.values()),
             "cashed_out_per_book": per_book_cashed,
-            "combined_equity_after": _combined_equity_for_milestones()}
+            "combined_equity_after": _combined_equity_for_milestones(books)}
 
 
 def _phase1_cumulative_banked() -> float:
@@ -841,8 +906,6 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
     phase = done.get("phase", 1)
     fired_levels = done.get("fired_levels", [])
 
-    combined = _combined_equity_for_milestones()
-
     pdef = PHASE_DEFS.get(phase)
     if pdef is None:
         # Defensive: an unknown/corrupted phase number must never crash the trading loop --
@@ -851,6 +914,18 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
 
     pkey = f"p{phase}"
 
+    # 13 Nov 2026 (Ali, NEW): phase 1 runs on compound ALONE -- sprint joins only from phase 2
+    # onward. phase_books/phase_split route every helper below to compound-only (100% split)
+    # during phase 1, and to the normal PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT (compound+sprint,
+    # 65/35) for phases 2-5, unchanged from the 7 Nov behavior.
+    if phase == 1:
+        phase_books = (PHASE1_SOLO_BOOK,)
+        phase_split = {PHASE1_SOLO_BOOK: 1.0}
+    else:
+        phase_books = PHASE_ENGINE_BOOKS
+        phase_split = PHASE_ENGINE_SPLIT
+    combined = _combined_equity_for_milestones(phase_books)
+
     if phase in (1, 2, 3, 4):
         # The hard cash-out trigger is checked FIRST, ahead of the lighter ladder legs below.
         # This matters: if the smaller percentage-banks fired first every call, repeatedly
@@ -858,10 +933,23 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
         # clears the trigger AND several ladder levels in one go could drain equity back below
         # the trigger purely from its OWN protective banking, before the real lever -- the
         # actual priority -- ever got to fire.
+        #
+        # 13 Nov 2026 (Ali, NEW, explicit clarifying question answered): phase 1's cashout is
+        # additionally gated on the cross-module cascade having ALREADY fired -- "the cascade
+        # must fire first, then phase 1 completes." Phase 1 is not considered done (its $2,000
+        # cashout / $1,000 reseed) until compound's own banked() has already crossed $500-600
+        # and the $300 cascade has gone out to sprint/core1/core2 (SC_CASCADE_KEY shows fired).
+        # This check only applies to phase 1 -- phases 2-4 have no such gate.
         cashout_key = f"{pkey}_cashout"
-        if cashout_key not in fired_levels and combined >= pdef["trigger"]:
+        phase1_cascade_gate_cleared = True
+        if phase == 1:
+            guard = state.get_value(SC_CASCADE_KEY)
+            phase1_cascade_gate_cleared = isinstance(guard, dict) and guard.get("fired") is True
+        if (cashout_key not in fired_levels and combined >= pdef["trigger"]
+                and phase1_cascade_gate_cleared):
             cashout = _fixed_cashout_combined(pdef["cashout"], pdef["reseed"],
-                                               f"phase{phase}_cashout_7nov2026", now)
+                                               f"phase{phase}_cashout_13nov2026",
+                                               now, phase_books, phase_split)
             fired_levels.append(cashout_key)
             done["fired_levels"] = fired_levels
             done["phase"] = phase + 1
@@ -873,15 +961,18 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
             state.set_value(MILESTONE_LADDER_KEY, done)
             return result
 
-        # Only reached if this phase's trigger has NOT yet been hit -- safe to bank the lighter
-        # protective percentages on the way up without risking the main lever.
+        # Only reached if this phase's trigger has NOT yet been hit (or, for phase 1, the
+        # cascade hasn't fired yet even if the $-trigger has technically been cleared) -- safe
+        # to bank the lighter protective percentages on the way up without risking the main
+        # lever.
         for level, pct in pdef["ladder"]:
             key = f"{pkey}_{int(level)}"
             if key in fired_levels:
                 continue
             if combined < level:
                 break
-            bank = _bank_combined_pct(pct, f"milestone_{pkey}_{int(level)}_7nov2026", now)
+            bank = _bank_combined_pct(pct, f"milestone_{pkey}_{int(level)}_13nov2026", now,
+                                       phase_books, phase_split)
             fired_levels.append(key)
             done["fired_levels"] = fired_levels
             result = {"ts": now, "phase": phase, "level": level, "pct": pct, **bank}
@@ -889,7 +980,7 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
             state.set_value(MILESTONE_LADDER_KEY, done)
             if phase == 1:
                 _maybe_fire_phase1_cascade(now)  # retired no-op, kept for historical call site
-            check_sprint_compound_cascade(now)  # 11 Nov 2026: new cascade, check every ladder tick
+            check_sprint_compound_cascade(now)  # 13 Nov 2026: new cascade (compound-funded, 3-way split), check every ladder tick
             return result
 
         return None
@@ -1472,11 +1563,43 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
         from executor import phase_target
         if phase_target.is_paused():
             return False, f"{book_id}: paused -- phase target hit or drawdown breaker active (see phase_target.status())"
+
+    # 13 Nov 2026 (Ali, NEW, explicit clarifying questions answered): sprint/core1/core2 take NO
+    # trades at all -- paper or real -- once compound goes LIVE, until the cross-module cascade
+    # (check_sprint_compound_cascade()) has fired. Ali's exact concern: "while compound is
+    # trading, what will happen for sprint core1 core2... they won't be having any funds before
+    # the cascade... things will get hobnosh... we won't know what is the real equity standing,
+    # whether it comprises of paper equity as well." Without this gate, these three books would
+    # keep silently accumulating PAPER trades/P&L in the background while compound runs alone
+    # for phase 1 -- so when the cascade later deposits $100 real dollars into each of them,
+    # their equity() would be a confusing mix of that real $100 plus whatever paper P&L they'd
+    # already piled up, with no way to cleanly separate "real" from "paper" after the fact. This
+    # gate guarantees each of the three starts from an exactly clean $0 (no trades at all, paper
+    # included) right up until the moment the cascade credits their real $100 -- at which point
+    # this gate opens automatically (SC_CASCADE_KEY shows fired) and all three begin trading
+    # immediately on that clean, real $100 seed, nothing else mixed in.
+    #
+    # SCOPED TO LIVE MODE ONLY (second explicit clarifying question, 13 Nov 2026 -- Ali: "the
+    # paper trail needs to be stopped immediately once we're going to push this thing up...
+    # once the wallet is funded, the system is live"): this gate is a no-op entirely while
+    # LIVE_BOOKS does not include "compound" -- today's ongoing paper trading on sprint/core1/
+    # core2 continues completely undisturbed right up until Ali actually arms compound live
+    # tonight. The INSTANT compound is armed (LIVE_BOOKS=compound set and this code deployed),
+    # this gate activates and sprint/core1/core2 stop taking any trade at all -- paper or real
+    # -- until the cascade fires. compound itself is NEVER gated by this check -- it is the one
+    # book that runs (and must run) before the cascade exists at all.
+    if book_id in ("sprint", "core1", "core2") and SC_CASCADE_FUNDER in _live_books_from_env():
+        _cascade_guard = state.get_value(SC_CASCADE_KEY)
+        if not (isinstance(_cascade_guard, dict) and _cascade_guard.get("fired") is True):
+            return False, (f"{book_id}: paused -- compound is live and no trades (paper or real) are "
+                            f"allowed here until the cross-module cascade seeds this book with its "
+                            f"real $100 (see check_sprint_compound_cascade())")
+
     check_cashout(book_id)
     check_bust(book_id)
     check_compound_split()   # RETIRED 11 Nov 2026 -- permanent no-op, see its own docstring
-    if book_id in SC_CASCADE_SOURCES:
-        check_sprint_compound_cascade()   # 11 Nov 2026 (Ali): one-time $200-banked -> $100/$100 to core1/core2, see its own docstring
+    if book_id == SC_CASCADE_FUNDER:
+        check_sprint_compound_cascade()   # 13 Nov 2026 (Ali, corrected): one-time compound-banked $500 -> $100/$100/$100 to sprint/core1/core2, see its own docstring
     check_milestone_ladder()   # 5 Nov 2026 (Ali): periodic partial cash-outs as combined equity climbs toward $20,000, see its own docstring
     eq = equity(book_id)
     if eq < 5.0:
