@@ -700,6 +700,13 @@ def act(d: dict, now: Optional[float] = None) -> dict:
                         raise _RealSizeSkip()
                     _result = _buy_fn(d["addr"], _real_stake)
                     pos["live_attempted"] = True
+                    pos["live_usd_amount"] = _real_stake  # real dollars actually sent to this buy
+                                                           # (the number _real_stake sized against
+                                                           # real wallet balance), regardless of
+                                                           # whether the buy succeeded -- needed so
+                                                           # books.can_open() can gate compound's
+                                                           # capacity off REAL committed $ instead
+                                                           # of paper's `stake`
                     pos["live_ok"] = bool(_result.ok)
                     pos["live_reason"] = _result.reason
                     pos["live_tx"] = _result.tx_signature

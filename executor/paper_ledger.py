@@ -1177,6 +1177,22 @@ def module_open_cost(module_id: str) -> float:
                for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id)
 
 
+def module_open_cost_real(module_id: str) -> float:
+    """14 Nov 2026 (Ali, explicit instruction): REAL dollars still at risk in this module's open
+    positions, mirroring module_open_cost() above but counting only real, successfully-executed
+    buys (live_ok is True) at their real sent amount (live_usd_amount), not paper's `usd`/`stake`.
+    A position whose real buy was attempted but failed (live_ok=False) contributes $0 here -- no
+    real money actually left the wallet for it. Used by books.can_open() to gate compound's real
+    capacity off real committed capital instead of paper bookkeeping (the root cause of compound
+    silently refusing real-eligible entries while real wallet balance still had room -- paper's
+    committed_usd/free_equity had "filled up" on numbers with no connection to the real wallet).
+    Same `remaining` scaling as module_open_cost -- a partially-trimmed moonbag position has
+    genuinely less real capital at risk than its original entry size."""
+    return round(sum(float(p.get("live_usd_amount") or 0) * float(p.get("remaining", 1.0))
+                      for p in _open().values()
+                      if p.get("strategy") != "runner" and _module_of(p) == module_id and p.get("live_ok") is True), 2)
+
+
 def committed_usd_by_book_for_coin(chain: str, addr: str) -> dict:
     """8 Nov 2026 (Ali, fix #2 backtest-confirmed): per-coin committed USD broken down by book, for
     the cross-book exposure cap in books.tier_stake_usd()/stake_usd(). Real audit found 11 of 35

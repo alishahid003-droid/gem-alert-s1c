@@ -1268,6 +1268,34 @@ def free_equity(book_id: str) -> float:
     return max(0.0, round(equity(book_id) - committed_usd(book_id), 2))
 
 
+# Added 14 Nov 2026 (Ali, explicit instruction, real incident): compound's can_open() gate was
+# refusing real-eligible entries ("balance is fully committed ($245 open)") off PAPER equity/
+# committed-$ numbers that have zero connection to the real wallet (~$120 real vs $245 "open" on
+# paper) -- same root disease as the real-buy sizing bug fixed earlier tonight, just in the GATE
+# instead of the SIZING. These three mirror equity()/committed_usd()/free_equity() above but are
+# computed from REAL on-chain wallet balance and REAL committed capital (paper_ledger.
+# module_open_cost_real(), which only counts successfully-executed real buys at their real sent
+# amount). Used by can_open() for compound ONLY -- sprint/core1/core2 are not live-armed tonight
+# and keep the original paper-based gate untouched, exactly as before.
+def equity_real() -> float:
+    """Real, live, total spendable wallet balance across every chain with real execution wired
+    up (robinhood_chain + base), in USD. Always a fresh on-chain read (never cached) -- a number
+    that gates whether real money can be committed must never be stale."""
+    from executor import swap_executor
+    return swap_executor.get_total_real_wallet_usd()
+
+
+def committed_usd_real(book_id: str) -> float:
+    """Real dollars still at risk in this book's open positions (successfully-executed real buys
+    only -- a failed live_ok=False attempt spent $0 real)."""
+    from executor import paper_ledger
+    return paper_ledger.module_open_cost_real(book_id)
+
+
+def free_equity_real(book_id: str) -> float:
+    return max(0.0, round(equity_real() - committed_usd_real(book_id), 2))
+
+
 def open_count(book_id: str, chain: str = None) -> int:
     from executor import paper_ledger
     return paper_ledger.module_open_count(book_id, chain=chain)
@@ -1601,13 +1629,21 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
     if book_id == SC_CASCADE_FUNDER:
         check_sprint_compound_cascade()   # 13 Nov 2026 (Ali, corrected): one-time compound-banked $500 -> $100/$100/$100 to sprint/core1/core2, see its own docstring
     check_milestone_ladder()   # 5 Nov 2026 (Ali): periodic partial cash-outs as combined equity climbs toward $20,000, see its own docstring
-    eq = equity(book_id)
+
+    # 14 Nov 2026 (Ali, explicit instruction, real incident): compound is live -- gate its
+    # capacity off REAL wallet balance/committed $, not paper equity. Real incident tonight:
+    # compound refused new real-eligible entries ("balance is fully committed ($245 open)") on
+    # paper numbers with zero connection to the real ~$120 wallet. sprint/core1/core2 are not
+    # live-armed and keep the original paper-based gate exactly as before -- this ONLY changes
+    # compound's own capacity check.
+    _use_real_capital = (book_id == "compound" and SC_CASCADE_FUNDER in _live_books_from_env())
+    eq = equity_real() if _use_real_capital else equity(book_id)
     if eq < 5.0:
-        return False, f"{book_id} book is empty (${eq:.2f})"
+        return False, f"{book_id} book is empty (${eq:.2f})" + (" [real]" if _use_real_capital else "")
     limit = max_open(book_id, eq)
     extra = int(_f("BOOK_STRONG_EXTRA_SLOTS", 2) or 0) if strong else 0
     n_open = open_count(book_id, chain=chain)
-    need_cash = free_equity(book_id) < 5.0
+    need_cash = (free_equity_real(book_id) if _use_real_capital else free_equity(book_id)) < 5.0  # 14 Nov 2026: real capital for compound, see _use_real_capital above
     # 9 Nov 2026 (Ali): REVERTED the 8 Nov 2026 compound-only swap-out widening. That change was
     # backtested against a sampled window of past refusals (91 refusals / 67 missed coins) and
     # projected a real recovery at compound's then-measured +55.4%/trade expectancy -- but
@@ -1626,12 +1662,14 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
                               and _f("COMPOUND_SWAP_ALLOW_WEAK", 0.0))
     if n_open >= limit + extra or (need_cash and strong) or compound_widened_swap:
         if (strong or compound_widened_swap) and _try_swap(book_id):
-            n_open, need_cash = open_count(book_id, chain=chain), free_equity(book_id) < 5.0
+            n_open = open_count(book_id, chain=chain)
+            need_cash = (free_equity_real(book_id) if _use_real_capital else free_equity(book_id)) < 5.0
         if n_open >= limit + extra:
             chain_note = f" [{chain}]" if chain else ""
             return False, f"{book_id}{chain_note}: {limit} open position(s) is the limit at ${eq:,.0f}" + (f" (+{extra} for strong signals, all used)" if extra else "")
     if need_cash:
-        return False, f"{book_id}: balance is fully committed (${committed_usd(book_id):,.0f} open)"
+        _committed = committed_usd_real(book_id) if _use_real_capital else committed_usd(book_id)
+        return False, f"{book_id}: balance is fully committed (${_committed:,.0f} open)" + (" [real]" if _use_real_capital else "")
     return True, "ok" if n_open < limit else "ok (strong-signal extra slot)"
 
 
