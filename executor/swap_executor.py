@@ -1043,10 +1043,31 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
         return ExecutionResult(False, f"'{token_address}' is not a valid Robinhood Chain address -- "
                                        f"refusing to build a tx to it")
 
-    native_price = _rhc_native_price_usd(token_checksum)
+    # FIXED 14 Nov 2026 (real incident, Ali): this used to call
+    # _rhc_native_price_usd(token_checksum) -- i.e. derive the RHC-native/USD
+    # price from THIS CANDIDATE TOKEN'S OWN pair on DexScreener. For a brand-new,
+    # thin-liquidity launch (exactly what this sniper targets), that per-token
+    # pair's priceNative/priceUsd fields can be stale, thin, or just wrong --
+    # and since amount_in_wei = usd_amount / native_price, a bad (too-low)
+    # native_price silently balloons the real spend far past the intended
+    # dollar size. Real incident: a $24.02 intended buy (GR00T2, RHC) actually
+    # tried to spend ~0.0437 native ETH -- back-solving shows that implies a
+    # native_price of only ~$549 was used, derived from GR00T2's own thin pair,
+    # instead of the real price. The wallet correctly had too little for that
+    # inflated amount and the chain refused it ("insufficient funds") --
+    # a lucky catch, not a safe outcome to rely on again.
+    #
+    # Fix: price RHC-native ether off the SAME stable, deep-liquidity reference
+    # token (_RHC_NATIVE_PRICE_REFERENCE_TOKEN, HOOKR -- $889K+ liquidity,
+    # already execution-tested this session) that get_real_wallet_usd() uses,
+    # not off whatever thin pair the candidate token happens to have. This is
+    # the correct price to size spend against; the candidate token's own pair
+    # price is for execution/slippage math elsewhere, never for sizing how much
+    # real ETH leaves the wallet.
+    native_price = _rhc_native_price_usd(_RHC_NATIVE_PRICE_REFERENCE_TOKEN)
     if native_price is None or native_price <= 0:
-        return ExecutionResult(False, "could not derive a live RHC-native/USD price from DexScreener -- "
-                                       "refusing to size a buy on a guess")
+        return ExecutionResult(False, "could not derive a live RHC-native/USD price from the stable "
+                                       "reference pair -- refusing to size a buy on a guess")
     amount_in_wei = int((usd_amount / native_price) * 10 ** 18)
     if amount_in_wei <= 0:
         return ExecutionResult(False, f"usd_amount ${usd_amount} converts to 0 wei at derived price "
