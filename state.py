@@ -300,17 +300,68 @@ def _local_load_all() -> dict:
 # decrease here is already suspicious; this allows a small decrease (manual edits,
 # dedup drops) but blocks a collapse, and saves the would-be-destructive `data` to a
 # side file for inspection rather than destroying the real history silently.
-_SHRINK_GUARD_KEYS = ("paper_closed_positions", "books_deposits_v1")
+# 13 Nov 2026 (Claude, Ali -- THIRD real incident, this time ALL of paper_closed_positions
+# (404->gone), paper_open_positions (32->gone), books_cashouts_v1, books_deposits_v1, and the
+# milestone ladder vanished together in one ~10-min window, confirmed against the state_snapshots
+# backup folder. This guard did NOT fire -- no .BLOCKED_SHRINK file exists -- because (a) only 2
+# of the 5+ real cumulative keys were ever listed here, and (b) the guard is per-KEY only: it never
+# noticed that the whole FILE itself collapsed from 1,205 top-level keys to 109 in one write, which
+# is an even stronger, cheaper-to-check signal than any single key's shrink. Two fixes:
+#   1. _SHRINK_GUARD_KEYS widened to every cumulative/history-bearing key identified in this
+#      incident's post-mortem (paper_ledger.OPEN_KEY, books.CASHOUT_KEY, the milestone ladder key).
+#   2. A new, cheaper whole-file collapse check (_whole_file_collapse_check) runs FIRST: if the
+#      incoming data has far fewer total top-level keys than the file currently on disk, that alone
+#      is refused, regardless of which individual keys moved -- this would have caught today's
+#      incident even if every single history key had been missed again.
+# This STILL cannot fix an external process overwriting the file outside this module's own write
+# path entirely (os.replace() never runs, so this guard never even executes) -- that needs the
+# separate OS-level investigation (sync/backup/AV tool holding the file) Ali asked for directly.
+_SHRINK_GUARD_KEYS = (
+    "paper_closed_positions", "books_deposits_v1",
+    "paper_open_positions",       # paper_ledger.OPEN_KEY -- real open trades, wiped 13 Nov 2026
+    "books_cashouts_v1",          # books.CASHOUT_KEY -- real withdrawn/milestone payout history
+    "milestone_ladder_v2",        # books.MILESTONE_LADDER_KEY -- phase-ladder fired-level history
+)
 _SHRINK_GUARD_MIN_ABS_DROP = 20   # a drop smaller than this is allowed through unexamined
 _SHRINK_GUARD_MIN_RATIO = 0.5     # a drop to below 50% of the current count is blocked
 
 
+# 13 Nov 2026: whole-file collapse threshold, independent of any single key. The 13 Nov incident
+# went from 1,205 top-level keys to 109 (91% gone) in one write; a real single trade/cycle can
+# never remove this many top-level state keys at once. 0.3 (70%+ of all keys vanishing) is well
+# above any plausible single-cycle change.
+_WHOLE_FILE_MIN_KEYS_FOR_CHECK = 50    # below this, the file is too small for ratio-based collapse
+                                        # detection to mean anything -- skip the check entirely
+_WHOLE_FILE_COLLAPSE_RATIO = 0.3       # new key-count below 30% of current is blocked
+
+
+def _whole_file_collapse_check(new_data: dict, cur_on_disk: dict):
+    cur_n = len(cur_on_disk)
+    new_n = len(new_data)
+    if cur_n < _WHOLE_FILE_MIN_KEYS_FOR_CHECK:
+        return
+    if new_n < cur_n * _WHOLE_FILE_COLLAPSE_RATIO:
+        side_path = LOCAL_STATE_FILE + f".BLOCKED_WHOLE_FILE_COLLAPSE_{int(time.time())}.json"
+        try:
+            with open(side_path, "w", encoding="utf-8") as f:
+                json.dump(new_data, f)
+        except OSError:
+            side_path = "(could not even write the side file)"
+        raise StateShrinkGuardError(
+            f"refused to save: whole file would shrink from {cur_n} top-level keys to {new_n} "
+            f"({cur_n - new_n} lost, below {_WHOLE_FILE_COLLAPSE_RATIO:.0%} of current key count). "
+            f"Live file left untouched. The blocked write was saved to {side_path} for inspection, "
+            f"not applied."
+        )
+
+
 class StateShrinkGuardError(RuntimeError):
-    """Raised when a save would collapse paper_closed_positions (or books_deposits_v1)
-    to a small fraction of its current size. Callers should treat this exactly like any
-    other failed save (the live file is left untouched, same as a PermissionError that
-    exhausts its retries) -- NOT silently swallowed, NOT retried in a loop that could
-    eventually succeed by chance against a real external overwrite."""
+    """Raised when a save would collapse paper_closed_positions (or another guarded
+    history-bearing key, or the whole file's key count) to a small fraction of its current
+    size. Callers should treat this exactly like any other failed save (the live file is left
+    untouched, same as a PermissionError that exhausts its retries) -- NOT silently swallowed,
+    NOT retried in a loop that could eventually succeed by chance against a real external
+    overwrite."""
 
 
 def _shrink_guard_check(new_data: dict):
@@ -318,6 +369,7 @@ def _shrink_guard_check(new_data: dict):
         cur_on_disk = _local_read_file()
     except Exception:
         return  # can't check against an unreadable file; don't block on top of that
+    _whole_file_collapse_check(new_data, cur_on_disk)
     for key in _SHRINK_GUARD_KEYS:
         cur_val = cur_on_disk.get(key)
         new_val = new_data.get(key)
