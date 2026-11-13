@@ -431,7 +431,20 @@ def _force_close_rug_siblings(book: dict, chain: str, token: str, rugged_module:
               mechanism="rug_sibling_force_close")
         closed.append(_close(sibling_pos, "rug_liquidity_sibling",
                               f"force-closed: {rugged_module} detected rug on same token", now))
-        del book[sibling_pid]
+        # 13 Nov 2026 (Claude, real incident found live by Ali the same night this shipped):
+        # this mutates the SAME book dict manage()'s outer loop is iterating (over a
+        # list(book.items()) snapshot taken before this ran). If the outer loop later reaches
+        # one of the keys just removed here -- e.g. that position's own independent liquidity
+        # check also firing in this same pass -- its own "del book[pid]" raised KeyError and
+        # crashed manage() entirely, silently skipping every remaining position in that cycle
+        # (confirmed from logs/local_early-watch.log: dozens of these KeyError tracebacks,
+        # one per cycle, for hours -- the real reason 12 robinhood_chain/base positions stayed
+        # last_mcap=None long after the GeckoTerminal/PumpPortal fixes shipped: manage() never
+        # got far enough into the book to price them). Fixed by making every "del book[x]" in
+        # this function and in manage() below a book.pop(x, None) instead -- same removal when
+        # the key is present, a safe no-op when a sibling-close already removed it, no change
+        # to any actual close/exit/write-off decision.
+        book.pop(sibling_pid, None)
     return closed
 
 
@@ -530,7 +543,7 @@ def swap_out(module_id: str, now: Optional[float] = None) -> Optional[dict]:
     mult = pos["last_mcap"] / pos["entry_mcap"]
     _sell(pos, pos["remaining"], pos["last_mcap"], swap_reason, now)
     row = _close(pos, swap_reason, f"swapped out at {mult:.2f}x to free a slot for a stronger signal", now)
-    del book[pid]
+    book.pop(pid, None)
     # 6 Nov 2026: OPEN_KEY and CLOSED_KEY must be read, modified, AND written as one atomic unit --
     # see state.atomic_multi_fn()'s docstring for the full investigation (two separate writes lost
     # trades to a torn read; even one combined write still lost trades because the NEW closed-list
@@ -928,7 +941,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 reason = ("never priceable since entry (pool not indexed / dead on arrival)" if never_priced
                           else "no longer priceable (delisted/rugged)")
                 closed_now.append(_close(pos, "written_off", reason, now))
-                del book[pid]
+                book.pop(pid, None)
             continue
         pos["unpriced_cycles"] = 0
         pos["last_mcap"] = mcap          # dashboard shows the live multiple
@@ -994,7 +1007,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             closed_now.append(_close(pos, "rug_liquidity_early",
                                       f"liquidity ${_prev_liq:,.0f} -> ${liq:,.0f} ({(1-liq/_prev_liq)*100:.0f}% drop)", now))
             pos["prev_liquidity_usd"] = liq
-            del book[pid]
+            book.pop(pid, None)
             # 13 Nov 2026 (Claude, cross-module rug kill switch): mark this token as rugged so
             # _open_paper_unlocked refuses new entries from any module, AND force-close any
             # sibling module still holding this exact (chain, token) right now in this same
@@ -1010,7 +1023,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             # cannot be sold into: the remaining slice is worth ~nothing.
             _sell(pos, pos["remaining"], pos["entry_mcap"] * 0.01, "liquidity collapsed", now)
             closed_now.append(_close(pos, "rug_liquidity", f"liquidity ${liq:,.0f}", now))
-            del book[pid]
+            book.pop(pid, None)
             # 13 Nov 2026 (Claude, cross-module rug kill switch): same as the rug_liquidity_early
             # site above -- mark the token rugged and force-close any sibling module still
             # holding it, instead of waiting for that module's own independent check to catch up.
@@ -1036,17 +1049,17 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             if d.action == "exit_all":
                 _sell(pos, pos["remaining"], mcap, d.exit_type, now)
                 closed_now.append(_close(pos, d.exit_type, d.reason, now))
-                del book[pid]
+                book.pop(pid, None)
             continue
         if pos.get("strategy") == "early":
             if _manage_early(pos, mcap, now):
                 closed_now.append(pos)
-                del book[pid]
+                book.pop(pid, None)
             continue
         if pos.get("strategy") in ("scalper", "quick"):
             if _manage_scalper(pos, mcap, now):
                 closed_now.append(pos)
-                del book[pid]
+                book.pop(pid, None)
             continue
         d = exit_rules.evaluate_exit(pos["entry_mcap"], mcap, pos["peak_mcap"], pos["opened_ts"], now,
                                      pos["remaining"], pos["breakeven_locked"], pos["cost_pct"],
@@ -1054,7 +1067,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         if d.action == "exit_all":
             _sell(pos, pos["remaining"], mcap, d.exit_type, now)
             closed_now.append(_close(pos, d.exit_type, d.reason, now))
-            del book[pid]
+            book.pop(pid, None)
             continue
         if d.action == "sell_partial":
             _sell(pos, d.pct_of_original, mcap, d.exit_type, now)
@@ -1069,7 +1082,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
                 runner_value = pos["usd"] * runner_frac * (mcap / pos["entry_mcap"]) * (1.0 - pos["cost_pct"])
                 pos["proceeds_usd"] += runner_value
                 closed_now.append(_close(pos, d.exit_type, d.reason + " (runner marked to market)", now))
-                del book[pid]
+                book.pop(pid, None)
                 book["runner:" + pid] = {
                     **{k: pos[k] for k in ("chain", "token", "signal", "band", "tags", "entry_mcap",
                                            "peak_mcap", "cost_pct", "guard")},
@@ -1089,7 +1102,7 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
             break  # one rung per cycle, same as moonbag.check_and_trim
         if pos["remaining"] <= 1e-6:
             closed_now.append(_close(pos, "fully_sold", "every slice sold", now))
-            del book[pid]
+            book.pop(pid, None)
 
     with _OPEN_LOCK:
         # Positions opened while we were pricing the book must survive this write.
