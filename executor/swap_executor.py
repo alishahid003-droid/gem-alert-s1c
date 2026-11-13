@@ -165,23 +165,39 @@ def _rhc_quote_exact_input_single(pool_key: dict, zero_for_one: bool, exact_amou
     amount_out_minimum floor. Returns None (never a guess) on any
     RPC/decode failure; callers decide how to handle a missing quote (buy
     refuses outright -- see execute_buy_robinhood_chain; sell falls back
-    to a DexScreener-derived estimate -- see execute_sell_robinhood_chain)."""
+    to a DexScreener-derived estimate -- see execute_sell_robinhood_chain).
+
+    14 Nov 2026 (Ali, explicit instruction, real incident): a real compound
+    buy (CSI) was refused with "could not get a real on-chain quote" on the
+    very first attempt -- RHC has only ONE RPC endpoint in this system's
+    pool (rpc.mainnet.chain.robinhood.com, officially rate-limited per
+    Robinhood's own docs, no failover), so a single transient hiccup on
+    that one endpoint can silently cost a real, otherwise-good buy. Ali's
+    explicit choice: retry once, after a short delay, before giving up --
+    catches a one-off network blip without weakening the "never buy
+    without a real quote" safety floor itself (still refuses outright if
+    BOTH the original call and the retry fail)."""
     try:
         calldata = build_quote_exact_input_single_calldata(pool_key, zero_for_one, exact_amount)
     except ValueError:
         return None
-    result = rpc_call("robinhood_chain", "eth_call", [
-        {"to": UNISWAP_V4_QUOTER_RHC, "data": "0x" + calldata.hex()}, "latest",
-    ])
-    if not result.get("ok"):
-        return None
-    raw = result.get("result")
-    if not isinstance(raw, str) or not raw.startswith("0x") or len(raw) <= 2:
-        return None
-    try:
-        return decode_quote_exact_input_single_result(bytes.fromhex(raw[2:]))
-    except Exception:  # noqa: BLE001 -- malformed/unexpected quoter response, treat as "no quote available"
-        return None
+
+    for _attempt in range(2):  # original try + 1 retry
+        if _attempt > 0:
+            __import__("time").sleep(1.5)
+        result = rpc_call("robinhood_chain", "eth_call", [
+            {"to": UNISWAP_V4_QUOTER_RHC, "data": "0x" + calldata.hex()}, "latest",
+        ])
+        if not result.get("ok"):
+            continue  # transient failure -- try again (once) before giving up
+        raw = result.get("result")
+        if not isinstance(raw, str) or not raw.startswith("0x") or len(raw) <= 2:
+            continue
+        try:
+            return decode_quote_exact_input_single_result(bytes.fromhex(raw[2:]))
+        except Exception:  # noqa: BLE001 -- malformed/unexpected quoter response, treat as "no quote available" and retry
+            continue
+    return None  # both the original attempt and the retry failed -- genuinely no quote available
 
 
 @dataclass
