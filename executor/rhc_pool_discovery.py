@@ -64,7 +64,26 @@ NATIVE_CURRENCY = "0x0000000000000000000000000000000000000000"
 # unbounded from-genesis query, since most RPC providers cap the block
 # range per call and this codebase has no confirmed number for this one.
 _LOG_SCAN_CHUNK_BLOCKS = 5000
-_LOG_SCAN_MAX_CHUNKS = 20  # bounds worst-case call count if a token has no pool at all
+# 13 Nov 2026 (Claude, real incident found live by Ali tonight): the original
+# 20 chunks (100,000 blocks total) was nowhere near enough -- confirmed live
+# against a real, actively-traded HOOKR pool on Robinhood Chain with $889K
+# liquidity (verified directly via DexScreener's own API) that find_v4_pool
+# still reported as "no pool found". That pool's real pairCreatedAt timestamp
+# is 99 days before this fix, and Robinhood Chain (an Arbitrum Orbit chain)
+# runs sub-2-second blocks like the rest of the Arbitrum family, so 100,000
+# blocks covers only a few hours -- every real buy attempt against anything
+# but a brand-new-this-cycle pool was silently refusing with a misleading
+# "no pool" reason, not a code crash, so this was easy to miss without a
+# real live test (which is exactly what surfaced it). Widened to 140 chunks
+# (700,000 blocks) -- comfortably covers roughly a week back even at a
+# conservative 1 block/second, while keeping the per-call chunk size
+# unchanged so this only costs more RPC calls when a pool genuinely isn't
+# found early, not a bigger call each time. Ali confirmed he wants "just
+# enough for very recent pools" (the sniper targets new launches anyway),
+# not months of depth, so this is deliberately not sized to catch
+# HOOKR-style 99-day-old pools going forward -- only to stop rejecting
+# pools from the last several days as if they did not exist.
+_LOG_SCAN_MAX_CHUNKS = 140  # bounds worst-case call count if a token has no pool at all
 
 
 def _topic_to_address(topic: str) -> str:
