@@ -108,6 +108,20 @@ WETH_BASE = "0x4200000000000000000000000000000000000006"
 # official contract-address docs (developers.circle.com/stablecoins/usdc-contract-addresses).
 USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_CHAIN_ID = 8453
+
+# Added 14 Nov 2026 (Ali) after a real failed live RHC sell: a signed tx's gasPrice,
+# quoted from a bare eth_gasPrice snapshot moments earlier, came in ~0.65% BELOW the
+# chain's real base fee by the time it reached the node -- rejected outright with
+# "max fee per gas less than block base fee", no retry, two prior approval txs
+# already spent. eth_gasPrice is only a point-in-time read on an EIP-1559 chain; base
+# fee moves block-to-block, and any multi-tx sequence (approve -> approve -> swap, as
+# every sell path here does) is the most exposed case since each step re-quotes after
+# the previous step's confirmation delay. Applied to every eth_gasPrice read in this
+# file (all 3 buy paths + the shared sell/approve tail in _sign_and_send_evm_tx) for
+# the same reason it was needed anywhere: 15% comfortably covers normal single-block
+# drift without overpaying meaningfully at these gas levels (RHC: ~20 gwei * 250k gas
+# ~= $0.01 either way).
+_EVM_GAS_PRICE_BUFFER = 1.15
 BASE_BUY_SLIPPAGE_TOLERANCE = 0.20   # same tolerance BSC's buy path uses
 BASE_SELL_SLIPPAGE_TOLERANCE = 0.25  # wider than buy, same reasoning as BSC's sell path -- a rug-triggered
                                      # sell needs to land, not get optimal price
@@ -579,7 +593,8 @@ def execute_buy_bsc(token_address: str, usd_amount: float) -> ExecutionResult:
         "value": bnb_amount_wei,
         "gas": 400_000,  # conservative fixed limit -- deliberately NOT estimate_gas (that needs a live call
                           # this module doesn't make against an untrusted new token contract pre-buy)
-        "gasPrice": int(gas_price_result["result"], 16),
+        "gasPrice": int(int(gas_price_result["result"], 16) * _EVM_GAS_PRICE_BUFFER),  # 15% headroom -- see
+                                                                                        # _sign_and_send_evm_tx's incident note
         "nonce": int(nonce_result["result"], 16),
         "chainId": 56,
         "data": calldata,
@@ -716,7 +731,8 @@ def execute_buy_base(token_address: str, usd_amount: float) -> ExecutionResult:
         "value": eth_amount_wei,
         "gas": 400_000,  # conservative fixed limit, same reasoning as BSC's buy path: no estimate_gas
                           # against an untrusted new token contract pre-buy.
-        "gasPrice": int(gas_price_result["result"], 16),
+        "gasPrice": int(int(gas_price_result["result"], 16) * _EVM_GAS_PRICE_BUFFER),  # 15% headroom -- see
+                                                                                        # _sign_and_send_evm_tx's incident note
         "nonce": int(nonce_result["result"], 16),
         "chainId": BASE_CHAIN_ID,
         "data": calldata,
@@ -1050,7 +1066,8 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
         "gas": 500_000,  # conservative fixed limit, same reasoning as BSC's buy path: no estimate_gas
                           # against an untrusted new token contract pre-buy. v4 swaps do more work per
                           # call than a v2 router hop, so this is higher than BSC's 400_000.
-        "gasPrice": int(gas_price_result["result"], 16),
+        "gasPrice": int(int(gas_price_result["result"], 16) * _EVM_GAS_PRICE_BUFFER),  # 15% headroom -- see
+                                                                                        # _sign_and_send_evm_tx's incident note
         "nonce": int(nonce_result["result"], 16),
         "chainId": ROBINHOOD_CHAIN_ID,
         "data": calldata.hex() if not calldata.hex().startswith("0x") else calldata.hex(),
@@ -1532,19 +1549,34 @@ def _sign_and_send_evm_tx(chain: str, chain_id: int, account, to_address: str, v
     from the old BSC-only _sign_and_send_bsc_tx (chain/chain_id/gas were
     hardcoded to BSC's values) so Robinhood Chain's sell path (approve,
     Permit2.approve, swap -- 3 separate txs) can reuse it instead of a
-    fourth copy-pasted nonce/gas/sign/send block."""
+    fourth copy-pasted nonce/gas/sign/send block.
+
+    Gas price carries a 15% buffer above the eth_gasPrice snapshot (added
+    14 Nov 2026 after a real failed sell: a live RHC sell quoted gasPrice
+    via eth_gasPrice, but by the time the (3rd, after 2 approvals) signed
+    tx reached the node, the chain's real base fee had ticked up ~0.65%
+    past that snapshot and the node rejected it outright with "max fee
+    per gas less than block base fee" -- no retry, approvals already
+    spent. eth_gasPrice is only a point-in-time read on an EIP-1559 chain;
+    base fee moves block-to-block, and a multi-tx sequence (approve ->
+    approve -> swap) is exactly the case most exposed to that drift since
+    each step re-quotes after the previous one's confirmation delay. A
+    15% buffer comfortably covers normal single-block drift without
+    overpaying meaningfully at these gas price levels (RHC base fee here
+    was ~20 gwei * 250k gas ~= $0.01 either way)."""
     nonce_result = rpc_call(chain, "eth_getTransactionCount", [account.address, "pending"])
     if not nonce_result.get("ok"):
         return ExecutionResult(False, f"could not fetch nonce: {nonce_result.get('reason')}")
     gas_price_result = rpc_call(chain, "eth_gasPrice", [])
     if not gas_price_result.get("ok"):
         return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
+    buffered_gas_price = int(int(gas_price_result["result"], 16) * _EVM_GAS_PRICE_BUFFER)
 
     tx = {
         "to": to_address,
         "value": value_wei,
         "gas": gas,
-        "gasPrice": int(gas_price_result["result"], 16),
+        "gasPrice": buffered_gas_price,
         "nonce": int(nonce_result["result"], 16),
         "chainId": chain_id,
         "data": calldata,
