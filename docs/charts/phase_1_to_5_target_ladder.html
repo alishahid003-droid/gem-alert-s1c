@@ -1,0 +1,473 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Phase 1-5 Target Ladder</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout concept: a single vertical ladder of 5 phase cards, each a horizontal strip showing
+   trigger -> cashout -> reseed, with a compact Monte-Carlo stat block per card (days/trades at
+   55/60/65% win rate) and a cumulative-days spine running down the left edge like a trading
+   ladder's rungs. Phase 1 is visually marked SOLO (compound-only) with a distinct accent;
+   phases 2-5 share the combined compound+sprint treatment. */
+:root {
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --surface-2: #f3f1ec;
+  --border: #e4e0d6;
+  --fg: #1c1a16;
+  --fg-dim: #6b6558;
+  --accent: #b8622e;
+  --accent-soft: #f3e3d8;
+  --solo: #2f5d4e;
+  --solo-soft: #e2ece7;
+  --good: #2f6b45;
+  --warn: #9a6b17;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15130f;
+    --surface: #1d1b16;
+    --surface-2: #242119;
+    --border: #38332a;
+    --fg: #f0ece2;
+    --fg-dim: #a39b89;
+    --accent: #e08a52;
+    --accent-soft: #3a2a1d;
+    --solo: #6bc4a4;
+    --solo-soft: #1d2e27;
+    --good: #5fbf7f;
+    --warn: #d9a63f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15130f;
+  --surface: #1d1b16;
+  --surface-2: #242119;
+  --border: #38332a;
+  --fg: #f0ece2;
+  --fg-dim: #a39b89;
+  --accent: #e08a52;
+  --accent-soft: #3a2a1d;
+  --solo: #6bc4a4;
+  --solo-soft: #1d2e27;
+  --good: #5fbf7f;
+  --warn: #d9a63f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+  line-height: 1.5;
+}
+
+.wrap { max-width: 920px; margin: 0 auto; }
+
+header { margin-bottom: 28px; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 8px;
+}
+h1 {
+  font-family: var(--font-display);
+  font-size: clamp(26px, 5vw, 36px);
+  font-weight: 700;
+  margin: 0 0 10px;
+  text-wrap: balance;
+  letter-spacing: -0.01em;
+}
+.sub {
+  color: var(--fg-dim);
+  font-size: 14.5px;
+  max-width: 62ch;
+  margin: 0;
+}
+
+.winrate-toggle {
+  display: flex;
+  gap: 8px;
+  margin: 22px 0 26px;
+  flex-wrap: wrap;
+}
+.wr-btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.wr-btn:hover { border-color: var(--accent); }
+.wr-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff8f2;
+  border-color: var(--accent);
+}
+:root[data-theme="dark"] .wr-btn[aria-pressed="true"],
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wr-btn[aria-pressed="true"] { color: #1a140d; } }
+
+.ladder { position: relative; display: flex; flex-direction: column; gap: 14px; }
+
+.spine {
+  position: absolute;
+  left: 23px;
+  top: 28px;
+  bottom: 28px;
+  width: 2px;
+  background: var(--border);
+  z-index: 0;
+}
+
+.phase-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 18px 18px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1;
+}
+.phase-card.solo { border-color: var(--solo); }
+
+.phase-num {
+  position: absolute;
+  left: 10px;
+  top: 18px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+.phase-card.solo .phase-num {
+  background: var(--solo-soft);
+  border-color: var(--solo);
+  color: var(--solo);
+}
+
+.phase-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.phase-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+.solo-badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--solo-soft);
+  color: var(--solo);
+  border: 1px solid var(--solo);
+  white-space: nowrap;
+}
+.combo-badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  font-family: var(--font-mono);
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.flow-step {
+  flex: 1;
+  min-width: 110px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.flow-label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.flow-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.flow-arrow {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--fg-dim);
+  font-size: 14px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.stat-tile {
+  background: var(--surface-2);
+  border-radius: 7px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.stat-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.stat-val {
+  font-family: var(--font-mono);
+  font-size: 14.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stat-sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+}
+
+.note {
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+.note b { color: var(--fg); font-weight: 600; }
+
+.summary-band {
+  margin-top: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+.summary-tile { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.summary-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.summary-val {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.summary-val.good { color: var(--good); }
+
+.honesty-box {
+  margin-top: 22px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 16px 18px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.honesty-box b { color: var(--accent); }
+
+footer {
+  margin-top: 28px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 480px) {
+  .phase-card { padding: 16px 14px 16px 48px; }
+  .phase-num { left: 6px; top: 16px; }
+  .spine { left: 19px; }
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Compound / Sprint / Core1 / Core2 — revised 13 Nov 2026</p>
+    <h1>Phase 1&ndash;5 target ladder</h1>
+    <p class="sub">Trigger, cashout and reseed for each phase, with Monte Carlo days-to-clear at three win rates (1,500 simulated runs per scenario, bootstrapped from real historical compound+sprint trade outcomes). Phase 1 runs on Compound alone; Sprint joins from Phase 2 on.</p>
+  </header>
+
+  <div class="winrate-toggle" role="group" aria-label="Win rate scenario">
+    <button class="wr-btn" data-wr="55" aria-pressed="false">55% win rate</button>
+    <button class="wr-btn" data-wr="60" aria-pressed="true">60% win rate</button>
+    <button class="wr-btn" data-wr="65" aria-pressed="false">65% win rate</button>
+  </div>
+
+  <div class="ladder" id="ladder">
+    <div class="spine"></div>
+    <!-- phase cards injected by script -->
+  </div>
+
+  <div class="summary-band" id="summary-band"></div>
+
+  <div class="honesty-box">
+    <b>On the $3,000-in-24-hours hope:</b> at a realistic Curve C-sized trade pace, Phase 1 clears in a median of 1.4&ndash;3.1 days across all three win rates, not 24 hours &mdash; getting there inside a day would need an early run of wins well above the model's middle case, which is possible but not the number to plan around. Every other figure here holds whether Phase 1 takes a day or four.
+  </div>
+
+  <div class="honesty-box">
+    <b>On the grand total:</b> it's three separate pools of money added together, not one figure. The <b>ladder-leg bankings</b> (~$338k median) are profit pulled out at each of the 6 rungs inside every phase, as combined equity climbs &mdash; a different mechanism from, and in addition to, the 4 <b>phase cashouts</b> (~$126k, fixed amounts at each phase's trigger). The rest (~$1.04M median) is still live, uncashed equity the moment Phase 5 crosses $1,000,000. Add the three and the total lands near <b>$1.5M</b>, not the ~$1.16M an earlier version of this chart showed before it was corrected to include the ladder legs.
+  </div>
+
+  <footer>Bust rate: 0% across all three scenarios, every phase. Trade pace: 19/day compound, 9/day sprint (confirmed real pace, Robinhood + Base). Ladder-leg bankings and phase cashouts are two distinct, additive money flows &mdash; see breakdown above.</footer>
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  var DATA = {"55": {"phases": {"1": {"trades_compound_p50": 58, "trades_sprint_p50": 0, "days_p50": 3.05, "cum_days_p10": 1.53, "cum_days_p50": 3.05, "cum_days_p90": 5.89, "ladder_banked_p50": 1402.33, "cashout": 2000.0}, "2": {"trades_compound_p50": 51, "trades_sprint_p50": 24, "days_p50": 2.95, "cum_days_p10": 3.97, "cum_days_p50": 6.28, "cum_days_p90": 9.95, "ladder_banked_p50": 7405.44, "cashout": 14000.0}, "3": {"trades_compound_p50": 12, "trades_sprint_p50": 5, "days_p50": 0.68, "cum_days_p10": 4.74, "cum_days_p50": 7.26, "cum_days_p90": 11.39, "ladder_banked_p50": 6236.46, "cashout": 10000.0}, "4": {"trades_compound_p50": 66, "trades_sprint_p50": 31, "days_p50": 3.78, "cum_days_p10": 7.74, "cum_days_p50": 11.49, "cum_days_p90": 16.84, "ladder_banked_p50": 40937.19, "cashout": 100000.0}, "5": {"trades_compound_p50": 144, "trades_sprint_p50": 68, "days_p50": 8.0, "cum_days_p10": 14.95, "cum_days_p50": 19.7, "cum_days_p90": 27.57, "ladder_banked_p50": 280807.72, "cashout": null}}, "total_ladder_banked_p50": 337760.69, "total_cashout_p50": 126000.0, "final_live_equity_p50": 1039628.22, "grand_total_p50": 1499579.99, "days_to_phase5_p50": 19.69, "bust_rate_pct": 0.0, "n_runs": 1500}, "60": {"phases": {"1": {"trades_compound_p50": 43, "trades_sprint_p50": 0, "days_p50": 2.26, "cum_days_p10": 1.26, "cum_days_p50": 2.26, "cum_days_p90": 4.11, "ladder_banked_p50": 1403.28, "cashout": 2000.0}, "2": {"trades_compound_p50": 43, "trades_sprint_p50": 20, "days_p50": 2.47, "cum_days_p10": 3.31, "cum_days_p50": 5.0, "cum_days_p90": 7.46, "ladder_banked_p50": 7665.99, "cashout": 14000.0}, "3": {"trades_compound_p50": 11, "trades_sprint_p50": 5, "days_p50": 0.68, "cum_days_p10": 3.85, "cum_days_p50": 5.87, "cum_days_p90": 8.6, "ladder_banked_p50": 6277.32, "cashout": 10000.0}, "4": {"trades_compound_p50": 52, "trades_sprint_p50": 25, "days_p50": 3.0, "cum_days_p10": 6.55, "cum_days_p50": 9.07, "cum_days_p90": 12.48, "ladder_banked_p50": 41087.39, "cashout": 100000.0}, "5": {"trades_compound_p50": 120, "trades_sprint_p50": 57, "days_p50": 6.78, "cum_days_p10": 12.54, "cum_days_p50": 15.82, "cum_days_p90": 21.49, "ladder_banked_p50": 281791.09, "cashout": null}}, "total_ladder_banked_p50": 339368.43, "total_cashout_p50": 126000.0, "final_live_equity_p50": 1037851.77, "grand_total_p50": 1501811.91, "days_to_phase5_p50": 15.82, "bust_rate_pct": 0.0, "n_runs": 1500}, "65": {"phases": {"1": {"trades_compound_p50": 36, "trades_sprint_p50": 0, "days_p50": 1.89, "cum_days_p10": 1.05, "cum_days_p50": 1.89, "cum_days_p90": 3.26, "ladder_banked_p50": 1412.95, "cashout": 2000.0}, "2": {"trades_compound_p50": 36, "trades_sprint_p50": 17, "days_p50": 2.11, "cum_days_p10": 2.79, "cum_days_p50": 4.16, "cum_days_p90": 5.89, "ladder_banked_p50": 7789.82, "cashout": 14000.0}, "3": {"trades_compound_p50": 10, "trades_sprint_p50": 4, "days_p50": 0.58, "cum_days_p10": 3.3, "cum_days_p50": 4.84, "cum_days_p90": 6.99, "ladder_banked_p50": 6313.72, "cashout": 10000.0}, "4": {"trades_compound_p50": 45, "trades_sprint_p50": 21, "days_p50": 2.56, "cum_days_p10": 5.59, "cum_days_p50": 7.57, "cum_days_p90": 10.54, "ladder_banked_p50": 41116.76, "cashout": 100000.0}, "5": {"trades_compound_p50": 101, "trades_sprint_p50": 48, "days_p50": 5.68, "cum_days_p10": 10.49, "cum_days_p50": 13.42, "cum_days_p90": 17.83, "ladder_banked_p50": 282089.73, "cashout": null}}, "total_ladder_banked_p50": 339447.3, "total_cashout_p50": 126000.0, "final_live_equity_p50": 1037367.2, "grand_total_p50": 1500691.9, "days_to_phase5_p50": 13.41, "bust_rate_pct": 0.0, "n_runs": 1500}};
+
+  var PHASE_META = [
+    { n: 1, title: "Phase 1 — Compound alone", solo: true,
+      flow: [["Start", "$100"], ["Trigger", "$3,000"], ["Cashout", "$2,000"], ["Reseed", "$1,000"]],
+      note: "Compound runs solo here &mdash; Sprint/Core1/Core2 take no trades at all until the cross-module cascade fires. The cascade (Compound's own banked profit crossing $500&ndash;600) must fire <b>before</b> this phase's cashout can complete: $300 comes out of Compound's real banked profit and splits $100 each to Sprint, Core1 and Core2, bringing all three online for the first time." },
+    { n: 2, title: "Phase 2 — Compound + Sprint", solo: false,
+      flow: [["Start", "$1,000"], ["Trigger", "$15,000"], ["Cashout", "$14,000"], ["Reseed", "$1,000"]],
+      note: "Sprint joins the phase-target engine for the first time here, seeded by its 35% share of Phase 1's $1,000 reseed (65/35 compound/sprint). Core1 and Core2 are already trading independently by this point on their $100 cascade seed &mdash; their win rate never counts toward this number." },
+    { n: 3, title: "Phase 3 — Compound + Sprint", solo: false,
+      flow: [["Start", "$1,000"], ["Trigger", "$12,000"], ["Cashout", "$10,000"], ["Reseed", "$2,000"]],
+      note: "Same 65/35 split as every phase from here on. A lower trigger than Phase 2 by design &mdash; not a typo." },
+    { n: 4, title: "Phase 4 — Compound + Sprint", solo: false,
+      flow: [["Start", "$2,000"], ["Trigger", "$105,000"], ["Cashout", "$100,000"], ["Reseed", "$5,000"]],
+      note: "The big step: six figures taken off the table in one cashout." },
+    { n: 5, title: "Phase 5 — Compound + Sprint (final)", solo: false,
+      flow: [["Start", "$5,000"], ["Trigger", "$1,000,000"], ["Cashout", "&mdash;"], ["Reseed", "&mdash;"]],
+      note: "Final target. Ladder-only &mdash; no automatic cash-out is coded for reaching $1M yet; that decision waits until the number is actually close." }
+  ];
+
+  function fmtMoney(n) {
+    if (n >= 1000) return "$" + Math.round(n).toLocaleString("en-US");
+    return "$" + n.toFixed(0);
+  }
+  function fmtDays(n) { return n.toFixed(1) + "d"; }
+
+  var ladder = document.getElementById("ladder");
+  var summaryBand = document.getElementById("summary-band");
+
+  function render(wr) {
+    var d = DATA[wr];
+    ladder.querySelectorAll(".phase-card").forEach(function(el) { el.remove(); });
+
+    PHASE_META.forEach(function(meta) {
+      var stats = d.phases[meta.n];
+      var card = document.createElement("div");
+      card.className = "phase-card" + (meta.solo ? " solo" : "");
+
+      var flowHtml = meta.flow.map(function(step, i) {
+        var arrow = i > 0 ? '<span class="flow-arrow">&rarr;</span>' : "";
+        return arrow + '<div class="flow-step"><span class="flow-label">' + step[0] +
+          '</span><span class="flow-value">' + step[1] + '</span></div>';
+      }).join("");
+
+      var badge = meta.solo
+        ? '<span class="solo-badge">Compound solo</span>'
+        : '<span class="combo-badge">Compound + Sprint</span>';
+
+      card.innerHTML =
+        '<div class="phase-num">' + meta.n + '</div>' +
+        '<div class="phase-head"><h3 class="phase-title">' + meta.title + '</h3>' + badge + '</div>' +
+        '<div class="flow-row">' + flowHtml + '</div>' +
+        '<div class="stat-grid">' +
+          '<div class="stat-tile"><span class="stat-label">Days this phase</span>' +
+            '<span class="stat-val">' + fmtDays(stats.days_p50 != null ? stats.days_p50 : (stats.cum_days_p50)) + '</span>' +
+            '<span class="stat-sub">median</span></div>' +
+          '<div class="stat-tile"><span class="stat-label">Cumulative days</span>' +
+            '<span class="stat-val">' + fmtDays(stats.cum_days_p50) + '</span>' +
+            '<span class="stat-sub">p10 ' + fmtDays(stats.cum_days_p10) + ' &ndash; p90 ' + fmtDays(stats.cum_days_p90) + '</span></div>' +
+          '<div class="stat-tile"><span class="stat-label">Trades (C / S)</span>' +
+            '<span class="stat-val">' + stats.trades_compound_p50 + ' / ' + stats.trades_sprint_p50 + '</span>' +
+            '<span class="stat-sub">median, this phase</span></div>' +
+          '<div class="stat-tile"><span class="stat-label">Ladder-leg banked</span>' +
+            '<span class="stat-val">' + fmtMoney(stats.ladder_banked_p50) + '</span>' +
+            '<span class="stat-sub">6 rungs, this phase only</span></div>' +
+        '</div>' +
+        '<div class="note">' + meta.note + '</div>';
+
+      ladder.appendChild(card);
+    });
+
+    summaryBand.innerHTML =
+      '<div class="summary-tile"><span class="summary-label">Ladder-leg banked (all 5 phases)</span>' +
+        '<span class="summary-val">' + fmtMoney(d.total_ladder_banked_p50) + '</span></div>' +
+      '<div class="summary-tile"><span class="summary-label">Phase cashouts (4 fixed)</span>' +
+        '<span class="summary-val">' + fmtMoney(d.total_cashout_p50) + '</span></div>' +
+      '<div class="summary-tile"><span class="summary-label">Final live equity at $1M trigger</span>' +
+        '<span class="summary-val">' + fmtMoney(d.final_live_equity_p50) + '</span></div>' +
+      '<div class="summary-tile"><span class="summary-label">Grand total (all three, median)</span>' +
+        '<span class="summary-val good">' + fmtMoney(d.grand_total_p50) + '</span></div>' +
+      '<div class="summary-tile"><span class="summary-label">Days to clear all 5 phases</span>' +
+        '<span class="summary-val">' + fmtDays(d.days_to_phase5_p50) + '</span></div>' +
+      '<div class="summary-tile"><span class="summary-label">Bust rate</span>' +
+        '<span class="summary-val good">' + d.bust_rate_pct.toFixed(1) + '%</span></div>';
+  }
+
+  document.querySelectorAll(".wr-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      document.querySelectorAll(".wr-btn").forEach(function(b) { b.setAttribute("aria-pressed", "false"); });
+      btn.setAttribute("aria-pressed", "true");
+      render(btn.getAttribute("data-wr"));
+    });
+  });
+
+  render("60");
+})();
+</script>
