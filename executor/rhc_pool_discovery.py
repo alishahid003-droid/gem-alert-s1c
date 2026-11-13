@@ -51,6 +51,7 @@ DexScreener's own sample data: a real live ROBINHOOD/ETH pair had
 quoteToken.address == "0x0000000000000000000000000000000000000000") --
 this module's default quote_currency reflects that.
 """
+import time
 from typing import Optional
 
 from executor.rpc_pool import rpc_call
@@ -69,21 +70,53 @@ _LOG_SCAN_CHUNK_BLOCKS = 5000
 # against a real, actively-traded HOOKR pool on Robinhood Chain with $889K
 # liquidity (verified directly via DexScreener's own API) that find_v4_pool
 # still reported as "no pool found". That pool's real pairCreatedAt timestamp
-# is 99 days before this fix, and Robinhood Chain (an Arbitrum Orbit chain)
-# runs sub-2-second blocks like the rest of the Arbitrum family, so 100,000
-# blocks covers only a few hours -- every real buy attempt against anything
-# but a brand-new-this-cycle pool was silently refusing with a misleading
-# "no pool" reason, not a code crash, so this was easy to miss without a
-# real live test (which is exactly what surfaced it). Widened to 140 chunks
-# (700,000 blocks) -- comfortably covers roughly a week back even at a
-# conservative 1 block/second, while keeping the per-call chunk size
-# unchanged so this only costs more RPC calls when a pool genuinely isn't
-# found early, not a bigger call each time. Ali confirmed he wants "just
-# enough for very recent pools" (the sniper targets new launches anyway),
-# not months of depth, so this is deliberately not sized to catch
-# HOOKR-style 99-day-old pools going forward -- only to stop rejecting
-# pools from the last several days as if they did not exist.
-_LOG_SCAN_MAX_CHUNKS = 140  # bounds worst-case call count if a token has no pool at all
+# is 99 days before this fix. Widened then to 140 chunks (700,000 blocks) on
+# an ASSUMED "sub-2-second block, conservative 1 block/sec" block time --
+# that assumption was never actually checked against real chain data.
+#
+# 14 Nov 2026 (Claude, re-checked against REAL data per Ali's explicit
+# standing rule to never leave a number unverified): pulled real block
+# timestamps from robinhoodchain.blockscout.com's own API -- 48 real blocks
+# (heights 113671031-113671079) spanned exactly 5 real seconds
+# (2026-11-13T21:35:25Z to 21:35:30Z). Real block time is ~0.104 sec/block,
+# roughly 10x FASTER than the "1 block/sec" guess the 140-chunk number was
+# based on. So the 140-chunk setting was actually only covering ~19-20 real
+# hours, not "roughly a week" as that comment claimed -- a real, confirmed
+# gap, same class of silent-miss risk as the original HOOKR incident, just
+# smaller in scale.
+#
+# Widened to 1,164 chunks (5,820,000 blocks) to genuinely cover 1 real week
+# at the confirmed ~0.104 sec/block rate, per Ali's original intent ("just
+# enough for very recent pools, not months of depth") -- this is that same
+# target, just computed from a real number instead of a guess.
+#
+# Real constraint this has to respect (Ali, 14 Nov 2026, explicit): Robinhood
+# Chain has ONLY ONE RPC endpoint in this system's pool (rpc.mainnet.chain.
+# robinhood.com -- see rpc_pool.py's own docstring: "their own docs say it is
+# rate-limited and not recommended for production use"), with NO second
+# endpoint to fail over to if it rate-limits. Raising chunk count alone,
+# with find_v4_pool()'s tight no-delay loop, would mean a genuine "pool not
+# found" case fires up to 1,164 eth_getLogs calls back-to-back against that
+# single endpoint -- real risk of tripping its rate limit mid-scan, which
+# would then also block the NEXT real buy attempt (60s cooldown, no second
+# endpoint to carry it) for a reason that has nothing to do with that next
+# token. This is why _LOG_SCAN_INTER_CHUNK_DELAY_S below exists: it isn't
+# optional padding, it's what makes the wider scan depth safe to actually
+# use on a single-endpoint, rate-limited chain, so the live system doesn't
+# lose speed or halt on a scan that's supposed to be a rare worst case, not
+# a routine cost paid on every token.
+_LOG_SCAN_MAX_CHUNKS = 1164  # bounds worst-case call count if a token has no pool at all -- ~1 real week at the confirmed ~0.104 sec/block rate
+
+# Paced deliberately (Ali, 14 Nov 2026): spreads a worst-case full scan
+# (1,164 calls) over real time instead of bursting them, so it can't trip
+# the single RHC endpoint's rate limit and take the next real buy attempt
+# down with it via the 60s cooldown. At 0.5s/call, worst case adds ~582s
+# (~9.7 min) ONLY when a token's pool genuinely isn't found anywhere in the
+# full week scanned -- the common case (pool found in the first few chunks,
+# since the sniper targets brand-new launches) is barely affected. This
+# trades a slower worst-case refusal for not risking the live system
+# stalling on a rate-limit cooldown it caused against itself.
+_LOG_SCAN_INTER_CHUNK_DELAY_S = 0.5
 
 
 def _topic_to_address(topic: str) -> str:
@@ -155,7 +188,13 @@ def find_v4_pool(token_address: str, quote_currency: str = NATIVE_CURRENCY,
     quote_topic = _address_to_topic(quote_currency)
 
     to_block = latest_block
-    for _ in range(_LOG_SCAN_MAX_CHUNKS):
+    for _chunk_i in range(_LOG_SCAN_MAX_CHUNKS):
+        # 14 Nov 2026 (Ali): paced on purpose -- see _LOG_SCAN_INTER_CHUNK_DELAY_S's
+        # own comment above. Skipped on the very first chunk so the common case
+        # (pool found immediately, since the sniper targets brand-new launches)
+        # pays zero extra latency.
+        if _chunk_i > 0:
+            time.sleep(_LOG_SCAN_INTER_CHUNK_DELAY_S)
         from_block = max(0, to_block - _LOG_SCAN_CHUNK_BLOCKS)
         result = rpc_call("robinhood_chain", "eth_getLogs", [{
             "address": UNISWAP_V4_POOL_MANAGER_RHC,

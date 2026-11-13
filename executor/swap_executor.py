@@ -1435,6 +1435,88 @@ def _get_evm_native_balance(chain: str, address: str) -> Optional[int]:
         return None
 
 
+# Added 14 Nov 2026 (Ali, explicit instruction): real buy sizing must track the
+# REAL wallet balance on each chain, not paper-ledger equity (books.equity()).
+# Ali's exact words: "It should be based on my real USDT amount size in my
+# actual real wallet instead of the paper book's equity... it should track
+# down real wallet balance and trade accordingly as per the logic which is
+# defined for that module." This reuses the EXISTING bankroll-tier sizing
+# logic in executor/config.py (BANKROLL_TIERS / bankroll_tier()) -- the
+# "logic defined for that module" -- which until now was only ever driven by
+# the static TOTAL_WALLET_USD env var (a $50 placeholder), never by a real
+# on-chain read. This function is the live replacement for that placeholder.
+#
+# HOOKR (0x18E674231A58c239Dc7DaeDcffE15Ec3A24cff5c) is used as the fixed
+# reference token for pricing RHC's native ether in USD: a real, already
+# execution-tested token on Robinhood Chain with a deep ($889K at last
+# check) native-ETH-quoted pool (see rhc_pool_discovery.py's own docstring
+# and test_live_buy.py / test_live_sell_rhc.py, both run successfully
+# against it earlier this session). Robinhood Chain has no fixed
+# USDC-style stablecoin pool known-good here the way Base's _eth_price_usd()
+# has, so a deep, real, already-verified token pair stands in for one --
+# same reasoning _rhc_native_price_usd() itself already uses, just pointed
+# at a specific, trusted token rather than whatever token a buy call passes
+# in.
+_RHC_NATIVE_PRICE_REFERENCE_TOKEN = "0x18E674231A58c239Dc7DaeDcffE15Ec3A24cff5c"  # HOOKR
+
+
+def get_real_wallet_usd(chain: str) -> Optional[float]:
+    """Real, live spendable balance of the trading wallet on one chain, in
+    USD, read fresh from the chain every call (never cached -- a balance
+    this drives real position sizing from must never go stale). Returns
+    None (never a guess, never a fallback to a placeholder number) if the
+    balance or the price can't be read live.
+
+    chain must be "robinhood_chain" or "base" -- the two chains with real
+    execution wired up (see executor/config.py's ready_for_chain)."""
+    try:
+        from eth_account import Account  # type: ignore
+    except ImportError:
+        return None
+
+    if chain == "robinhood_chain":
+        private_key = EXECUTOR_CONFIG.rhc_private_key
+    elif chain == "base":
+        private_key = EXECUTOR_CONFIG.base_private_key
+    else:
+        return None
+    if not private_key:
+        return None
+
+    try:
+        address = Account.from_key(private_key).address
+    except Exception:  # noqa: BLE001 -- a bad key must never crash the sizing path
+        return None
+
+    balance_wei = _get_evm_native_balance(chain, address)
+    if balance_wei is None:
+        return None
+
+    if chain == "base":
+        native_price = _eth_price_usd()
+    else:  # robinhood_chain
+        native_price = _rhc_native_price_usd(_RHC_NATIVE_PRICE_REFERENCE_TOKEN)
+    if native_price is None or native_price <= 0:
+        return None
+
+    return (balance_wei / 10 ** 18) * native_price
+
+
+def get_total_real_wallet_usd() -> float:
+    """Sum of the real, live wallet balance across every chain with real
+    execution wired up (robinhood_chain + base), in USD. A chain whose
+    balance can't be read right now contributes 0 rather than blocking the
+    whole figure -- matching _cap_sell_amount_to_real_balance's own stance
+    that a failed live read must never block real trading outright. Always
+    a fresh on-chain read, never cached."""
+    total = 0.0
+    for chain in ("robinhood_chain", "base"):
+        usd = get_real_wallet_usd(chain)
+        if usd is not None:
+            total += usd
+    return round(total, 2)
+
+
 def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> ExecutionResult:
     """Sells amount_tokens of an ERC20 token back to native RHC ether via
     Uniswap v4's Universal Router. Added Sept 25 2026, on top of the same

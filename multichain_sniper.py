@@ -648,12 +648,57 @@ def act(d: dict, now: Optional[float] = None) -> dict:
         # (including an exception) is recorded on the position and swallowed, never raised --
         # paper trading must keep working exactly as it does tonight even if live wiring breaks.
         if pos and d["chain"] in ("robinhood_chain", "base") and books.is_live_armed(lane):
+            class _RealSizeSkip(Exception):
+                """Internal sentinel: real-balance sizing already recorded its own
+                live_attempted/live_ok/live_reason and called update_live_fields()
+                before raising this -- the except block below must not overwrite
+                that with a generic 'live buy hook raised' message."""
+                pass
             try:
                 from executor import config as _execcfg, swap_executor as _swap
                 if _execcfg.EXECUTOR_CONFIG.execution_enabled and _execcfg.EXECUTOR_CONFIG.ready_for_chain(d["chain"]):
                     _buy_fn = (_swap.execute_buy_robinhood_chain if d["chain"] == "robinhood_chain"
                                else _swap.execute_buy_base)
-                    _result = _buy_fn(d["addr"], stake)
+                    # 14 Nov 2026 (Ali, explicit instruction): the real buy's dollar amount must
+                    # come from the REAL wallet balance on this chain, never from `stake` (which
+                    # is paper_ledger/books.equity()-derived -- pure paper P&L bookkeeping, zero
+                    # connection to real capital). Ali's exact words: "It should be based on my
+                    # real USDT amount size in my actual real wallet instead of the paper book's
+                    # equity... it should track down real wallet balance and trade accordingly
+                    # as per the logic which is defined for that module." `stake` and the paper
+                    # open_paper() call above are deliberately left untouched -- paper trading's
+                    # own bookkeeping, and the entry/qualification logic that decided `pos`
+                    # should fire at all, are NOT part of this change.
+                    #
+                    # "the logic which is defined for that module" = the SAME bankroll_tier()
+                    # percentage-of-wallet sizing executor/config.py already defines (seed tier:
+                    # 30% of wallet per shot, Ali Sept 23 2026), just pointed at a live, real,
+                    # per-chain on-chain balance read instead of the static TOTAL_WALLET_USD
+                    # placeholder that logic used to run on.
+                    _real_wallet_usd = _swap.get_real_wallet_usd(d["chain"])
+                    if _real_wallet_usd is None or _real_wallet_usd < 5.0:
+                        pos["live_attempted"] = True
+                        pos["live_ok"] = False
+                        pos["live_reason"] = (
+                            f"refusing real buy: could not read a real {d['chain']} wallet balance "
+                            f"(or it's below $5) -- never guessing or falling back to paper stake "
+                            f"for a real buy amount"
+                        )
+                        paper_ledger.update_live_fields(pos)
+                        raise _RealSizeSkip()
+                    _real_tier = _execcfg.bankroll_tier(_real_wallet_usd)
+                    _real_stake = round(_real_wallet_usd * _real_tier["position_pct"], 2)
+                    _real_stake = _real_stake if _real_stake >= 5.0 else 0.0
+                    if not _real_stake:
+                        pos["live_attempted"] = True
+                        pos["live_ok"] = False
+                        pos["live_reason"] = (
+                            f"refusing real buy: real {d['chain']} wallet is ${_real_wallet_usd:.2f}, "
+                            f"sized real stake of ${_real_stake:.2f} is below the $5 floor"
+                        )
+                        paper_ledger.update_live_fields(pos)
+                        raise _RealSizeSkip()
+                    _result = _buy_fn(d["addr"], _real_stake)
                     pos["live_attempted"] = True
                     pos["live_ok"] = bool(_result.ok)
                     pos["live_reason"] = _result.reason
@@ -667,6 +712,10 @@ def act(d: dict, now: Optional[float] = None) -> dict:
                         # decrementing as a running "what's left" figure for reporting).
                         pos["live_amount_tokens_original"] = _result.filled_amount_tokens
                     paper_ledger.update_live_fields(pos)
+            except _RealSizeSkip:
+                # Already recorded (live_attempted/live_ok/live_reason + update_live_fields())
+                # by the real-balance sizing checks above -- nothing more to do here.
+                pass
             except Exception as _live_exc:  # noqa: BLE001
                 try:
                     pos["live_attempted"] = True
