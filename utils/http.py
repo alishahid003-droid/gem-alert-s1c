@@ -34,6 +34,22 @@ def _get_session() -> requests.Session:
         with _session_lock:
             if _session is None:
                 _session = requests.Session()
+                # FIXED 14 Nov 2026 (Ali, real incident): requests' own default
+                # User-Agent ("python-requests/x.x.x") gets a hard 403 Forbidden
+                # from Robinhood Chain's RPC -- confirmed live, on Ali's own
+                # machine, that the SAME request with a curl or browser
+                # User-Agent gets a clean 200 with the correct chainId. This was
+                # silently indistinguishable from real rate-limiting/downtime in
+                # every error this session saw ("all pool endpoints failed"),
+                # because manual debugging all day used curl, which was never
+                # affected. A real browser UA here costs nothing and fixes this
+                # for every call through this shared session -- every chain's
+                # RPC, DexScreener, GoPlus, MadeOnSol, Mobula, all of it.
+                _session.headers.update({
+                    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/131.0.0.0 Safari/537.36"),
+                })
     return _session
 
 

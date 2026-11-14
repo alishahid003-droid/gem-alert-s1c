@@ -90,7 +90,17 @@ RPC_ENDPOINT_POOLS = {
         "https://bsc-dataseed1.defibit.io",   # CONFIRMED healthy, Ali, Sept 23 2026 (round 4)
     ],
     "robinhood_chain": [
-        "https://rpc.mainnet.chain.robinhood.com",  # CONFIRMED healthy, Ali, Sept 23 2026 (round 4); official but rate-limited per Robinhood's own docs -- only 1 candidate exists
+        "https://rpc.mainnet.chain.robinhood.com",  # CONFIRMED healthy, Ali, Sept 23 2026 (round 4), RE-CONFIRMED
+                                                     # 14 Nov 2026 after the User-Agent fix (see utils/http.py) --
+                                                     # official, primary endpoint.
+        "https://rpc.nodeflare.app/robinhood/public",  # ADDED 14 Nov 2026 (Ali, real incident): real second
+                                                        # candidate, free, no signup, CONFIRMED live via the app's
+                                                        # own rpc_call() on Ali's machine (chainId 0x1237 returned
+                                                        # correctly). Nodeflare's own docs state a 1 request/10s
+                                                        # per-IP limit -- kept SECOND in this list (fallback only,
+                                                        # used when the primary is cooling down/failing) rather
+                                                        # than primary, since that limit would get hit immediately
+                                                        # under real polling frequency if used as the main endpoint.
     ],
     "base": [
         "https://mainnet.base.org",            # Base's own official public RPC (Coinbase/OP Stack) -- no signup
