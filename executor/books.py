@@ -136,6 +136,20 @@ def realized_pnl(book_id: str) -> float:
     return round(gross - withdrawn(book_id) + deposited(book_id) - bust_offset(book_id), 2)
 
 
+def realized_pnl_real(book_id: str, chain: str = None) -> float:
+    """15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"):
+    REAL counterpart to realized_pnl() above -- gross real P&L from position_state (via
+    position_state.module_realized_pnl_real(), the f"{module_id}_real" stage convention) instead
+    of paper's pnl_usd rows. withdrawn()/deposited()/bust_offset() are intentionally reused
+    UNCHANGED: cashouts/deposits (e.g. the sprint/core1/core2 cascade's $300 pull and $100 seeds)
+    and busts are already real-dollar ledger entries with no paper/real split of their own -- a
+    dollar pulled out of compound's real banked vault is the same real dollar whichever side of
+    this split computed the gross P&L it came from."""
+    from executor import position_state
+    gross = position_state.module_realized_pnl_real(book_id, chain=chain)
+    return round(gross - withdrawn(book_id) + deposited(book_id) - bust_offset(book_id), 2)
+
+
 BUST_KEY = "books_busts_v1"
 
 
@@ -1003,8 +1017,29 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
     return None
 
 def total_value(book_id: str) -> float:
-    """Everything the book has made: seed + realized paper P&L (trading balance + banked vault)."""
+    """Everything the book has made: seed + realized P&L (trading balance + banked vault).
+
+    15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"):
+    compound switches to REAL realized P&L (total_value_real()) once it's live-armed for a
+    real chain -- same live gate banked()/compound_banked() already switched on. Without this,
+    banked() alone switching to the real ladder left total_value() (and therefore equity() =
+    total_value() - banked(), which is what the milestone/phase-cashout ladder and
+    _combined_equity_for_milestones() actually trade off of) still reading paper P&L -- a
+    mismatched pair that's as broken as either one being paper-only alone. Both now move
+    together: paper-only compound is entirely paper (unaffected), live compound is entirely
+    real (seed + realized_pnl_real()), with no call site able to see a half-paper/half-real
+    number for compound again."""
+    if book_id == "compound" and SC_CASCADE_FUNDER in _live_books_from_env():
+        return total_value_real(book_id)
     return max(0.0, round(cfg(book_id)["seed"] + realized_pnl(book_id), 2))
+
+
+def total_value_real(book_id: str, chain: str = None) -> float:
+    """15 Nov 2026: REAL counterpart to total_value() -- seed + realized_pnl_real() instead of
+    paper's realized_pnl(). Used by compound_banked_real() to walk COMPOUND_STAGES against the
+    book's REAL total value, so the real banking ladder and the real cascade trigger move off
+    real trading outcomes, not paper ones."""
+    return max(0.0, round(cfg(book_id)["seed"] + realized_pnl_real(book_id, chain=chain), 2))
 
 
 # 31 Oct 2026 (Ali): staged profit-banking for the $50->$20,000 attempt. Ali's own structure,
@@ -1036,6 +1071,15 @@ def _compound_total_value_raw(book_id: str) -> float:
     return max(0.0, round(c["seed"] + realized_pnl(book_id), 2))
 
 
+def _compound_total_value_raw_real(book_id: str, chain: str = None) -> float:
+    """15 Nov 2026: REAL counterpart to _compound_total_value_raw() -- the undiscounted REAL
+    total compound has ever made (seed + realized_pnl_real()), used only by
+    compound_banked_real() to figure out which COMPOUND_STAGES line has been crossed in real
+    dollars."""
+    c = cfg(book_id)
+    return max(0.0, round(c["seed"] + realized_pnl_real(book_id, chain=chain), 2))
+
+
 def compound_banked(book_id: str) -> float:
     """Staged version of banked() for compound: walks COMPOUND_STAGES in order, banking bank_pct of
     the total value AT THE MOMENT each threshold is first crossed (not continuously re-banking a
@@ -1052,13 +1096,35 @@ def compound_banked(book_id: str) -> float:
     return round(total_banked, 2)
 
 
+def compound_banked_real(book_id: str, chain: str = None) -> float:
+    """15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"):
+    REAL counterpart to compound_banked() -- walks the exact same COMPOUND_STAGES ladder
+    ($1k@32.5%, $5k@37.5%, $10k@55%, $20k final) but against compound's REAL total value
+    (_compound_total_value_raw_real()) instead of paper's. This is what check_sprint_compound_
+    cascade() below must use once compound is live for real money: the $500 cascade trigger
+    and the $1k/$5k/$10k banking stages all need to reflect the real wallet's real profit, not
+    a paper number with no connection to it -- compound_banked() alone was the last paper-based
+    link left in the real-money path after Fix #1/#2/#3 closed the sizing/count/entry gaps."""
+    raw = _compound_total_value_raw_real(book_id, chain=chain)
+    total_banked = 0.0
+    for threshold, bank_pct in COMPOUND_STAGES:
+        if raw >= threshold and bank_pct > 0:
+            total_banked += threshold * bank_pct
+    return round(total_banked, 2)
+
+
 def banked(book_id: str) -> float:
     """Profit taken OUT of play (the vault).
-    compound: staged escalating bank-out per COMPOUND_STAGES above (Ali, 31 Oct 2026).
+    compound: staged escalating bank-out per COMPOUND_STAGES above (Ali, 31 Oct 2026). Uses the
+    REAL ladder (compound_banked_real()) once compound is live-armed for a real chain (15 Nov
+    2026) -- see compound_banked_real()'s docstring for why. Falls back to the paper ladder
+    whenever compound isn't live yet, so paper-only testing is completely unaffected.
     sprint/core1/core2/copy books: original mechanism -- once realized profit passes
     BANK_AFTER_MULT x seed (default 3x), bank_pct of the profit above that line is locked away.
     Both are stateless: derived from realized P&L, so neither ever gets out of sync."""
     if book_id == "compound":
+        if SC_CASCADE_FUNDER in _live_books_from_env():
+            return compound_banked_real(book_id)
         return compound_banked(book_id)
     c = cfg(book_id)
     line = float(os.environ.get("BANK_AFTER_MULT", "3")) * c["seed"]

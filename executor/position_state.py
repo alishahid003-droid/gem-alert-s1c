@@ -229,6 +229,35 @@ def realized_pnl_summary() -> dict:
     }
 
 
+def module_realized_pnl_real(module_id: str, chain: str = None) -> float:
+    """15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"):
+    REAL realized P&L for a module's real-money entries (f"{module_id}_real" stage, matching
+    the convention multichain_sniper.py and entrypoint.py both use), read directly from
+    position_state's CLOSED positions -- the real-money counterpart to books._rows()'s paper
+    pnl_usd sum, used by realized_pnl() for the paper-only books.
+
+    Without this, compound's profit-banking ladder (COMPOUND_STAGES: $1k/$5k/$10k/$20k) and the
+    $500 real-dollar cascade trigger that funds sprint/core1/core2 with real $100 each were both
+    being computed off paper P&L that has no connection to the real wallet -- the same root
+    disease already fixed once for compound's capital/position-count gates (14-15 Nov 2026
+    incidents) and its real-buy sizing (13 Nov 2026), just not yet fixed in the BANKING math.
+
+    A position with no priced pnl_usd (e.g. a close that couldn't compute exit_usd) is excluded
+    from the sum rather than counted as 0, matching realized_pnl_summary()'s existing rule."""
+    stage_name = f"{module_id}_real"
+    total = 0.0
+    for pos in list_closed_positions(limit=100000):
+        if chain is not None and pos.get("chain") != chain:
+            continue
+        entry = pos.get("stages", {}).get(stage_name)
+        if not entry or entry.get("buy_status") == "failed":
+            continue
+        if pos.get("pnl_usd") is None:
+            continue
+        total += pos["pnl_usd"]
+    return round(total, 2)
+
+
 def _signal_of(pos: dict) -> Optional[str]:
     """The signal classification a closed position fired under -- looks across every stage
     this position ever recorded (stage1, stage2, ...) and returns the first one with a

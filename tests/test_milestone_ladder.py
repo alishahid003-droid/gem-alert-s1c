@@ -20,7 +20,7 @@ import time
 import pytest
 
 import state as st
-from executor import books, paper_ledger as pl
+from executor import books, paper_ledger as pl, position_state as ps
 
 
 @pytest.fixture(autouse=True)
@@ -46,13 +46,32 @@ def _seed_closed_trade(module: str, pnl_usd: float, now: float, trade_id: str):
     st.set_value(pl.CLOSED_KEY, closed)
 
 
+def _seed_real_closed_trade(module: str, pnl_usd: float, usd_amount: float, token: str):
+    """15 Nov 2026: real-money counterpart to _seed_closed_trade() above. Once compound is
+    listed in LIVE_BOOKS, books.banked()/check_sprint_compound_cascade() read REAL closed
+    trades from position_state (via books.compound_banked_real()), not paper's CLOSED_KEY rows
+    -- see executor/books.py's compound_banked_real()/banked() docstrings for why. Records one
+    real closed position the way multichain_sniper.py's act() actually records a real trade:
+    record_stage_entry(..., f"{module}_real", ...), record_fill(...), close_position(...)."""
+    ps.record_stage_entry("robinhood_chain", token, f"{module}_real", usd_amount, 50_000,
+                           f"real {module} buy attempt: ok")
+    ps.record_fill("robinhood_chain", token, 1000.0, tx_signature="0xtest_milestone")
+    ps.close_position("robinhood_chain", token, "test_exit", exit_usd=usd_amount + pnl_usd)
+
+
 def _fire_cascade(now: float):
-    """Helper: arms LIVE_BOOKS=compound, seeds enough compound profit to cross the cascade's own
-    $500 banked() trigger, and fires it -- used by every phase-1-cashout test, since phase 1's
-    cashout is now gated on this having already happened."""
+    """Helper: arms LIVE_BOOKS=compound, seeds enough REAL compound profit to cross the
+    cascade's own $500 banked() trigger, and fires it -- used by every phase-1-cashout test,
+    since phase 1's cashout is now gated on this having already happened.
+
+    15 Nov 2026: switched from seeding a PAPER closed trade (_seed_closed_trade) to a REAL one
+    (_seed_real_closed_trade) -- now that compound is live-armed here (LIVE_BOOKS=compound),
+    books.banked()/check_sprint_compound_cascade() correctly ignore paper P&L entirely and
+    read real position_state records instead, so a paper seed no longer fires the cascade in
+    this test, exactly as it should no longer fire it for real money either."""
     import os
     os.environ["LIVE_BOOKS"] = "compound"
-    _seed_closed_trade("compound", 5000.0, now - 1000, "cascade_seed")
+    _seed_real_closed_trade("compound", 5000.0, 20.0, "cascade_seed_real")
     result = books.check_sprint_compound_cascade(now - 1000)
     assert result is not None and result.get("fired") is True, "cascade did not fire in test setup"
     return result
@@ -214,21 +233,24 @@ def test_full_5_phase_walk_to_1_million_fires_every_cashout_in_order():
                 break
             events.append(r)
 
-    # Phase 1 -> cashout (compound alone; cascade must fire first)
+    # Phase 1 -> cashout (compound alone; cascade must fire first). LIVE_BOOKS=compound is
+    # armed inside _fire_cascade() -- from that point on, compound's total_value()/banked()/
+    # equity() all read REAL position_state records, not paper's CLOSED_KEY rows (15 Nov 2026
+    # fix), so every phase step below seeds a real closed trade, not a paper one.
     _fire_cascade(now)
-    _seed_closed_trade("compound", 3500.0, now, "p1")
+    _seed_real_closed_trade("compound", 3500.0, 20.0, "p1")
     drain()
     # Phase 2 -> cashout ($15k trigger, compound+sprint)
-    _seed_closed_trade("compound", 14000.0, now + 1, "p2")
+    _seed_real_closed_trade("compound", 14000.0, 20.0, "p2")
     drain()
     # Phase 3 -> cashout ($12k trigger)
-    _seed_closed_trade("compound", 12000.0, now + 2, "p3")
+    _seed_real_closed_trade("compound", 12000.0, 20.0, "p3")
     drain()
     # Phase 4 -> cashout ($105k trigger)
-    _seed_closed_trade("compound", 105000.0, now + 3, "p4")
+    _seed_real_closed_trade("compound", 105000.0, 20.0, "p4")
     drain()
     # Phase 5 -> ladder only, push well past $1,000,000
-    _seed_closed_trade("compound", 1_200_000.0, now + 4, "p5")
+    _seed_real_closed_trade("compound", 1_200_000.0, 20.0, "p5")
     drain()
 
     cashouts = [e for e in events if "event" in e]
