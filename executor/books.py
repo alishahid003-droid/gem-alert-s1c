@@ -1301,6 +1301,16 @@ def open_count(book_id: str, chain: str = None) -> int:
     return paper_ledger.module_open_count(book_id, chain=chain)
 
 
+def open_count_real(book_id: str, chain: str = None) -> int:
+    """14 Nov 2026 (Ali, explicit instruction): real on-chain open-position count, mirroring
+    open_count() but counting only confirmed real buys. Used by can_open() for compound's
+    position-count LIMIT under the exact same _use_real_capital condition that already gates
+    compound's capital check (equity_real/committed_usd_real) -- this was the missing other
+    half of that fix. sprint/core1/core2 are not live-armed and keep the original paper count."""
+    from executor import paper_ledger
+    return paper_ledger.module_open_count_real(book_id, chain=chain)
+
+
 def effective_max_share(book_id: str, now: Optional[float] = None) -> float:
     """How much of equity this book may have committed at once, RIGHT NOW -- scales up from the
     book's configured base max_share as it falls behind the pace its own target/window demands,
@@ -1655,7 +1665,10 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
         return False, f"{book_id} book is empty (${eq:.2f})" + (" [real]" if _use_real_capital else "")
     limit = max_open(book_id, eq)
     extra = int(_f("BOOK_STRONG_EXTRA_SLOTS", 2) or 0) if strong else 0
-    n_open = open_count(book_id, chain=chain)
+    # 14 Nov 2026 (Ali, explicit instruction): the position-COUNT limit must use the same
+    # real/paper split as the capital check two lines above (_use_real_capital) -- this was
+    # the other half of the "compound shows paper position count, blocks real trades" bug.
+    n_open = open_count_real(book_id, chain=chain) if _use_real_capital else open_count(book_id, chain=chain)
     need_cash = (free_equity_real(book_id) if _use_real_capital else free_equity(book_id)) < 5.0  # 14 Nov 2026: real capital for compound, see _use_real_capital above
     # 9 Nov 2026 (Ali): REVERTED the 8 Nov 2026 compound-only swap-out widening. That change was
     # backtested against a sampled window of past refusals (91 refusals / 67 missed coins) and
@@ -1675,7 +1688,7 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
                               and _f("COMPOUND_SWAP_ALLOW_WEAK", 0.0))
     if n_open >= limit + extra or (need_cash and strong) or compound_widened_swap:
         if (strong or compound_widened_swap) and _try_swap(book_id):
-            n_open = open_count(book_id, chain=chain)
+            n_open = open_count_real(book_id, chain=chain) if _use_real_capital else open_count(book_id, chain=chain)
             need_cash = (free_equity_real(book_id) if _use_real_capital else free_equity(book_id)) < 5.0
         if n_open >= limit + extra:
             chain_note = f" [{chain}]" if chain else ""

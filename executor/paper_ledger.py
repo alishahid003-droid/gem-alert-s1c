@@ -1225,6 +1225,24 @@ def module_open_count(module_id: str, chain: str = None) -> int:
                and (chain is None or p.get("chain") == chain))
 
 
+def module_open_count_real(module_id: str, chain: str = None) -> int:
+    """14 Nov 2026 (Ali, explicit instruction -- "I don't want paper trades anymore... why would
+    I even need paper trades when paper trades blocks at times the max open count to my real
+    trading"): REAL on-chain open-position count, mirroring module_open_count() above but
+    counting only positions with a confirmed real buy (live_ok is True), the same filter
+    module_open_cost_real() already uses for real committed-$ gating. A paper-only entry (no
+    real buy attempted, or attempted and refused/failed) contributes 0 here -- it never actually
+    put real money or a real open slot at risk, so it must never count against the real
+    position-count ceiling either. This is the count-side half of the real-capital gate; the
+    cost/capital side (module_open_cost_real) was already fixed earlier tonight -- this closes
+    the other half of the same bug (books.can_open()'s position-COUNT limit was still reading
+    the paper count, so compound could show "10 open positions" and refuse new real-eligible
+    entries while the real wallet had only 3 real fills and plenty of room)."""
+    return sum(1 for p in _open().values() if p.get("strategy") != "runner" and _module_of(p) == module_id
+               and p.get("live_ok") is True
+               and (chain is None or p.get("chain") == chain))
+
+
 def module_scoreboard() -> dict:
     """Per-module paper record: {module_id: {open, n, wins, win_rate, total_pnl_usd, recent[]}}.
     Positions opened before modules existed are classified on read."""

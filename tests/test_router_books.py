@@ -394,3 +394,43 @@ def test_swap_never_touches_deep_loss_runner_or_young_position():
     row = paper_ledger.swap_out("core1", now=1000.0 + 60 * 60 * 5)                            # 5h later: only the flat S2 qualifies
     assert row and row["token"] == "S2" and row["exit_type"] == "slot_swap"
     assert paper_ledger.swap_out("core1", now=1000.0 + 60 * 60 * 5) is None                   # S0 deep red + S1 runner are kept
+
+
+def test_compound_position_count_limit_uses_real_fills_not_paper_entries(monkeypatch):
+    """14 Nov 2026 (Ali, explicit instruction -- "why would I even need paper trades when...
+    it even blocks at times the max open count to my real trading"): compound's can_open()
+    position-count LIMIT must count only confirmed real buys (live_ok=True) when compound is
+    live-armed for a real chain, exactly mirroring the capital-side fix (committed_usd_real/
+    equity_real) that already existed. Before this fix, open_count() counted every paper entry
+    regardless of live_ok, so a book could show "N open positions" and refuse new real-eligible
+    entries while the real wallet had plenty of room and only a handful of real fills.
+    """
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
+    monkeypatch.setattr(books, "equity_real", lambda: 120.0)          # plenty of real wallet room
+    monkeypatch.setattr(books, "max_open", lambda book_id, eq: 8)      # same cap as live deployment
+
+    # 10 paper entries opened (matches the real incident: many signals pass the filter and
+    # always get a paper record), but only 3 have a confirmed real buy (live_ok=True) --
+    # the other 7 either never attempted a real buy, or attempted and were refused/failed.
+    for i in range(10):
+        pos = paper_ledger.open_paper("robinhood_chain", f"T{i}", "compound", "early_compound",
+                                       20, 50_000, module="compound", strategy="early")
+        assert pos is not None, "open_paper refused the test entry -- fixture setup bug, not the fix under test"
+    # open_paper's returned dict is a copy of what's stored -- mutate the actually-persisted
+    # book in place (same pattern as other tests in this file, e.g. _fill() + state.set_value
+    # above) so live_ok/chain changes are visible to open_count_real()/can_open() afterward.
+    book = paper_ledger._open()
+    for i, p in enumerate(book.values()):
+        p["chain"] = "robinhood_chain"
+        p["live_ok"] = i < 3
+        if i < 3:
+            p["live_usd_amount"] = 5.0
+    state.set_value(paper_ledger.OPEN_KEY, book)
+
+    # Real count must be 3 (only the confirmed real fills), not 10 (every paper entry) --
+    # well under the 8-slot cap, so a real-eligible entry must NOT be refused on count.
+    assert books.open_count_real("compound", chain="robinhood_chain") == 3
+    assert books.open_count("compound", chain="robinhood_chain") == 10          # paper count unchanged, for comparison
+
+    can, reason = books.can_open("compound", chain="robinhood_chain")
+    assert can is True, f"expected can_open to allow a new real-eligible entry, got refused: {reason}"
