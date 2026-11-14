@@ -1025,12 +1025,20 @@ TRADE_LOG_KEY = "dashboard_trade_log"
 
 def log_trade_event(side: str, chain: str, token: str, ok: bool, reason: str,
                      amount_tokens: Optional[float] = None, usd_amount: Optional[float] = None,
-                     tx_signature: Optional[str] = None, ts: Optional[float] = None):
+                     tx_signature: Optional[str] = None, ts: Optional[float] = None,
+                     elapsed_seconds: Optional[float] = None):
+    """15 Nov 2026 (Ali, explicit instruction -- real-time execution-speed visibility after a
+    manual RHC test felt slow): elapsed_seconds is the REAL wall-clock time swap_executor.py's
+    execute_buy_*/execute_sell measured for that trade's own submit-to-confirm window (see
+    ExecutionResult.elapsed_seconds for exactly what it does/doesn't include). Feeds the
+    dashboard's Trade History "Exec Time" column so every real trade's actual on-chain latency
+    is visible live, not just inferred from a one-off manual test."""
     ts = ts if ts is not None else time.time()
     log = get_value(TRADE_LOG_KEY) or []
     log.append({
         "ts": ts, "side": side, "chain": chain, "token": token, "ok": ok, "reason": reason,
         "amount_tokens": amount_tokens, "usd_amount": usd_amount, "tx_signature": tx_signature,
+        "elapsed_seconds": elapsed_seconds,
     })
     cutoff = time.time() - TRADE_LOG_MAX_AGE_SECONDS
     log = [t for t in log if t["ts"] >= cutoff][-TRADE_LOG_MAX_ITEMS:]

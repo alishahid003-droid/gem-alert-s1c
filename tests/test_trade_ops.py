@@ -38,6 +38,47 @@ def test_retry_once_then_notify(iso):
     assert "REAL BUY solana" in iso[0] and "retried once" in iso[0] and "MINT" in iso[0]
 
 
+# ---- 15 Nov 2026 (Ali, explicit instruction -- real-time execution-speed visibility: "we
+# might lose the edge" on slow memecoin execution) -----------------------------------------
+
+def test_hardened_sets_elapsed_seconds_from_real_wall_clock(iso, monkeypatch):
+    """hardened() must time the REAL wall-clock duration of the wrapped call and stamp it
+    onto the result as elapsed_seconds, so the dashboard can show actual on-chain
+    submit-to-confirm latency per trade instead of nothing."""
+    fake_now = [1000.0]
+    def fake_time():
+        fake_now[0] += 0.5  # each call() to time.time() advances the clock by 0.5s
+        return fake_now[0]
+    monkeypatch.setattr(trade_ops.time, "time", fake_time)
+
+    def buy(token, usd):
+        return ExecutionResult(True, "ok", tx_signature="S", filled_usd=usd)
+    r = trade_ops.hardened("buy", "robinhood_chain")(buy)("TOKEN", 2.0)
+    assert r.ok
+    assert r.elapsed_seconds is not None and r.elapsed_seconds > 0
+    assert "⏱" in iso[0]  # the timer emoji -- confirms elapsed time reached the Telegram message too
+
+
+def test_hardened_does_not_overwrite_an_already_set_elapsed_seconds(iso):
+    """If a wrapped function ever sets its own, more precise elapsed_seconds (none currently
+    do, but this is the documented contract), hardened() must not clobber it with its own
+    coarser outer-call timing."""
+    def buy(token, usd):
+        return ExecutionResult(True, "ok", tx_signature="S", filled_usd=usd, elapsed_seconds=3.33)
+    r = trade_ops.hardened("buy", "base")(buy)("TOKEN", 2.0)
+    assert r.elapsed_seconds == 3.33
+
+
+def test_execute_buy_base_is_hardened():
+    """15 Nov 2026: execute_buy_base was the one real buy path never wrapped with hardened()
+    (solana/bsc/robinhood_chain all were, since Sept 30 2026 -- base was added later, 3 Nov
+    2026, and missed it). A transient failure on a Base buy was silently never retried the
+    way every other chain's buy already is. Fixed alongside the timing instrumentation since
+    the fix lives in the same wrapping call -- this test guards it stays fixed."""
+    from executor import swap_executor
+    assert getattr(swap_executor.execute_buy_base, "__wrapped_once__", False) is True
+
+
 def test_never_retries_after_send(iso):
     calls = []
 

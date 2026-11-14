@@ -62,9 +62,12 @@ def notify_trade(side: str, chain: str, token: str, result, extra: str = "") -> 
         head = f"❌ REAL {side.upper()} FAILED {chain}"
         body = reason[:300]
     sig = getattr(result, "tx_signature", None)
+    elapsed = getattr(result, "elapsed_seconds", None)  # 15 Nov 2026 (Ali, execution-speed visibility)
     lines = [head, f"`{token}`", body]
     if extra:
         lines.append(extra)
+    if elapsed is not None:
+        lines.append(f"⏱ {elapsed:.1f}s")
     if sig:
         lines.append(f"tx: `{sig}`")
     return _send("\n".join(x for x in lines if x))
@@ -72,16 +75,33 @@ def notify_trade(side: str, chain: str, token: str, result, extra: str = "") -> 
 
 def hardened(side: str, chain: Optional[str] = None):
     """Wraps a swap_executor buy/sell: retry once on transient pre-send
-    failure, then notify Telegram of the final result."""
+    failure, then notify Telegram of the final result.
+
+    15 Nov 2026 (Ali, explicit instruction -- real-time execution-speed visibility: "we might
+    lose the edge... if buying and selling is taking so much time"): also times the REAL
+    wall-clock duration of the call(s) to fn() here -- this is the single choke point every
+    hardened buy/sell (solana/bsc/robinhood_chain buys, every chain's sell) already passes
+    through, so timing it here covers all of them uniformly with no change to any of the
+    actual trading functions themselves. A retried call's total elapsed time includes BOTH
+    attempts plus the 1.5s backoff between them -- that is genuinely how long this trade took
+    from this system's perspective, not just the final attempt. Only sets elapsed_seconds if
+    the wrapped function didn't already set a more precise one itself (none currently do, but
+    this keeps a future per-chain timer from being silently overwritten)."""
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            t0 = time.time()
             result = fn(*args, **kwargs)
             retried = False
             if is_transient(result):
                 time.sleep(1.5)
                 result = fn(*args, **kwargs)
                 retried = True
+            if getattr(result, "elapsed_seconds", None) is None:
+                try:
+                    result.elapsed_seconds = round(time.time() - t0, 2)
+                except Exception:  # noqa: BLE001 -- timing must never break a real trade result
+                    pass
             ch = chain or kwargs.get("chain") or (args[0] if args else "?")
             tok = (kwargs.get("token_address") or kwargs.get("token_mint")
                    or (args[1] if chain is None and len(args) > 1 else (args[0] if args else "?")))

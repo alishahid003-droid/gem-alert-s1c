@@ -685,6 +685,7 @@ PAGE_TEMPLATE = """<!doctype html>
   .pos-pnl { color:#2ecc71; } .neg-pnl { color:#e74c3c; } .na { color:#555; }
   .side-buy { color:#2ecc71; font-weight:600; } .side-sell { color:#e67e22; font-weight:600; }
   .ok-yes { color:#2ecc71; } .ok-no { color:#e74c3c; }
+  .exec-ok { color:#2ecc71; } .exec-warn { color:#f1c40f; } .exec-slow { color:#e74c3c; font-weight:600; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; }
   .band-A { color:#2ecc71; font-weight:700; } .band-B { color:#3498db; font-weight:700; }
   .band-C { color:#f1c40f; } .band-D { color:#e74c3c; }
@@ -1030,14 +1031,21 @@ function render(data) {
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No closed positions yet.</div>';
 
   const trades = data.trade_log || [];
+  // 15 Nov 2026 (Ali, explicit instruction -- real-time execution-speed visibility after a
+  // manual RHC test felt slow): Exec Time shows the REAL wall-clock submit-to-confirm
+  // duration swap_executor.py measured for that trade (ExecutionResult.elapsed_seconds,
+  // via trade_ops.hardened()). Colors flag anything genuinely slow -- >10s amber, >20s red
+  // -- since on a fast-moving memecoin that's real missed-edge time, not just a number.
+  const execTimeClass = (s) => s == null ? '' : (s > 20 ? 'exec-slow' : (s > 10 ? 'exec-warn' : 'exec-ok'));
   document.getElementById("trade_log").innerHTML = trades.length ? `
-    <table><thead><tr><th>When</th><th>Side</th><th>Chain</th><th>Token</th><th>USD</th><th>OK</th><th>Reason</th></tr></thead>
+    <table><thead><tr><th>When</th><th>Side</th><th>Chain</th><th>Token</th><th>USD</th><th>OK</th><th>Exec Time</th><th>Reason</th></tr></thead>
     <tbody>${trades.slice(0, 30).map(t => `<tr>
       <td title="${esc(t.ts_fmt)}">${esc(t.ago)}</td>
       <td class="side-${esc(t.side)}">${esc((t.side || "").toUpperCase())}</td>
       <td>${esc(t.chain)}</td><td class="mono">${esc(t.token)}</td>
       <td>${t.usd_amount != null ? '$' + Number(t.usd_amount).toFixed(2) : '-'}</td>
       <td class="${t.ok ? 'ok-yes' : 'ok-no'}">${t.ok ? 'yes' : 'no'}</td>
+      <td class="${execTimeClass(t.elapsed_seconds)}">${t.elapsed_seconds != null ? Number(t.elapsed_seconds).toFixed(1) + 's' : '-'}</td>
       <td>${esc(t.reason)}</td>
     </tr>`).join("")}</tbody></table>` : '<div class="empty">No trades logged yet.</div>';
 

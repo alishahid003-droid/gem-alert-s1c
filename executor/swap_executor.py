@@ -275,6 +275,18 @@ class ExecutionResult:
                                                     # needs to compute real sell amounts; without
                                                     # it, check_and_trim() reads amount_tokens=0
                                                     # off the position and every trim is a no-op.
+    elapsed_seconds: Optional[float] = None  # 15 Nov 2026 (Ali, explicit instruction -- "we might
+                                              # lose the edge" on slow memecoin execution): real
+                                              # wall-clock time from "about to submit" to "confirmed/
+                                              # failed", measured by each execute_buy_*/execute_sell
+                                              # function itself around its real RPC submit+confirm
+                                              # work (never includes quote/pricing lookups before the
+                                              # tx is built, or anything after the result is returned
+                                              # -- this is specifically "how long did the chain take
+                                              # to settle this trade", the number that matters for
+                                              # whether a memecoin's price has already moved). None
+                                              # only if a function returns before ever attempting a
+                                              # real submit (e.g. refused by a pre-flight guard).
 
 
 def _log_trade(side: str, chain: str, token: str, result: "ExecutionResult", reason: Optional[str] = None):
@@ -283,12 +295,15 @@ def _log_trade(side: str, chain: str, token: str, result: "ExecutionResult", rea
     ExecutionResult is final, success or failure, so the dashboard shows
     what was actually tried, not just what worked. Best-effort: a logging
     failure must never take down a real trade in flight, so this is
-    deliberately wrapped and swallows its own errors."""
+    deliberately wrapped and swallows its own errors.
+
+    15 Nov 2026: now also passes elapsed_seconds through to the trade log, so the dashboard
+    can show REAL submit-to-confirm timing per trade -- see ExecutionResult.elapsed_seconds."""
     try:
         state.log_trade_event(
             side=side, chain=chain, token=token, ok=result.ok, reason=reason or result.reason,
             amount_tokens=result.filled_amount_tokens, usd_amount=result.filled_usd,
-            tx_signature=result.tx_signature,
+            tx_signature=result.tx_signature, elapsed_seconds=result.elapsed_seconds,
         )
     except Exception:  # noqa: BLE001 -- logging must never break a real trade
         pass
@@ -1977,9 +1992,20 @@ def _sol_price_usd() -> Optional[float]:
 # to Telegram -- see executor/trade_ops.py. Wrapped here, at the bottom, so
 # callers that map these names at import time (entrypoint, compound_scalper)
 # get the hardened versions.
+#
+# 15 Nov 2026 (Ali, execution-speed visibility instruction): found while wiring real
+# timing instrumentation through hardened() that execute_buy_base was the ONE real buy
+# path never wrapped here -- solana/bsc/robinhood_chain all got the retry-once-on-
+# transient-failure + Telegram notification treatment when this wrapping was first built
+# (Sept 30 2026), but Base's buy function (added later, 3 Nov 2026) was never added to
+# this list. A transient failure on a Base buy (e.g. a dropped RPC call, a 503) was
+# silently NOT retried the way every other chain's buy already is, and Base buy attempts
+# never got a Telegram notification either. Added here now, both to close that real gap
+# and so Base buys get the same real elapsed_seconds timing as every other chain.
 from executor import trade_ops as _trade_ops  # noqa: E402
 
 execute_buy_solana = _trade_ops.hardened("buy", "solana")(execute_buy_solana)
 execute_buy_bsc = _trade_ops.hardened("buy", "bsc")(execute_buy_bsc)
 execute_buy_robinhood_chain = _trade_ops.hardened("buy", "robinhood_chain")(execute_buy_robinhood_chain)
+execute_buy_base = _trade_ops.hardened("buy", "base")(execute_buy_base)
 execute_sell = _trade_ops.hardened("sell")(execute_sell)
