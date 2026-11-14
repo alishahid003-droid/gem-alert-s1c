@@ -160,3 +160,64 @@ def test_base_router_and_weth_addresses_are_valid_checksummed_evm_addresses():
     for addr in (swap_executor.UNISWAP_V2_ROUTER_BASE, swap_executor.WETH_BASE, swap_executor.USDC_BASE):
         assert Web3.is_address(addr), f"not a valid EVM address: {addr}"
     assert swap_executor.BASE_CHAIN_ID == 8453
+
+
+
+def test_sell_base_uses_rhc_matching_gas_limit_for_approve_and_swap(monkeypatch):
+    """FIXED 14 Nov 2026 (Ali, explicit go-ahead): Base's sell path used to
+    rely on _sign_and_send_evm_tx's generic 250k default -- never live-tested
+    against Base's own untrusted, fee-on-transfer-capable tokens. Both the
+    approve() and swap() calls in _sell_base now explicitly request
+    2_500_000 gas, matching RHC's proven real-world limit (RHC needed exactly
+    this after a real gas-hungry token call failed at a lower limit)."""
+    from web3 import Web3
+    from eth_account import Account
+
+    account = Account.create()
+    monkeypatch.setattr(EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(EXECUTOR_CONFIG, "base_private_key", account.key.hex())
+
+    token_address = "0x" + "33" * 18 + "cccc"
+    w3 = Web3()
+
+    def encode_uint256_array(values):
+        return w3.codec.encode(["uint256[]"], [values]).hex()
+
+    def fake_rpc_call(chain, method, params):
+        assert chain == "base"
+        if method == "eth_call":
+            calldata = params[0]["data"]
+            if calldata.startswith("0x" + Web3.keccak(text="decimals()").hex()[:8]):
+                return {"ok": True, "result": "0x0000000000000000000000000000000000000000000000000000000000000012"}
+            if calldata.startswith("0x" + Web3.keccak(text="allowance(address,address)").hex()[:8]):
+                return {"ok": True, "result": "0x0"}  # needs a real approve() -- exercises that call site too
+            if calldata.startswith("0x" + Web3.keccak(text="getAmountsOut(uint256,address[])").hex()[:8]):
+                return {"ok": True, "result": "0x" + encode_uint256_array([10**21, 2 * 10**17])}
+            raise AssertionError(f"unexpected eth_call calldata: {calldata}")
+        if method == "eth_getTransactionCount":
+            return {"ok": True, "result": "0x1"}
+        if method == "eth_gasPrice":
+            return {"ok": True, "result": "0x3b9aca00"}
+        if method == "eth_sendRawTransaction":
+            return {"ok": True, "result": "0xbasesellhash1"}
+        if method == "eth_getTransactionReceipt":
+            return {"ok": True, "result": {"status": "0x1", "logs": []}}
+        raise AssertionError(f"unexpected rpc_call: {method}")
+
+    monkeypatch.setattr(swap_executor, "rpc_call", fake_rpc_call)
+    monkeypatch.setattr(swap_executor, "_eth_price_usd", lambda: 2500.0)
+
+    captured_gas = []
+    real_sign_and_send = swap_executor._sign_and_send_evm_tx
+
+    def spying_sign_and_send(chain, chain_id, account_, to_address, value_wei, calldata, gas=250_000):
+        captured_gas.append(gas)
+        return real_sign_and_send(chain, chain_id, account_, to_address, value_wei, calldata, gas=gas)
+
+    monkeypatch.setattr(swap_executor, "_sign_and_send_evm_tx", spying_sign_and_send)
+
+    result = swap_executor.execute_sell("base", token_address, amount_tokens=1000.0, reason="test base gas")
+
+    assert result.ok, result.reason
+    # one call for approve() (allowance was 0x0), one for the swap -- both must use 2.5M
+    assert captured_gas == [2_500_000, 2_500_000], captured_gas

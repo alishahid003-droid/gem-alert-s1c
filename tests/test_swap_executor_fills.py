@@ -244,3 +244,88 @@ def test_sell_bsc_sets_filled_usd_from_pre_swap_quote(monkeypatch):
     assert len(log) == 1
     assert log[0]["side"] == "sell" and log[0]["ok"] is True
     assert log[0]["usd_amount"] == pytest.approx(120.0)
+
+
+
+def test_sell_bsc_refuses_rather_than_send_unprotected_when_quote_unavailable(monkeypatch):
+    """FIXED 14 Nov 2026 (Ali, explicit go-ahead, same root cause as RHC's sell
+    path fix): the OLD behavior fell back to amount_out_min=0 and sent a real,
+    unprotected swap whenever getAmountsOut failed. The fix shrinks the amount
+    and retries the QUOTE (never the real tx) down to 1% of the original ask,
+    and refuses the sell outright if even the smallest size can't get one."""
+    from web3 import Web3
+    from eth_account import Account
+
+    account = Account.create()
+    monkeypatch.setattr(EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(EXECUTOR_CONFIG, "bsc_private_key", account.key.hex())
+
+    token_address = "0x" + "11" * 18 + "aaaa"
+    w3 = Web3()
+
+    def fake_rpc_call(chain, method, params):
+        assert chain == "bsc"
+        if method == "eth_call":
+            calldata = params[0]["data"]
+            if calldata.startswith("0x" + Web3.keccak(text="decimals()").hex()[:8]):
+                return {"ok": True, "result": "0x0000000000000000000000000000000000000000000000000000000000000012"}
+            if calldata.startswith("0x" + Web3.keccak(text="allowance(address,address)").hex()[:8]):
+                return {"ok": True, "result": "0x" + ("f" * 64)}
+            if calldata.startswith("0x" + Web3.keccak(text="getAmountsOut(uint256,address[])").hex()[:8]):
+                return {"ok": False, "reason": "execution reverted"}  # quote genuinely unavailable, every size
+            raise AssertionError(f"unexpected eth_call calldata: {calldata}")
+        if method == "eth_getTransactionCount":
+            return {"ok": True, "result": "0x1"}
+        if method == "eth_gasPrice":
+            return {"ok": True, "result": "0x3b9aca00"}
+        if method == "eth_sendRawTransaction":
+            raise AssertionError("must not send a real tx when no protected quote was ever obtained")
+        raise AssertionError(f"unexpected rpc_call: {method}")
+
+    monkeypatch.setattr(swap_executor, "rpc_call", fake_rpc_call)
+
+    result = swap_executor.execute_sell("bsc", token_address, amount_tokens=1000.0, reason="test bsc refuse")
+
+    assert not result.ok
+    assert "no real on-chain quote available" in result.reason
+    assert "amount_out_min=0" in result.reason
+
+
+def test_sell_base_refuses_rather_than_send_unprotected_when_quote_unavailable(monkeypatch):
+    """Identical fix/test to the BSC one above, for Base's sell path."""
+    from web3 import Web3
+    from eth_account import Account
+
+    account = Account.create()
+    monkeypatch.setattr(EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(EXECUTOR_CONFIG, "base_private_key", account.key.hex())
+
+    token_address = "0x" + "22" * 18 + "bbbb"
+    w3 = Web3()
+
+    def fake_rpc_call(chain, method, params):
+        assert chain == "base"
+        if method == "eth_call":
+            calldata = params[0]["data"]
+            if calldata.startswith("0x" + Web3.keccak(text="decimals()").hex()[:8]):
+                return {"ok": True, "result": "0x0000000000000000000000000000000000000000000000000000000000000012"}
+            if calldata.startswith("0x" + Web3.keccak(text="allowance(address,address)").hex()[:8]):
+                return {"ok": True, "result": "0x" + ("f" * 64)}
+            if calldata.startswith("0x" + Web3.keccak(text="getAmountsOut(uint256,address[])").hex()[:8]):
+                return {"ok": False, "reason": "execution reverted"}
+            raise AssertionError(f"unexpected eth_call calldata: {calldata}")
+        if method == "eth_getTransactionCount":
+            return {"ok": True, "result": "0x1"}
+        if method == "eth_gasPrice":
+            return {"ok": True, "result": "0x3b9aca00"}
+        if method == "eth_sendRawTransaction":
+            raise AssertionError("must not send a real tx when no protected quote was ever obtained")
+        raise AssertionError(f"unexpected rpc_call: {method}")
+
+    monkeypatch.setattr(swap_executor, "rpc_call", fake_rpc_call)
+
+    result = swap_executor.execute_sell("base", token_address, amount_tokens=1000.0, reason="test base refuse")
+
+    assert not result.ok
+    assert "no real on-chain quote available" in result.reason
+    assert "amount_out_min=0" in result.reason

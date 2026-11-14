@@ -918,7 +918,12 @@ def _sell_base(token_address: str, amount_tokens: float) -> ExecutionResult:
 
     if current_allowance < raw_amount:
         approve_calldata = _encode_router_call(token, "approve", [router_addr, 2**256 - 1])  # unlimited, one-time
-        approve_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, token_checksum, 0, approve_calldata)
+        approve_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, token_checksum, 0, approve_calldata,
+                                                     gas=2_500_000)  # ADDED 14 Nov 2026 (Ali): matches RHC's
+                                                     # proven real-world limit -- Base sells into the same
+                                                     # class of untrusted, fee-on-transfer-capable tokens as
+                                                     # RHC, and the shared helper's 250k default was never
+                                                     # live-tested against one.
         if not approve_result.ok:
             return ExecutionResult(False, f"approve() failed, no swap attempted: {approve_result.reason}")
         confirmed = _confirm_evm_tx("base", approve_result.tx_signature)
@@ -928,18 +933,45 @@ def _sell_base(token_address: str, amount_tokens: float) -> ExecutionResult:
 
     router = w3.eth.contract(address=router_addr, abi=PANCAKE_ROUTER_SELL_ABI)
 
+    # FIXED 14 Nov 2026 (Ali, explicit go-ahead, same root cause as RHC's sell path):
+    # the OLD amount_out_min=0 fallback let a sell proceed UNPROTECTED whenever the
+    # quote failed -- exactly the dangerous pattern that caused tonight's real RHC
+    # losses, just reached via a different mechanism (V2's quote simply failing/no
+    # answer, vs V4's revert-hides-the-real-answer). Fix: shrink the amount and
+    # retry the QUOTE (never the real tx) down to 1% of the original ask; refuse
+    # the sell outright if even the smallest size can't get a quote. Mirrors
+    # RHC's sell path exactly (see swap_executor.py's robinhood_chain sell, ~line 1730).
+    weth_checksum_sell = Web3.to_checksum_address(WETH_BASE)
+    eth_out_wei = _base_get_amounts_out(router, raw_amount, [token_checksum, weth_checksum_sell])
+    original_raw_amount = raw_amount
+    _shrink_steps = [0.5, 0.25, 0.10, 0.05, 0.01]  # 50% -> 1% of original ask
+    _shrink_idx = 0
+    while not eth_out_wei and _shrink_idx < len(_shrink_steps):
+        shrink_fraction = _shrink_steps[_shrink_idx]
+        shrunk_amount = int(original_raw_amount * shrink_fraction)
+        _shrink_idx += 1
+        if shrunk_amount <= 0:
+            continue
+        print(f"[swap_executor] base sell: no quote at {raw_amount} raw units -- "
+              f"retrying quote at {shrink_fraction:.0%} of original ask ({shrunk_amount} raw units)", flush=True)
+        requoted = _base_get_amounts_out(router, shrunk_amount, [token_checksum, weth_checksum_sell])
+        if requoted:
+            raw_amount = shrunk_amount
+            eth_out_wei = requoted
+            print(f"[swap_executor] base sell: quote succeeded at {shrink_fraction:.0%} size -- "
+                  f"selling {raw_amount} raw units instead of the original {original_raw_amount}", flush=True)
+
+    if not eth_out_wei:
+        return ExecutionResult(False, f"no real on-chain quote available even at the smallest tested size "
+                                       f"({_shrink_steps[-1]:.0%} of {original_raw_amount} raw units) -- "
+                                       f"refusing to send an unprotected (amount_out_min=0) swap")
+
+    amount_out_min = int(eth_out_wei * (1 - BASE_SELL_SLIPPAGE_TOLERANCE))
     filled_usd = None
-    amount_out_min = 0  # falls back to 0 only if the quote itself is unavailable -- same reasoning as
-                         # BSC/RHC's sell paths: a sell that fails to execute (e.g. during a rug, exactly
-                         # when this call is most likely to be degraded) is worse than one that executes
-                         # unprotected.
     try:
-        eth_out_wei = _base_get_amounts_out(router, raw_amount, [token_checksum, Web3.to_checksum_address(WETH_BASE)])
-        if eth_out_wei:
-            amount_out_min = int(eth_out_wei * (1 - BASE_SELL_SLIPPAGE_TOLERANCE))
-            eth_price = _eth_price_usd()
-            if eth_price:
-                filled_usd = (eth_out_wei / 10**18) * eth_price
+        eth_price = _eth_price_usd()
+        if eth_price:
+            filled_usd = (eth_out_wei / 10**18) * eth_price
     except Exception:  # noqa: BLE001 -- pricing must never block a real sell
         filled_usd = None
 
@@ -947,7 +979,8 @@ def _sell_base(token_address: str, amount_tokens: float) -> ExecutionResult:
     swap_calldata = _encode_router_call(router, "swapExactTokensForETHSupportingFeeOnTransferTokens", [
         raw_amount, amount_out_min, [token_checksum, Web3.to_checksum_address(WETH_BASE)], account.address, deadline,
     ])
-    swap_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, router_addr, 0, swap_calldata)
+    swap_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, router_addr, 0, swap_calldata,
+                                           gas=2_500_000)  # ADDED 14 Nov 2026 (Ali): see approve() call above
     if not swap_result.ok:
         return ExecutionResult(False, f"approve() succeeded but swap failed: {swap_result.reason}")
 
@@ -1494,18 +1527,40 @@ def _sell_bsc(token_address: str, amount_tokens: float) -> ExecutionResult:
     # diff like the Solana sell path gets, since PancakeSwap V2 sends
     # native BNB via an internal call that doesn't show up as a log --
     # still real and quote-derived, not a guess.
+    # FIXED 14 Nov 2026 (Ali, explicit go-ahead): identical fix to Base's sell path
+    # (see _sell_base's matching comment) -- shrink-and-retry the quote instead of
+    # falling back to an unprotected amount_out_min=0 swap.
+    wbnb_checksum_sell = Web3.to_checksum_address(WBNB_BSC)
+    bnb_out_wei = _bsc_get_amounts_out(router, raw_amount, [token_checksum, wbnb_checksum_sell])
+    original_raw_amount = raw_amount
+    _shrink_steps = [0.5, 0.25, 0.10, 0.05, 0.01]  # 50% -> 1% of original ask
+    _shrink_idx = 0
+    while not bnb_out_wei and _shrink_idx < len(_shrink_steps):
+        shrink_fraction = _shrink_steps[_shrink_idx]
+        shrunk_amount = int(original_raw_amount * shrink_fraction)
+        _shrink_idx += 1
+        if shrunk_amount <= 0:
+            continue
+        print(f"[swap_executor] bsc sell: no quote at {raw_amount} raw units -- "
+              f"retrying quote at {shrink_fraction:.0%} of original ask ({shrunk_amount} raw units)", flush=True)
+        requoted = _bsc_get_amounts_out(router, shrunk_amount, [token_checksum, wbnb_checksum_sell])
+        if requoted:
+            raw_amount = shrunk_amount
+            bnb_out_wei = requoted
+            print(f"[swap_executor] bsc sell: quote succeeded at {shrink_fraction:.0%} size -- "
+                  f"selling {raw_amount} raw units instead of the original {original_raw_amount}", flush=True)
+
+    if not bnb_out_wei:
+        return ExecutionResult(False, f"no real on-chain quote available even at the smallest tested size "
+                                       f"({_shrink_steps[-1]:.0%} of {original_raw_amount} raw units) -- "
+                                       f"refusing to send an unprotected (amount_out_min=0) swap")
+
+    amount_out_min = int(bnb_out_wei * (1 - BSC_SELL_SLIPPAGE_TOLERANCE))
     filled_usd = None
-    amount_out_min = 0  # falls back to 0 only if the quote itself is unavailable -- a sell that fails
-                         # to execute (e.g. during a rug, exactly when this call is most likely to be
-                         # degraded) is worse than one that executes unprotected; see the RHC sell path's
-                         # identical reasoning.
     try:
-        bnb_out_wei = _bsc_get_amounts_out(router, raw_amount, [token_checksum, Web3.to_checksum_address(WBNB_BSC)])
-        if bnb_out_wei:
-            amount_out_min = int(bnb_out_wei * (1 - BSC_SELL_SLIPPAGE_TOLERANCE))
-            bnb_price = _bnb_price_usd()
-            if bnb_price:
-                filled_usd = (bnb_out_wei / 10**18) * bnb_price
+        bnb_price = _bnb_price_usd()
+        if bnb_price:
+            filled_usd = (bnb_out_wei / 10**18) * bnb_price
     except Exception:  # noqa: BLE001 -- pricing must never block a real sell
         filled_usd = None
 
