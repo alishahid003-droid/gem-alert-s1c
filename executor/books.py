@@ -1636,7 +1636,20 @@ def can_open(book_id: str, strong: bool = False, chain: str = None) -> tuple:
     # paper numbers with zero connection to the real ~$120 wallet. sprint/core1/core2 are not
     # live-armed and keep the original paper-based gate exactly as before -- this ONLY changes
     # compound's own capacity check.
-    _use_real_capital = (book_id == "compound" and SC_CASCADE_FUNDER in _live_books_from_env())
+    # 14 Nov 2026 (Ali, real regression found via tests/test_layer15_moonshot.py): the real-capital
+    # gate must only block compound's capacity for the chains that actually get real execution
+    # (robinhood_chain/base -- see multichain_sniper.py's `d["chain"] in ("robinhood_chain", "base")`
+    # check, which is the one real-money call site and the only one that passes chain= explicitly).
+    # Without this chain check, arming compound live for RHC/Base also silently starved EVERY solana
+    # (and any chain-unaware caller's) compound candidate -- entrypoint.py's moonshot router and
+    # layer16_catalyst_radar.py both call can_open("compound"/lane) with no chain=, and those paths
+    # span solana too, where equity_real() has zero connection -- a real paper-trading regression,
+    # not intended by the original real-vs-paper gate fix. Defaulting chain=None to NOT use real
+    # capital (rather than trying to enumerate every chain-unaware caller as "safe") keeps those
+    # paper-only callers working exactly as before; the one real-money call site is unaffected since
+    # it always passes chain= explicitly.
+    _use_real_capital = (book_id == "compound" and SC_CASCADE_FUNDER in _live_books_from_env()
+                          and chain in ("robinhood_chain", "base"))
     eq = equity_real() if _use_real_capital else equity(book_id)
     if eq < 5.0:
         return False, f"{book_id} book is empty (${eq:.2f})" + (" [real]" if _use_real_capital else "")

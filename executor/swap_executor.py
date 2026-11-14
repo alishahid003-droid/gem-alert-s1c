@@ -1684,9 +1684,16 @@ def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> Execution
         return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
     gas_price_wei = int(gas_price_result["result"], 16)
 
+    # 14 Nov 2026 (Ali, real incident): a real RHC sell on a thin/new pool reverted with
+    # "out of gas" in the UniversalRouter -> PoolManager -> UniversalRouter internal call chain
+    # (confirmed via Blockscout internal-transactions trace), at the previous 500_000 gas limit.
+    # The buy path's 500_000 limit is fine (single-hop, simpler call pattern); a v4 EXACT_IN sell
+    # that unlocks/settles through PoolManager needs more headroom. Raised to 900_000 -- real cost
+    # is only the ACTUAL gas used (RHC gas price is tiny, ~20 gwei), a higher limit just avoids
+    # a premature out-of-gas revert, it does not spend more unless the tx genuinely needs it.
     swap_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account, router_addr, 0,
                                          "0x" + calldata.hex() if not calldata.hex().startswith("0x") else calldata.hex(),
-                                         gas=500_000)
+                                         gas=900_000)
     if not swap_result.ok:
         return ExecutionResult(False, f"approvals succeeded but swap failed: {swap_result.reason}")
 
