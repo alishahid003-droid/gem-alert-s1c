@@ -888,6 +888,11 @@ def execute_buy_base(token_address: str, usd_amount: float) -> ExecutionResult:
     result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
                               filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
     _log_trade("buy", "base", token_checksum, result)
+    # 15 Nov 2026 (Ali, execution-speed fix): kick off the sell-side approve() in the
+    # background now, while there's real idle time before exit_rules/moonbag's next poll
+    # cycle could possibly trigger a sell -- see _preapprove_base_background's docstring.
+    # Fire-and-forget, never blocks this return, never affects the buy result above.
+    _preapprove_base_background(token_checksum)
     return result
 
 
@@ -1286,6 +1291,10 @@ def execute_buy_robinhood_chain(token_address: str, usd_amount: float) -> Execut
     result = ExecutionResult(True, "buy submitted and confirmed", tx_signature=tx_hash,
                               filled_usd=usd_amount, filled_amount_tokens=filled_tokens)
     _log_trade("buy", "robinhood_chain", token_checksum, result)
+    # 15 Nov 2026 (Ali, execution-speed fix): kick off the TWO sell-side approve() calls in
+    # the background now (ERC20->Permit2, Permit2->Router) -- see
+    # _preapprove_rhc_background's docstring. Fire-and-forget, never blocks this return.
+    _preapprove_rhc_background(token_checksum)
     return result
 
 
@@ -1891,6 +1900,134 @@ def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> Execution
 
     return ExecutionResult(True, "sell submitted and confirmed", tx_signature=swap_result.tx_signature,
                             filled_usd=filled_usd)
+
+
+def _preapprove_base_background(token_address: str):
+    """15 Nov 2026 (Ali, explicit instruction -- "we might lose the edge" on slow execution):
+    submits the Base router approve() for a just-bought token in a background thread, right
+    after the buy confirms, WHILE the position just sits open (there is always real elapsed
+    time between a buy confirming and exit_rules/moonbag's next poll cycle ever having a
+    chance to trigger a sell -- this runs in exactly that window).
+
+    By the time a real sell eventually fires, _sell_base's own existing allowance check
+    (`if current_allowance < raw_amount`) sees this approval already landed and skips the
+    approve step entirely -- cutting a sell from 2 sequential on-chain transactions (approve +
+    swap) down to 1 (swap only), without a single line of _sell_base's own logic changing.
+    _sell_base's allowance check is the safety net: if this background approve hasn't landed
+    yet (or failed) by the time a sell fires, the sell path transparently falls back to doing
+    its own approve inline, exactly as it always has -- this is a pure speed optimization with
+    no failure mode that makes a sell worse than it is today.
+
+    Deliberately fire-and-forget: a failure here (RPC hiccup, insufficient gas, whatever) is
+    silently swallowed and never raised, logged only to stdout -- this must never risk the buy
+    that already succeeded, and must never be mistaken for a trading decision. Uses MAX_UINT256
+    (unlimited, one-time), matching _sell_base's own approve amount exactly, so there is no
+    mismatch between what this pre-approves and what a real sell would have approved itself."""
+    def _run():
+        try:
+            from web3 import Web3  # type: ignore
+            from eth_account import Account  # type: ignore
+            token_checksum = Web3.to_checksum_address(token_address.lower())
+            w3 = Web3()
+            account = Account.from_key(EXECUTOR_CONFIG.base_private_key)
+            token = w3.eth.contract(address=token_checksum, abi=ERC20_ABI)
+            router_addr = Web3.to_checksum_address(UNISWAP_V2_ROUTER_BASE)
+
+            allowance_calldata = _encode_router_call(token, "allowance", [account.address, router_addr])
+            allowance_result = rpc_call("base", "eth_call", [{"to": token_checksum, "data": allowance_calldata}, "latest"])
+            current_allowance = int(allowance_result["result"], 16) if allowance_result.get("ok") else 0
+            if current_allowance > 0:
+                return  # already approved (e.g. a repeat buy of a token held before) -- nothing to do
+
+            approve_calldata = _encode_router_call(token, "approve", [router_addr, 2 ** 256 - 1])
+            approve_result = _sign_and_send_evm_tx("base", BASE_CHAIN_ID, account, token_checksum, 0,
+                                                     approve_calldata, gas=2_500_000)
+            if not approve_result.ok:
+                print(f"[swap_executor] base pre-approve (background) failed, sell will approve inline "
+                      f"instead: {approve_result.reason}", flush=True)
+                return
+            confirmed = _confirm_evm_tx("base", approve_result.tx_signature)
+            if not confirmed.get("ok"):
+                print(f"[swap_executor] base pre-approve (background) sent but did not confirm, sell will "
+                      f"approve inline instead: {confirmed.get('reason')}", flush=True)
+        except Exception as exc:  # noqa: BLE001 -- a background optimization must never raise
+            print(f"[swap_executor] base pre-approve (background) raised, sell will approve inline "
+                  f"instead: {exc}", flush=True)
+
+    import threading
+    threading.Thread(target=_run, daemon=True, name="base-preapprove").start()
+
+
+def _preapprove_rhc_background(token_address: str):
+    """15 Nov 2026 (Ali, same instruction as _preapprove_base_background above): same idea for
+    Robinhood Chain, which needs TWO approvals on a token's first-ever sell (ERC20->Permit2,
+    then Permit2->Router -- see _sell_robinhood_chain's docstring), run here sequentially in
+    the background right after a buy confirms. By the time a real sell fires, both of
+    _sell_robinhood_chain's existing allowance checks see these already satisfied and skip
+    straight to the swap -- cutting a sell from 3 sequential on-chain transactions down to 1.
+    Same fire-and-forget, swallow-everything, sell-path-is-the-safety-net contract as the Base
+    version: a failure here just means the sell approves inline instead, exactly as today."""
+    def _run():
+        try:
+            from web3 import Web3  # type: ignore
+            from eth_account import Account  # type: ignore
+            token_checksum = Web3.to_checksum_address(token_address.lower())
+            w3 = Web3()
+            account = Account.from_key(EXECUTOR_CONFIG.rhc_private_key)
+            token = w3.eth.contract(address=token_checksum, abi=ERC20_ABI)
+            permit2 = w3.eth.contract(address=Web3.to_checksum_address(PERMIT2_RHC), abi=PERMIT2_ABI)
+            router_addr = Web3.to_checksum_address(UNISWAP_V4_UNIVERSAL_ROUTER_RHC)
+
+            # Step 1: ERC20 -> Permit2.
+            erc20_allowance_calldata = _encode_router_call(token, "allowance", [account.address, PERMIT2_RHC])
+            erc20_allowance_result = rpc_call("robinhood_chain", "eth_call",
+                                               [{"to": token_checksum, "data": erc20_allowance_calldata}, "latest"])
+            erc20_allowance = int(erc20_allowance_result["result"], 16) if erc20_allowance_result.get("ok") else 0
+            if erc20_allowance == 0:
+                approve_calldata = _encode_router_call(token, "approve", [PERMIT2_RHC, 2 ** 256 - 1])
+                approve_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account,
+                                                        token_checksum, 0, approve_calldata)
+                if not approve_result.ok:
+                    print(f"[swap_executor] rhc pre-approve step1 (background) failed, sell will approve "
+                          f"inline instead: {approve_result.reason}", flush=True)
+                    return
+                confirmed = _confirm_evm_tx("robinhood_chain", approve_result.tx_signature)
+                if not confirmed.get("ok"):
+                    print(f"[swap_executor] rhc pre-approve step1 (background) sent but did not confirm, "
+                          f"sell will approve inline instead: {confirmed.get('reason')}", flush=True)
+                    return
+
+            # Step 2: Permit2 -> Universal Router.
+            permit2_allowance_calldata = _encode_router_call(permit2, "allowance", [account.address, token_checksum, router_addr])
+            permit2_allowance_result = rpc_call("robinhood_chain", "eth_call",
+                                                 [{"to": PERMIT2_RHC, "data": permit2_allowance_calldata}, "latest"])
+            permit2_allowance = 0
+            if permit2_allowance_result.get("ok"):
+                try:
+                    decoded = w3.codec.decode(["uint160", "uint48", "uint48"], bytes.fromhex(permit2_allowance_result["result"][2:]))
+                    permit2_allowance = decoded[0]
+                except Exception:  # noqa: BLE001 -- fall through to approving on any decode failure
+                    permit2_allowance = 0
+            if permit2_allowance == 0:
+                far_future_expiration = int(__import__("time").time()) + 365 * 24 * 3600
+                permit2_approve_calldata = _encode_router_call(
+                    permit2, "approve", [token_checksum, router_addr, 2 ** 160 - 1, far_future_expiration])
+                permit2_approve_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account,
+                                                                PERMIT2_RHC, 0, permit2_approve_calldata)
+                if not permit2_approve_result.ok:
+                    print(f"[swap_executor] rhc pre-approve step2 (background) failed, sell will approve "
+                          f"inline instead: {permit2_approve_result.reason}", flush=True)
+                    return
+                confirmed = _confirm_evm_tx("robinhood_chain", permit2_approve_result.tx_signature)
+                if not confirmed.get("ok"):
+                    print(f"[swap_executor] rhc pre-approve step2 (background) sent but did not confirm, "
+                          f"sell will approve inline instead: {confirmed.get('reason')}", flush=True)
+        except Exception as exc:  # noqa: BLE001 -- a background optimization must never raise
+            print(f"[swap_executor] rhc pre-approve (background) raised, sell will approve inline "
+                  f"instead: {exc}", flush=True)
+
+    import threading
+    threading.Thread(target=_run, daemon=True, name="rhc-preapprove").start()
 
 
 def _sign_and_send_evm_tx(chain: str, chain_id: int, account, to_address: str, value_wei: int,

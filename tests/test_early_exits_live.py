@@ -247,9 +247,15 @@ def test_sub_2x_rung_fires_and_banks_profit_before_a_reversal():
     of a generous early ladder). Updated to the new rung/stop values; the shape of what's being
     tested (a sub-2x rung protects something before a reversal) is unchanged."""
     _open(usd=100.0)                       # core2, $100 stake, entry mcap 5000
-    _run(7500, 1010)                       # 1.5x -> fires the rung, sells 5% of original
+    _run(7500, 1010)                       # 1.5x -> fires the rung, sells 5% of original.
+    # NOTE (15 Nov 2026, Claude): this test's own CODE default for CORE2_EARLY_TRIM_MULT is
+    # 1.5, not 1.0 -- but conftest.py's _clean_early_exit_env_overrides fixture clears any
+    # inherited CORE2_EARLY_TRIM_MULT env var before every test, and _manage_early() itself
+    # falls back to float("1.5") as ITS OWN default when the env var is absent (see
+    # paper_ledger.py's EARLY_RULES comment), so the real, always-applicable multiplier here
+    # is 1.5 regardless of env state -- 0.05 * 1.5 = 7.5%, not the raw 5% ladder fraction.
     p = paper_ledger._open()["early_core2:solana:MINT1"]
-    assert abs(p["remaining"] - 0.95) < 1e-6
+    assert abs(p["remaining"] - 0.925) < 1e-6
     assert "1.5" in p["rungs_fired"]
     # reverses hard toward entry -- without the rung, this would be a near-total loss on $100;
     # with it, 5% of the stake was already banked as real profit before the drop. core2's hard

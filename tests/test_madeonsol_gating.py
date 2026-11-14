@@ -11,6 +11,7 @@ import pytest
 
 import state
 import scheduler
+import api_budget
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +19,29 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
     monkeypatch.setattr(scheduler.CONFIG, "upstash_redis_rest_url", None)
     monkeypatch.setattr(scheduler.CONFIG, "upstash_redis_rest_token", None)
+    # 15 Nov 2026 (Claude, found while running the full suite before committing the Base/RHC
+    # pre-approve speed fix -- Ali: "fix them, each and every one"): run_poll_fast()/run_poll_slow()
+    # are large integration functions that make ~8+ real network calls (DexScreener boost board,
+    # StonkFun, CryptoPanic, CoinDesk RSS, Mobula, GeckoTerminal fallback across multiple chains,
+    # pump.fun smart-money, wallet portfolio...) through utils.http.get/get_json, each gated by
+    # api_budget.gate(), which blocks for up to 25s per call site waiting for rate-limit headroom
+    # before ever reaching the real HTTP request. These tests only mock 2 of those calls
+    # (fetch_boost_board, _run_layer1_cycle) -- every other call site still runs for real. On a
+    # reachable network each of those real calls fails fast (a normal non-2xx or empty response,
+    # degrading cleanly per each layer's own design) and the gate() wait on an UNTHROTTLED api_budget
+    # ledger returns near-instantly too, so this was never an issue in whatever environment these
+    # tests were first written against. In a network-restricted sandbox, every one of those ~8+ call
+    # sites instead burns its own real up-to-25s api_budget.gate() wait (compounded further by
+    # tenacity retries at several of them) before failing with ApiUnreachable -- which _safe()
+    # already handles correctly, but only AFTER paying the full gate() wait first. Measured: over
+    # 115 seconds and still not finished in this sandbox, for what should be an instant, fully-mocked
+    # unit test of pure gating logic (IS_GITHUB_ACTIONS branching), nothing to do with real network
+    # reachability at all. Neutering the one shared choke point (api_budget.gate(), which every
+    # affected call site funnels through either way) makes every one of those unmocked real calls
+    # fail at normal request-timeout speed instead of also paying a blocking rate-limit wait on top
+    # -- same behavior these tests always intended to exercise (the IS_GITHUB_ACTIONS skip logic),
+    # now actually fast and deterministic regardless of the host network's reachability.
+    monkeypatch.setattr(api_budget, "gate", lambda *a, **k: None)
     yield
 
 
@@ -80,52 +104,6 @@ def test_run_poll_madeonsol_runs_all_three_regardless_of_github_actions_flag(mon
     monkeypatch.setattr(scheduler, "fetch_boost_board", lambda: {"ok": False})
     scheduler.run_poll_madeonsol()
     assert calls == ["layer1", "layer8", "fomo"]
-
-
-def test_run_layer8_cycle_requeues_pending_tokens_when_budget_insufficient(monkeypatch):
-    # Real production scenario, Sept 25 2026: MadeOnSol's BASIC-tier key has
-    # a confirmed real 200/day cap. When the day's budget can't cover a
-    # full 3-call score_solana_mint attempt, _run_layer8_cycle must defer
-    # that token to a later cycle (state.queue_rescan) instead of burning a
-    # doomed call -- see scheduler.py's budget-check comment.
-    monkeypatch.setattr(scheduler.CONFIG, "madeonsol_api_key", "msk_test")
-    state.queue_rescan("MINTA", "solana", False)
-    state.queue_rescan("MINTB", "solana", False)
-
-    # Leave only 2 slots of real budget -- not enough for even one 3-call attempt.
-    state.record_madeonsol_calls(state.MADEONSOL_DAILY_BUDGET - 2)
-
-    scored_calls = []
-    monkeypatch.setattr(scheduler, "score_solana_mint",
-                         lambda *a, **kw: scored_calls.append(a) or {"error": "should not be called"})
-
-    alerts_sent, madeonsol_calls = scheduler._run_layer8_cycle(board={})
-
-    assert scored_calls == []  # never attempted -- budget was insufficient
-    assert madeonsol_calls == 0
-    assert alerts_sent == 0
-    # both tokens re-queued, not dropped
-    assert state.pending_rescan_count() == 2
-
-
-def test_run_layer8_cycle_scores_normally_when_budget_is_healthy(monkeypatch):
-    monkeypatch.setattr(scheduler.CONFIG, "madeonsol_api_key", "msk_test")
-    state.queue_rescan("MINTA", "solana", False)
-
-    scored_calls = []
-
-    def fake_score(mint, chain, is_pregraduation):
-        scored_calls.append(mint)
-        return {"chain": chain, "address": mint, "score": None}
-
-    monkeypatch.setattr(scheduler, "score_solana_mint", fake_score)
-    monkeypatch.setattr(scheduler, "_handle_scored", lambda *a, **kw: False)
-
-    alerts_sent, madeonsol_calls = scheduler._run_layer8_cycle(board={})
-
-    assert scored_calls == ["MINTA"]
-    assert madeonsol_calls == 3
-    assert state.pending_rescan_count() == 0
 
 
 def test_run_layer8_cycle_requeues_pending_tokens_when_budget_insufficient(monkeypatch):

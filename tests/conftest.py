@@ -117,6 +117,37 @@ def _clean_fomo_env_overrides(monkeypatch):
     yield
 
 
+# 15 Nov 2026 (Claude, found while running the full suite before committing the Base/RHC
+# pre-approve speed fix -- Ali: "fix them, each and every one... I don't want these blame
+# games"): SAME leak class as _BOOK_ENV_VARS_TO_CLEAR/_FOMO_ENV_VARS_TO_CLEAR above --
+# executor/paper_ledger.py's _manage_early() reads EARLY_TRIM_MULT/CORE2_EARLY_TRIM_MULT/
+# CORE2_MOONSHOT_TRIGGER_MULT/EARLY_STOP_MULT/EARLY_NO_POP_MIN/EARLY_NO_POP_MULT directly from
+# os.environ on every call, never through a singleton this file already resets elsewhere. Ali's
+# real .env sets EARLY_TRIM_MULT=2.0 and CORE2_EARLY_TRIM_MULT=1.5 for live trading (9 Nov 2026
+# decision -- see paper_ledger.py's own comment), which dashboard.py's module-level
+# load_dotenv() leaks into the whole pytest process the same way it already leaks Upstash/seed
+# vars. 4 tests in test_early_exits_live.py (which only reset EXECUTION_ENABLED/
+# PUMPPORTAL_API_KEY/EARLY_LIVE_LANES in its own fixture -- never these) silently depended on
+# running alone, with no real .env loaded yet, to get the code's SAFE DEFAULTS (1.0 trim, no
+# change) instead of the real live-trading multipliers -- confirmed by reproducing the exact
+# failure only when this file ran after dashboard.py in the same process, never in isolation.
+# CORE2_MOONSHOT_CARVEOUT_PCT and NO_POP_REENTRY_BLOCK_MIN are not currently set in .env but are
+# read the same direct-from-os.environ way by the same function/its neighbors, so they are
+# cleared here too, defensively, same posture as _BOOK_ENV_VARS_TO_CLEAR above.
+_EARLY_EXIT_ENV_VARS_TO_CLEAR = (
+    "EARLY_TRIM_MULT", "CORE2_EARLY_TRIM_MULT", "CORE2_MOONSHOT_TRIGGER_MULT",
+    "CORE2_MOONSHOT_CARVEOUT_PCT", "EARLY_STOP_MULT", "EARLY_NO_POP_MIN", "EARLY_NO_POP_MULT",
+    "NO_POP_REENTRY_BLOCK_MIN",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_early_exit_env_overrides(monkeypatch):
+    for k in _EARLY_EXIT_ENV_VARS_TO_CLEAR:
+        monkeypatch.delenv(k, raising=False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _paper_stats_include_all(monkeypatch):
     """Fixture timestamps predate the live paper-stats cutoff

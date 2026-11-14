@@ -1,9 +1,30 @@
 import time
+
+import pytest
+
 import dashboard
 import state
 from layers import modules as mods
 from telegram_alert import Alert
 from executor import paper_ledger
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(tmp_path, monkeypatch):
+    # 15 Nov 2026 (Claude, found while running the full suite before committing the Base/RHC
+    # pre-approve speed fix -- Ali: "fix them, each and every one"): this file never isolated
+    # state.LOCAL_STATE_FILE the way every other test file here does. test_module_cards_shape_and_
+    # routing's dashboard._module_cards() call reaches executor/books.py's status()/cashouts()/
+    # withdrawn(), which read real state via state.get_value() -- with no isolation, that silently
+    # reads Ali's REAL, live production state file (.gem_alert_state.json, confirmed 4.1MB on a
+    # real run) instead of a clean test fixture. json.load()-ing a multi-MB file on every one of
+    # several status() calls this test makes is real, measurable I/O cost, not a true infinite
+    # hang -- but slow enough in this sandbox's disk/IO path to run well past any reasonable test
+    # timeout. Same leak class already fixed for dashboard.py's load_dotenv() side effect (see
+    # tests/conftest.py's own docstring) and for *_SEED_USD/LIVE_BOOKS -- this file just never got
+    # the matching state.LOCAL_STATE_FILE isolation every other file already has.
+    monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "test_state.json"))
+    yield
 
 
 def test_registry_ids_unique_and_complete():

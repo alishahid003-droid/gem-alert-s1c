@@ -39,6 +39,15 @@ def test_activity_collapse_demotes_to_d(monkeypatch):
 
 
 def test_birdeye_only_called_for_a_or_b(monkeypatch):
+    # 15 Nov 2026 (Claude): the second score_geckoterminal_pools() call below scores the coin
+    # as something other than "D" on its first pass (is_mintable/is_honeypot alone don't force a
+    # D band here), so it falls through to the 10 Nov 2026 DexScreener-momentum fallback check
+    # (score_geckoterminal_pools, "if MOMENTUM_GATE_ENABLED and sr.band != 'D' ... dd is None"),
+    # which makes a REAL network call via dexscreener_momentum_verdict() if left unmocked -- this
+    # test never exercised that path over real network before (it happened to run against a real
+    # reachable network in earlier environments), so mock it here like every other network-facing
+    # dependency in this test, instead of leaving a real HTTP call inside a unit test.
+    monkeypatch.setattr(l0, "dexscreener_momentum_verdict", lambda chain, address: {"drawdown_pct": None})
     calls = []
     monkeypatch.setattr(l0, "_evm_launch_drawdown", lambda c, i: calls.append(i["address"]) or -80.0)
     monkeypatch.setattr(l0, "fetch_goplus_security", lambda c, a: {"ok": True, "data": GOOD_GP})
