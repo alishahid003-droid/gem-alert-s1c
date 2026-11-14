@@ -53,6 +53,17 @@ def breakeven_trigger_mult() -> float:   return _f("BREAKEVEN_TRIGGER_MULT", 1.5
 def trail_arm_mult() -> float:           return _f("TRAIL_ARM_MULT", 2.0)
 def trail_giveback_pct() -> float:       return _f("TRAIL_GIVEBACK_PCT", 0.50)
 def time_stop_minutes() -> float:        return _f("TIME_STOP_MINUTES", 90.0)
+
+# ADDED 14 Nov 2026 (Ali, real incident -- COCORO/tinfoil#2, confirmed dead/drained
+# pools via real on-chain balance checks). Below this real USD liquidity level, a
+# position is treated as practically unsellable regardless of what its last-reported
+# price/mcap says -- a dead pool can sit at a flat, stale price indefinitely, which
+# the existing time_stop (price/age based) does not reliably catch.
+def dead_pool_liquidity_floor_usd() -> float:  return _f("DEAD_POOL_LIQUIDITY_FLOOR_USD", 500.0)
+# How many CONSECUTIVE polls liquidity must be confirmed below the floor before this
+# fires -- confirmation, not a single bad/glitched reading, same posture as
+# defensive_sell.py's own liquidity-drop detection.
+def dead_pool_confirm_polls() -> int:           return int(_f("DEAD_POOL_CONFIRM_POLLS", 2.0))
 def time_stop_min_mult() -> float:       return _f("TIME_STOP_MIN_MULT", 1.2)
 
 # Moonshot runner (Sept 30 2026, Ali: "1500 dollars cashed out a million --
@@ -84,7 +95,7 @@ def runner_pct_for(profile: Optional[str]) -> float:
 @dataclass
 class ExitDecision:
     action: str                 # "hold" | "sell_partial" | "exit_all"
-    exit_type: str = ""         # "stop_loss" | "breakeven_lock" | "trailing_stop" | "time_stop"
+    exit_type: str = ""         # "stop_loss" | "breakeven_lock" | "trailing_stop" | "time_stop" | "dead_pool"
     pct_of_original: float = 0  # for sell_partial
     reason: str = ""
 
@@ -145,6 +156,28 @@ def evaluate_exit(entry_mcap: Optional[float], current_mcap: Optional[float],
     return ExitDecision("hold", reason=f"{mult:.2f}x (peak {peak_mult:.2f}x)")
 
 
+def _dead_pool_streak_key(chain: str, token: str) -> str:
+    return f"exec_dead_pool_streak:{chain}:{token}"
+
+
+def _update_dead_pool_streak(chain: str, token: str, liquidity_usd: Optional[float]) -> int:
+    """Returns the CURRENT consecutive-below-floor streak after accounting
+    for this poll's reading. A None/missing reading is skipped entirely --
+    it neither advances nor resets the streak (an API hiccup is not
+    evidence either way). A reading at/above the floor resets to 0. A
+    reading below the floor increments by 1."""
+    import state
+    key = _dead_pool_streak_key(chain, token)
+    if liquidity_usd is None:
+        return int(state.get_value(key) or 0)
+    if liquidity_usd >= dead_pool_liquidity_floor_usd():
+        state.set_value(key, 0)
+        return 0
+    streak = int(state.get_value(key) or 0) + 1
+    state.set_value(key, streak)
+    return streak
+
+
 def check_and_exit(chain: str, token: str, current_mcap: Optional[float],
                    liquidity_usd: Optional[float] = None, now_ts: Optional[float] = None) -> Optional[dict]:
     """Real-money application for an executor position (same shape as
@@ -165,6 +198,36 @@ def check_and_exit(chain: str, token: str, current_mcap: Optional[float],
     from executor.price_sanity import accept
     if not accept(chain, token, current_mcap):
         return None             # data glitch filtered -- never sell on a fake spike or dip
+
+    # ADDED 14 Nov 2026 (Ali, real incident -- COCORO/tinfoil#2): dead-pool write-off,
+    # checked BEFORE the normal price-based exit evaluation below, since a dead pool's
+    # stale price can otherwise look perfectly fine to evaluate_exit(). Fires exit_all
+    # only after dead_pool_confirm_polls() CONSECUTIVE confirmed-low readings.
+    streak = _update_dead_pool_streak(chain, token, liquidity_usd)
+    if streak >= dead_pool_confirm_polls():
+        decision = ExitDecision("exit_all", "dead_pool",
+            reason=f"liquidity stayed under ${dead_pool_liquidity_floor_usd():,.0f} for "
+                   f"{streak} consecutive polls -- writing off as dead/drained rather than "
+                   f"waiting on a stale price (see COCORO/tinfoil#2, 14 Nov 2026)")
+        result = swap_executor.execute_sell(chain=chain, token_address=token,
+                                            amount_tokens=pos["amount_tokens"] * position_state.remaining_pct(chain, token),
+                                            reason=f"{decision.exit_type}: {decision.reason}")
+        if result.ok:
+            cost_basis = pos.get("total_usd") or 0
+            position_state.close_position(chain, token, reason=f"{decision.exit_type}: {decision.reason}",
+                                          exit_usd=result.filled_usd)
+            if result.filled_usd is not None:
+                circuit_breaker.record_trade_result(result.filled_usd - cost_basis)
+        else:
+            # Dead pool AND the sell itself failed (expected -- that's often exactly WHY
+            # it's dead): still record the write-off so the position doesn't sit open
+            # forever looking live when it genuinely cannot be sold. Marked distinctly so
+            # it's never confused with a real, successful exit at a real price.
+            position_state.close_position(chain, token,
+                reason=f"dead_pool_writeoff_unsold: {decision.reason} (sell attempt failed: {result.reason})",
+                exit_usd=0.0)
+        return {"chain": chain, "token": token, "decision": decision, "sell_result": result}
+
     peak = position_state.update_peak_mcap(chain, token, current_mcap)
     remaining = position_state.remaining_pct(chain, token)
     cost = estimate_round_trip_cost_pct(chain, pos.get("total_usd") or 0, liquidity_usd)
