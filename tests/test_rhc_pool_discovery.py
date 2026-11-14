@@ -108,6 +108,13 @@ def test_find_v4_pool_returns_real_match_on_first_chunk(monkeypatch):
 
 
 def test_find_v4_pool_fetches_chain_tip_when_latest_block_omitted(monkeypatch):
+    # NOTE 14 Nov 2026: with no match ever returned and no latest_block cap given,
+    # this genuinely runs the full worst-case scan (_LOG_SCAN_MAX_CHUNKS * the real
+    # inter-chunk pacing added the same day -- see rhc_pool_discovery.py's own
+    # comment) -- ~582 real seconds unmocked. Only checking that eth_blockNumber is
+    # called first and the final result is a clean refusal, same as every other
+    # test in this file that intentionally exercises the no-match path -- mocking
+    # time.sleep keeps that real, correct behavior intact while making the test fast.
     calls = []
 
     def fake_rpc_call(chain, method, params, timeout=15):
@@ -119,6 +126,7 @@ def test_find_v4_pool_fetches_chain_tip_when_latest_block_omitted(monkeypatch):
         raise AssertionError
 
     monkeypatch.setattr(rpd, "rpc_call", fake_rpc_call)
+    monkeypatch.setattr(rpd.time, "sleep", lambda *a, **k: None)
     result = rpd.find_v4_pool(TOKEN, QUOTE)
     assert calls[0] == "eth_blockNumber"
     assert result["ok"] is False
@@ -177,14 +185,29 @@ def test_find_v4_pool_eth_get_logs_failure_short_circuits(monkeypatch):
 
 
 def test_find_v4_pool_gives_up_after_max_chunks_with_no_match(monkeypatch):
+    # UPDATED 14 Nov 2026: the real inter-chunk pacing (_LOG_SCAN_INTER_CHUNK_DELAY_S,
+    # added the same day, deliberate RPC-pacing -- see rhc_pool_discovery.py's own
+    # comment) made this worst-case test genuinely take _LOG_SCAN_MAX_CHUNKS * delay
+    # = 1164 * 0.5s = ~582 real seconds every run. That pacing is correct and
+    # intentional for real RPC calls -- the right fix is to mock time.sleep here,
+    # not to touch the real pacing, so this test verifies the real give-up logic
+    # (exact chunk count) without actually waiting for it.
     calls = {"n": 0}
 
     def fake_rpc_call(chain, method, params, timeout=15):
         calls["n"] += 1
         return {"ok": True, "result": []}
 
+    # FIXED 14 Nov 2026: latest_block=CHUNK_BLOCKS*100 only allows 100 backward
+    # steps before hitting block 0 (from_block = max(0, to_block - CHUNK_BLOCKS)) --
+    # the real scan genuinely stops at 100 chunks there, it can never reach the full
+    # _LOG_SCAN_MAX_CHUNKS=1164 the assertion expects. Starting high enough that the
+    # block-0 floor is never hit lets this actually exercise the real give-up-after-
+    # max-chunks path the test's name promises.
     monkeypatch.setattr(rpd, "rpc_call", fake_rpc_call)
-    result = rpd.find_v4_pool(TOKEN, QUOTE, latest_block=rpd._LOG_SCAN_CHUNK_BLOCKS * 100)
+    monkeypatch.setattr(rpd.time, "sleep", lambda *a, **k: None)
+    result = rpd.find_v4_pool(TOKEN, QUOTE,
+                              latest_block=rpd._LOG_SCAN_CHUNK_BLOCKS * (rpd._LOG_SCAN_MAX_CHUNKS + 10))
     assert result["ok"] is False
     assert calls["n"] == rpd._LOG_SCAN_MAX_CHUNKS
 

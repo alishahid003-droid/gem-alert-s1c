@@ -200,12 +200,21 @@ def test_sell_sets_a_real_slippage_floor_from_the_quoter(monkeypatch):
     assert captured["amount_out_minimum"] > 0  # the actual bug: this used to always be 0
 
 
-def test_sell_falls_back_to_zero_floor_when_no_quote_available_but_still_lands(monkeypatch):
-    """Unlike the buy side, a sell must not refuse just because the Quoter
-    is unreachable -- a rug event is exactly the scenario where a sell
-    most needs to land AND where supporting data is most likely to be
-    degraded. Confirms the sell still succeeds (with an unprotected floor
-    of 0, same as before this fix, but only as a last resort)."""
+def test_sell_refuses_rather_than_send_unprotected_when_quoter_truly_unreachable(monkeypatch):
+    """UPDATED 14 Nov 2026 (Ali, real incident, root cause found): this test's
+    old name/behavior ("falls back to zero floor... but still lands") was
+    testing the EXACT bug that caused real sell failures today -- an
+    amount_out_minimum=0 unprotected swap sent for real, rejected only by
+    UniversalRouter's own internal safety check after the fact. That is no
+    longer correct or safe behavior. The real, live-verified fix (see
+    swap_executor.py's 14 Nov 2026 comments): when the Quoter is genuinely
+    unreachable (not just a QuoteSwap-wrapped revert -- see
+    _try_parse_quoteswap_revert), the shrink-retry loop tries progressively
+    smaller sizes for a REAL quote; if NONE of them get one, the sell now
+    correctly REFUSES rather than ever building an unprotected swap. A real
+    rug event needing to sell blind is a genuine, understood trade-off this
+    fix accepts -- it is safer to refuse and alert than to send a swap that
+    can execute at a rounds-to-zero price, which is what actually happened."""
     from eth_account import Account
     account = Account.create()
     monkeypatch.setattr(EXECUTOR_CONFIG, "execution_enabled", True)
@@ -262,8 +271,10 @@ def test_sell_falls_back_to_zero_floor_when_no_quote_available_but_still_lands(m
     monkeypatch.setattr(swap_executor, "build_v4_exact_in_single_calldata", spying_builder)
 
     result = swap_executor.execute_sell("robinhood_chain", TOKEN, amount_tokens=100.0, reason="test sell")
-    assert result.ok, result.reason  # still lands, unlike the buy side
-    assert captured["amount_out_minimum"] == 0
+    # UPDATED 14 Nov 2026: refuses now, by design -- see docstring above.
+    assert not result.ok
+    assert "no real on-chain quote available" in result.reason
+    assert "amount_out_minimum" not in captured  # never even reached calldata-building -- no unprotected swap was built
 
 
 def test_sell_refuses_when_no_pool_found(monkeypatch):

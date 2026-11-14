@@ -104,12 +104,17 @@ def test_unknown_chain_fails_cleanly_without_calling_anything(monkeypatch):
     assert calls == []
 
 
-def test_robinhood_chain_pool_has_exactly_one_candidate_endpoint():
-    # Documents the real current state rather than assuming more exist --
-    # only one official endpoint was found (Robinhood's own docs), and it's
-    # explicitly rate-limited per those docs.
-    assert len(rpc_pool.RPC_ENDPOINT_POOLS["robinhood_chain"]) == 1
-    assert "robinhood" in rpc_pool.RPC_ENDPOINT_POOLS["robinhood_chain"][0]
+def test_robinhood_chain_pool_has_real_failover():
+    # UPDATED 14 Nov 2026 (Ali, real incident): a real second, live-tested,
+    # free no-signup endpoint (rpc.nodeflare.app) was added as a genuine
+    # fallback -- RHC is no longer a single point of failure. Documents the
+    # real current state: exactly 2 candidates, official one first (primary),
+    # the nodeflare one second (fallback -- its own docs state a 1 req/10s
+    # per-IP limit, unsuitable as primary under real polling frequency).
+    pool = rpc_pool.RPC_ENDPOINT_POOLS["robinhood_chain"]
+    assert len(pool) == 2
+    assert "rpc.mainnet.chain.robinhood.com" in pool[0]
+    assert "nodeflare" in pool[1]
 
 
 def test_cooldown_is_independent_per_chain(monkeypatch):
