@@ -410,3 +410,60 @@ def test_sprint_weight_env_overridable(monkeypatch, tmp_path):
     r = m.act(dict(d_rh), 10_000.0)
     # weight of 0.01 should drive the stake to effectively zero (below the $5 floor) -> refused
     assert r.get("opened") == []
+
+
+def test_real_compound_buy_mirrors_into_position_state_for_autosell(monkeypatch, tmp_path):
+    """Regression test for commit e5dd99b (14 Nov 2026, Ali, real incident): a
+    successful real compound buy on robinhood_chain used to never be recorded
+    into executor.position_state, the ONLY store exit_rules.check_and_exit()
+    reads from to decide real auto-sells (stop-loss, trailing stop, time stop).
+    3 real positions landed, confirmed on-chain, and then sat unmanaged with no
+    way to ever auto-exit -- discovered only when a real wallet dropped from
+    ~$120 to ~$31 liquid. This test drives act()'s real-buy block end to end
+    and asserts record_stage_entry/record_fill are actually called on a
+    successful buy, so this specific gap can never silently reopen."""
+    from executor import books, config as execcfg, swap_executor as swap, position_state
+
+    monkeypatch.setattr(books, "is_live_armed", lambda lane: True)
+    monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "ready_for_chain", lambda chain: True)
+    monkeypatch.setattr(swap, "get_real_wallet_usd", lambda chain: 100.0)
+
+    class _FakeResult:
+        ok = True
+        reason = "buy submitted and confirmed"
+        tx_signature = "0xrealcompoundbuyhash"
+        filled_amount_tokens = 12345.0
+
+    monkeypatch.setattr(swap, "execute_buy_robinhood_chain", lambda addr, usd: _FakeResult())
+
+    captured = {}
+
+    def spy_record_stage_entry(chain, token, stage, stake, mcap, reason):
+        captured["stage_entry"] = (chain, token, stage, stake)
+
+    def spy_record_fill(chain, token, filled_tokens, tx_signature=None):
+        captured["fill"] = (chain, token, filled_tokens, tx_signature)
+
+    monkeypatch.setattr(position_state, "record_stage_entry", spy_record_stage_entry)
+    monkeypatch.setattr(position_state, "record_fill", spy_record_fill)
+
+    # Built directly as a robinhood_chain pool (not via _base_pool, which is base's own
+    # growth-gate helper) -- mcap sits in RHC's $30k-50k qualifying band, liq is set so
+    # mcap/liq stays under 1.4 (the real MC_MAX_MCAP_LIQ_RATIO quality gate added 11 Nov
+    # 2026 -- confirmed live against multichain_sniper.py directly; a lower liq here would
+    # be correctly refused by that gate, not a sign of this fix breaking).
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrhcompound", chain="robinhood_chain", mcap=35_000.0,
+                           liq=30_000.0, now=10_000.0), 10_000.0)
+    assert d, "pool did not qualify -- test setup issue, not the fix under test"
+    t2 = 10_000.0
+
+    m.act(d, now=t2)
+
+    assert "stage_entry" in captured, "record_stage_entry was never called -- the wiring gap is back"
+    assert "fill" in captured, "record_fill was never called -- the wiring gap is back"
+    assert captured["stage_entry"][0] == "robinhood_chain"
+    assert captured["stage_entry"][2] == "compound_real"
+    assert captured["fill"][2] == 12345.0
+    assert captured["fill"][3] == "0xrealcompoundbuyhash"
