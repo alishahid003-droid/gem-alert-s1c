@@ -51,6 +51,23 @@ def test_bsc_cost_is_expected_slippage_not_tolerance_ceiling():
     assert thin > 0.15                                 # thin pools still priced in
 
 
+def test_base_cost_uses_its_own_estimate_not_generic_10pct_fallback():
+    # 14 Nov 2026 (Ali, paper-vs-real fidelity audit): "base" was previously
+    # MISSING from estimate_round_trip_cost_pct's chain branches, so every
+    # base paper trade silently used the generic 0.10 flat-chain fallback
+    # instead of base's own numbers. This pins the fix: base must behave
+    # like bsc/robinhood_chain (expected-slippage estimate), not like an
+    # unknown chain.
+    deep_base = compound_scalper.estimate_round_trip_cost_pct("base", 20.0, liquidity_usd=500_000)
+    deep_bsc = compound_scalper.estimate_round_trip_cost_pct("bsc", 20.0, liquidity_usd=500_000)
+    # Same conservative slippage model as bsc/rhc (2%/3%); base's per-leg fee
+    # differs slightly (0.003 vs bsc's 0.0025) so these are close, not equal.
+    assert deep_base == pytest.approx(deep_bsc, abs=0.01)
+    assert deep_base < 0.10                             # strictly below the old generic fallback
+    thin_base = compound_scalper.estimate_round_trip_cost_pct("base", 20.0, liquidity_usd=100)
+    assert thin_base > 0.15                             # thin pools still priced in, same as bsc
+
+
 # --- entry_gate -------------------------------------------------------------
 
 def test_disabled_by_default_config():

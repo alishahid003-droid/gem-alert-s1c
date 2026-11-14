@@ -225,6 +225,11 @@ CHAIN_SWAP_FEE_PCT = {
     "solana": 0.010,           # pump.fun bonding-curve / Raydium-Jupiter route fee, per leg
     "bsc": 0.0025,              # PancakeSwap v2/v3 typical per-leg fee
     "robinhood_chain": 0.003,   # Uniswap v4 typical per-leg fee -- RHC untested live, same as elsewhere
+    "base": 0.003,              # Uniswap v2 typical per-leg fee on Base -- added 14 Nov 2026 (Ali):
+                                 # "base" was previously MISSING from this dict and from the slippage
+                                 # branch below, so every base paper trade silently fell through to the
+                                 # generic 0.10 flat-cost assumption instead of base's own real,
+                                 # already-verified numbers -- found during a paper-vs-real fidelity audit.
 }
 SOLANA_BUY_SLIPPAGE = 0.010    # matches swap_executor.py's Jupiter buy quote, slippageBps=100
 SOLANA_SELL_SLIPPAGE = 0.015   # matches swap_executor.py's Jupiter sell quote, slippageBps=150
@@ -246,6 +251,16 @@ SOLANA_SELL_SLIPPAGE = 0.015   # matches swap_executor.py's Jupiter sell quote, 
 # measured values once real fills exist (the test trade logs real cost).
 BSC_RHC_BUY_SLIPPAGE = 0.02
 BSC_RHC_SELL_SLIPPAGE = 0.03
+# BASE: added 14 Nov 2026 (Ali, paper-vs-real fidelity audit). Same reasoning
+# as BSC_RHC above -- swap_executor.py's BASE_*_SLIPPAGE_TOLERANCE constants
+# (20%/25%) are a wide ceiling meant to guarantee a thin-pool tx lands, not a
+# typical realized cost. Base is Uniswap V2 on an L2, comparable pool-depth
+# characteristics to BSC's PancakeSwap V2, so it gets BSC/RHC's same
+# conservative 2%/3% estimate rather than the raw ceiling or the old 10%
+# generic-chain fallback it was silently using before this fix. Replace with
+# measured values once real Base fills exist.
+BASE_BUY_SLIPPAGE = 0.02
+BASE_SELL_SLIPPAGE = 0.03
 
 
 def _liquidity_impact_penalty(position_usd: float, liquidity_usd: Optional[float]) -> float:
@@ -276,6 +291,8 @@ def estimate_round_trip_cost_pct(chain: str, position_usd: float, liquidity_usd:
         base = SOLANA_BUY_SLIPPAGE + SOLANA_SELL_SLIPPAGE + 2 * CHAIN_SWAP_FEE_PCT["solana"]
     elif chain in ("bsc", "robinhood_chain"):
         base = BSC_RHC_BUY_SLIPPAGE + BSC_RHC_SELL_SLIPPAGE + 2 * CHAIN_SWAP_FEE_PCT.get(chain, 0.005)
+    elif chain == "base":
+        base = BASE_BUY_SLIPPAGE + BASE_SELL_SLIPPAGE + 2 * CHAIN_SWAP_FEE_PCT.get(chain, 0.005)
     else:
         base = 0.10  # unknown chain -- conservative flat assumption, never a guessed-low default
     return base + _liquidity_impact_penalty(position_usd, liquidity_usd)
