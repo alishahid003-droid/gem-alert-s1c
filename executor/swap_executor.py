@@ -188,8 +188,21 @@ def _rhc_quote_exact_input_single(pool_key: dict, zero_for_one: bool, exact_amou
         result = rpc_call("robinhood_chain", "eth_call", [
             {"to": UNISWAP_V4_QUOTER_RHC, "data": "0x" + calldata.hex()}, "latest",
         ])
+        # 14 Nov 2026 (Ali, real incident, REAL ROOT CAUSE -- confirmed via
+        # free on-chain replay + Blockscout's verified V4Quoter source):
+        # IV4Quoter.quoteExactInputSingle is designed to ALWAYS revert, with
+        # the real quote encoded inside a custom error QuoteSwap(uint256)
+        # (see Uniswap's own QuoterRevert.sol). A successful quote is NOT a
+        # clean eth_call return -- it's specifically this revert shape. The
+        # OLD code only handled result["ok"]==True, so every real quote
+        # (which always comes back as ok=False, by design) was wrongly
+        # treated as "no quote available", even against pools with real,
+        # healthy liquidity.
         if not result.get("ok"):
-            continue  # transient failure -- try again (once) before giving up
+            parsed = _try_parse_quoteswap_revert(result.get("reason") or "")
+            if parsed is not None:
+                return parsed
+            continue  # genuinely not a QuoteSwap revert -- real transient failure, retry once
         raw = result.get("result")
         if not isinstance(raw, str) or not raw.startswith("0x") or len(raw) <= 2:
             continue
@@ -198,6 +211,56 @@ def _rhc_quote_exact_input_single(pool_key: dict, zero_for_one: bool, exact_amou
         except Exception:  # noqa: BLE001 -- malformed/unexpected quoter response, treat as "no quote available" and retry
             continue
     return None  # both the original attempt and the retry failed -- genuinely no quote available
+
+
+def _try_parse_quoteswap_revert(rpc_error_reason: str) -> Optional[int]:
+    """Extracts the real quoted amountOut from a V4Quoter revert. The
+    quoter intentionally reverts on every call (see
+    _rhc_quote_exact_input_single's 14 Nov 2026 note); the real quote is
+    inside a QuoteSwap(uint256) custom error, sometimes wrapped one level
+    deeper inside UnexpectedRevertBytes(bytes) depending on the exact
+    code path taken inside the quoter. Returns None (never raises) for
+    any revert that is NOT a valid quote (a genuine error, e.g.
+    NotEnoughLiquidity) -- callers treat None exactly like the old
+    "no quote available" case.
+
+    Selectors below are real keccak256 selectors of the real, verified
+    V4Quoter source (0x8dc178efb8111bb0973dd9d722ebeff267c98f94 on RHC),
+    confirmed via Blockscout, not guessed."""
+    import re
+    from eth_utils import keccak
+    from eth_abi import decode as abi_decode
+
+    m = re.search(r"'data':\s*'(0x[0-9a-fA-F]*)'", rpc_error_reason)
+    if not m:
+        return None
+    data_hex = m.group(1)
+    if len(data_hex) < 10:
+        return None
+    try:
+        data_bytes = bytes.fromhex(data_hex[2:])
+    except ValueError:
+        return None
+    if len(data_bytes) < 4:
+        return None
+
+    quoteswap_sel = keccak(text="QuoteSwap(uint256)")[:4]
+    unexpected_sel = keccak(text="UnexpectedRevertBytes(bytes)")[:4]
+    outer_sel = data_bytes[:4]
+
+    if outer_sel == quoteswap_sel and len(data_bytes) >= 36:
+        return int.from_bytes(data_bytes[4:36], "big")
+
+    if outer_sel == unexpected_sel:
+        try:
+            inner = abi_decode(["bytes"], data_bytes[4:])[0]
+        except Exception:  # noqa: BLE001 -- malformed wrapper, not a usable quote
+            return None
+        if len(inner) >= 36 and inner[:4] == quoteswap_sel:
+            return int.from_bytes(inner[4:36], "big")
+        return None  # a real error (e.g. NotEnoughLiquidity) -- genuinely no quote
+
+    return None  # some other revert entirely -- genuinely no quote
 
 
 @dataclass
@@ -1658,15 +1721,53 @@ def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> Execution
     if not zero_for_one:
         return ExecutionResult(False, "pool_key's currency1 was not this token -- refusing to guess swap direction")
 
-    # Real slippage floor (fixed Sept 28 2026 -- see RHC_SELL_SLIPPAGE_TOLERANCE's
-    # module-level comment). Unlike the buy side, a missing quote does NOT
-    # refuse the sell outright -- a sell that fails to execute (e.g. during
-    # a rug, exactly when DexScreener/RPC data is most likely to be
-    # degraded) is worse than one that executes at an unprotected price;
-    # falling back to 0 here keeps the previous (pre-fix) behavior only as
-    # a last resort, not as the default.
+    # 14 Nov 2026 (Ali, real incident, ROOT CAUSE FOUND -- superseding the
+    # Sept 28 2026 "fall back to 0" behavior above, now confirmed WRONG):
+    # a failed quote almost always means NotEnoughLiquidity for this exact
+    # size (confirmed via a real, free eth_call replay + on-chain custom
+    # error decoding -- the real pool for tinfoil#1 reverted the quoter
+    # itself with NotEnoughLiquidity, which the OLD code silently treated
+    # as "proceed with amount_out_minimum=0", sending a real, UNPROTECTED
+    # swap that PoolManager then executed at a rounds-to-zero price,
+    # rejected only by UniversalRouter's OWN internal safety check
+    # (V4TooLittleReceivedPerHopSingle) -- i.e. the old fallback was
+    # actively dangerous, not just imperfect: it was one router-side
+    # safety check away from executing real sells that return nothing.
+    #
+    # Fix: if the quote fails, SHRINK the amount being sold and retry the
+    # QUOTE (never the real tx) at progressively smaller sizes, down to a
+    # real floor (1% of the original ask). Only send the real transaction
+    # once a genuine quote-backed amount_out_minimum exists. If even the
+    # smallest size still can't get a quote, refuse the sell outright --
+    # exactly matching the buy side's existing "never trade blind" rule.
     quoted_out = _rhc_quote_exact_input_single(pool_key, zero_for_one=False, exact_amount=raw_amount)
-    amount_out_minimum = int(quoted_out * (1 - RHC_SELL_SLIPPAGE_TOLERANCE)) if quoted_out else 0
+    original_raw_amount = raw_amount
+    _shrink_steps = [0.5, 0.25, 0.10, 0.05, 0.01]  # 50% -> 1% of original ask
+    _shrink_idx = 0
+    while quoted_out is None and _shrink_idx < len(_shrink_steps):
+        shrink_fraction = _shrink_steps[_shrink_idx]
+        shrunk_amount = int(original_raw_amount * shrink_fraction)
+        _shrink_idx += 1
+        if shrunk_amount <= 0:
+            continue
+        print(f"[swap_executor] robinhood_chain sell: no quote at {raw_amount} raw units -- "
+              f"NotEnoughLiquidity most likely; retrying quote at {shrink_fraction:.0%} of "
+              f"original ask ({shrunk_amount} raw units)", flush=True)
+        requoted = _rhc_quote_exact_input_single(pool_key, zero_for_one=False, exact_amount=shrunk_amount)
+        if requoted:
+            raw_amount = shrunk_amount
+            quoted_out = requoted
+            print(f"[swap_executor] robinhood_chain sell: quote succeeded at {shrink_fraction:.0%} size -- "
+                  f"selling {raw_amount} raw units instead of the original {original_raw_amount} "
+                  f"(real pool liquidity could not absorb the full position)", flush=True)
+
+    if quoted_out is None:
+        return ExecutionResult(False, f"no real on-chain quote available even at the smallest tested size "
+                                       f"({_shrink_steps[-1]:.0%} of {original_raw_amount} raw units) -- "
+                                       f"pool almost certainly has NotEnoughLiquidity for any real sell right "
+                                       f"now; refusing to send an unprotected (amount_out_minimum=0) swap")
+
+    amount_out_minimum = int(quoted_out * (1 - RHC_SELL_SLIPPAGE_TOLERANCE))
 
     deadline = int(__import__("time").time()) + 300
     try:
