@@ -430,7 +430,7 @@ def test_real_compound_buy_mirrors_into_position_state_for_autosell(monkeypatch,
     ~$120 to ~$31 liquid. This test drives act()'s real-buy block end to end
     and asserts record_stage_entry/record_fill are actually called on a
     successful buy, so this specific gap can never silently reopen."""
-    from executor import books, config as execcfg, swap_executor as swap, position_state
+    from executor import books, config as execcfg, swap_executor as swap, position_state, paper_ledger
 
     monkeypatch.setattr(books, "is_live_armed", lambda lane: True)
     monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "execution_enabled", True)
@@ -474,4 +474,41 @@ def test_real_compound_buy_mirrors_into_position_state_for_autosell(monkeypatch,
     assert captured["stage_entry"][0] == "robinhood_chain"
     assert captured["stage_entry"][2] == "compound_real"
     assert captured["fill"][2] == 12345.0
-    assert captured["fill"][3] == "0xrealcompoundbuyhash"
+    # 14 Nov 2026 (Ali, explicit instruction -- "I do not want paper trades anymore... for
+    # base/robinhood... it should reflect real balances, real wallet balances, real equity,
+    # real trades"): a real-eligible entry (live-armed lane, real chain) must NEVER also create
+    # a paper_ledger shell any more -- position_state is now the ONLY record for this entry.
+    assert paper_ledger.module_open_count("compound", chain="robinhood_chain") == 0, (
+        "a paper position was created for a real-eligible entry -- paper trading must not "
+        "exist at all for live-armed base/robinhood_chain lanes"
+    )
+
+
+def test_real_eligible_entry_never_opens_a_paper_position_even_on_refusal(monkeypatch, tmp_path):
+    """14 Nov 2026 (Ali, explicit instruction): same guarantee as the test above, but for the
+    REFUSAL path -- a real-eligible entry whose real buy is refused (e.g. real wallet balance
+    too small) must still never fall back to opening a paper position. It should show up as a
+    real refusal reason, not a silent paper trade standing in for it."""
+    from executor import books, config as execcfg, swap_executor as swap, paper_ledger as pl
+
+    monkeypatch.setattr(books, "is_live_armed", lambda lane: True)
+    monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "execution_enabled", True)
+    monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "ready_for_chain", lambda chain: True)
+    # Real wallet balance too small to size any real stake -- the real refusal path.
+    monkeypatch.setattr(swap, "get_real_wallet_usd", lambda chain: 1.50)
+
+    sc = m.Scanner()
+    d = sc.evaluate(_pool(addr="0xrhcrefuse", chain="robinhood_chain", mcap=35_000.0,
+                          liq=30_000.0, now=10_000.0), 10_000.0)
+    assert d, "pool did not qualify -- test setup issue, not the fix under test"
+
+    result = m.act(d, now=10_000.0)
+
+    assert not any("compound" == r or r.startswith("compound:") for r in result.get("opened", [])), \
+        "a real-eligible entry with an undersized real wallet must not show as opened"
+    assert any("compound" in r for r in result.get("refused", [])), \
+        "the refusal must be reported, not silently swallowed"
+    assert pl.module_open_count("compound", chain="robinhood_chain") == 0, (
+        "a paper position was opened on a real-buy refusal -- real-eligible entries must never "
+        "fall back to a paper trade"
+    )

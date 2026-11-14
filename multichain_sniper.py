@@ -623,139 +623,90 @@ def act(d: dict, now: Optional[float] = None) -> dict:
         if not stake:
             refused.append(f"{lane}: {reason}")
             continue
+        # 14 Nov 2026 (Ali, explicit instruction -- "I do not want paper traces... there should
+        # be no paper trading at any point [for base/robinhood_chain]... it should reflect real
+        # balances, real wallet balances, real equity, real trades"): for a chain/lane
+        # combination that can actually fire a real buy (robinhood_chain/base, and this lane is
+        # live-armed), skip the paper shell entirely and record straight into
+        # executor.position_state -- the same real store exit_rules.check_and_exit() already
+        # reads for auto-sell, and the same store the compound_real mirror (below, now folded
+        # into this path) used to bolt onto a paper record after the fact. Solana and any
+        # base/robinhood_chain entry for a NOT-yet-live-armed lane (sprint/core1/core2 before
+        # the cascade fires) are completely unaffected -- they fall through to the unchanged
+        # paper path beneath this block, exactly as before. Entry/qualification/stake-sizing
+        # logic above this line (can_open, tier_stake_usd, the bsc/sprint weight adjustments)
+        # is NOT touched by this change -- `stake` from that logic is still used below as the
+        # PAPER stake for non-real-eligible lanes; the real path sizes off real wallet balance,
+        # exactly as the pre-existing real-buy block already did.
+        _real_eligible = d["chain"] in ("robinhood_chain", "base") and books.is_live_armed(lane)
+        if _real_eligible:
+            from executor import config as _execcfg, swap_executor as _swap
+            import executor.position_state as _position_state
+            _real_ok = False
+            _real_reason = None
+            _real_tx = None
+            _real_stake = 0.0
+            _real_filled_tokens = None
+            try:
+                if _execcfg.EXECUTOR_CONFIG.execution_enabled and _execcfg.EXECUTOR_CONFIG.ready_for_chain(d["chain"]):
+                    _buy_fn = (_swap.execute_buy_robinhood_chain if d["chain"] == "robinhood_chain"
+                               else _swap.execute_buy_base)
+                    # Same real-wallet-balance sizing as before this change (14 Nov 2026, Ali,
+                    # explicit instruction, unchanged): the real buy's dollar amount comes from
+                    # the REAL wallet balance on this chain, never from a paper stake.
+                    _real_wallet_usd = _swap.get_real_wallet_usd(d["chain"])
+                    if _real_wallet_usd is None or _real_wallet_usd < 5.0:
+                        _real_reason = (
+                            f"refusing real buy: could not read a real {d['chain']} wallet balance "
+                            f"(or it's below $5) -- never guessing or falling back to a paper stake "
+                            f"for a real buy amount"
+                        )
+                    else:
+                        _real_tier = _execcfg.bankroll_tier(_real_wallet_usd)
+                        _real_stake = round(_real_wallet_usd * _real_tier["position_pct"], 2)
+                        if _real_stake < 5.0:
+                            _real_reason = (
+                                f"refusing real buy: real {d['chain']} wallet is ${_real_wallet_usd:.2f}, "
+                                f"sized real stake of ${_real_stake:.2f} is below the $5 floor"
+                            )
+                            _real_stake = 0.0
+                        else:
+                            _result = _buy_fn(d["addr"], _real_stake)
+                            _real_ok = bool(_result.ok)
+                            _real_reason = _result.reason
+                            _real_tx = _result.tx_signature
+                            if _result.ok:
+                                _real_filled_tokens = _result.filled_amount_tokens
+                else:
+                    _real_reason = "refusing real buy: EXECUTION_ENABLED is not true or no real key configured for this chain"
+            except Exception as _live_exc:  # noqa: BLE001 -- a raised exception must never
+                                             # leave this candidate unrecorded; record it as a
+                                             # failed real attempt instead of crashing the loop.
+                _real_reason = f"real buy hook raised: {_live_exc}"
+            # Always record a real_position_state entry for this attempt -- win or refuse or
+            # fail, so the real failure reason is visible (same honesty the old paper-mirrored
+            # live_reason field gave), and so has_stage()-style re-fire protection applies here
+            # too (record_stage_entry/mark_stage_buy_failed, same pair entrypoint.py's real path
+            # already uses).
+            try:
+                _position_state.record_stage_entry(
+                    d["chain"], d["addr"], f"{lane}_real", _real_stake, d.get("mcap"),
+                    f"real {lane} buy attempt: {_real_reason or 'ok'}"
+                )
+                if _real_ok:
+                    _position_state.record_fill(d["chain"], d["addr"], _real_filled_tokens, tx_signature=_real_tx)
+                else:
+                    _position_state.mark_stage_buy_failed(d["chain"], d["addr"], f"{lane}_real", reason=_real_reason or "unknown")
+            except Exception as _pos_state_exc:  # noqa: BLE001 -- must never raise out of act()
+                _real_reason = (_real_reason or "") + f" [WARNING: position_state record failed: {_pos_state_exc}]"
+            (opened if _real_ok else refused).append(lane if _real_ok else f"{lane}: {_real_reason}")
+            continue
         pos = paper_ledger.open_paper(d["chain"], d["addr"], f"early_{lane}", f"early_{lane}", stake, d["mcap"],
                                       strategy="early", exit_profile=lane, liquidity_usd=d.get("liq"),
                                       tags={"origin": "multichain", "name": str(d["name"])[:24], "src": d["src"], "age_min": d["age_min"],
                                             "confirmations": d["confirmations"], "tier": d.get("tier", "probe"), "safety": why,
                                             "raw": d.get("raw")}, module=lane)
         (opened if pos else refused).append(lane if pos else f"{lane}: not opened")
-        # 8 Nov 2026 (Ali, live-wiring build): mirror this paper entry with a REAL buy, only if
-        # ALL of the following hold -- books.is_live_armed() alone is never sufficient:
-        #   1. pos was actually opened (never fire a real buy for a paper entry that was refused)
-        #   2. this lane/book is listed in LIVE_BOOKS and (for sprint/core1/core2) the Phase-1
-        #      cascade live-pause is not set (books.is_live_armed(lane))
-        #   3. the chain is one swap_executor actually has a real buy function for -- only
-        #      robinhood_chain and base, per Ali's explicit correction (Solana/bsc are not
-        #      traded for real at all; solana is data/pattern-ID only, bsc has no live adapter
-        #      and is 0% win rate anyway per the docstring above)
-        #   4. executor.config.ready_for_chain(chain) passes -- EXECUTION_ENABLED=true AND the
-        #      real per-chain key (EXECUTION_RHC_PRIVATE_KEY / EXECUTION_BASE_PRIVATE_KEY) is
-        #      set. This is the SAME gate swap_executor's own real buy functions check
-        #      internally via _refuse_unless_ready() -- checked again here, before spending any
-        #      effort building a request, purely so a disarmed system logs nothing extra; the
-        #      real functions still refuse-closed on their own if this check is ever bypassed.
-        # The real buy is best-effort and never allowed to break the paper system: any failure
-        # (including an exception) is recorded on the position and swallowed, never raised --
-        # paper trading must keep working exactly as it does tonight even if live wiring breaks.
-        if pos and d["chain"] in ("robinhood_chain", "base") and books.is_live_armed(lane):
-            class _RealSizeSkip(Exception):
-                """Internal sentinel: real-balance sizing already recorded its own
-                live_attempted/live_ok/live_reason and called update_live_fields()
-                before raising this -- the except block below must not overwrite
-                that with a generic 'live buy hook raised' message."""
-                pass
-            try:
-                from executor import config as _execcfg, swap_executor as _swap
-                if _execcfg.EXECUTOR_CONFIG.execution_enabled and _execcfg.EXECUTOR_CONFIG.ready_for_chain(d["chain"]):
-                    _buy_fn = (_swap.execute_buy_robinhood_chain if d["chain"] == "robinhood_chain"
-                               else _swap.execute_buy_base)
-                    # 14 Nov 2026 (Ali, explicit instruction): the real buy's dollar amount must
-                    # come from the REAL wallet balance on this chain, never from `stake` (which
-                    # is paper_ledger/books.equity()-derived -- pure paper P&L bookkeeping, zero
-                    # connection to real capital). Ali's exact words: "It should be based on my
-                    # real USDT amount size in my actual real wallet instead of the paper book's
-                    # equity... it should track down real wallet balance and trade accordingly
-                    # as per the logic which is defined for that module." `stake` and the paper
-                    # open_paper() call above are deliberately left untouched -- paper trading's
-                    # own bookkeeping, and the entry/qualification logic that decided `pos`
-                    # should fire at all, are NOT part of this change.
-                    #
-                    # "the logic which is defined for that module" = the SAME bankroll_tier()
-                    # percentage-of-wallet sizing executor/config.py already defines (seed tier:
-                    # 30% of wallet per shot, Ali Sept 23 2026), just pointed at a live, real,
-                    # per-chain on-chain balance read instead of the static TOTAL_WALLET_USD
-                    # placeholder that logic used to run on.
-                    _real_wallet_usd = _swap.get_real_wallet_usd(d["chain"])
-                    if _real_wallet_usd is None or _real_wallet_usd < 5.0:
-                        pos["live_attempted"] = True
-                        pos["live_ok"] = False
-                        pos["live_reason"] = (
-                            f"refusing real buy: could not read a real {d['chain']} wallet balance "
-                            f"(or it's below $5) -- never guessing or falling back to paper stake "
-                            f"for a real buy amount"
-                        )
-                        paper_ledger.update_live_fields(pos)
-                        raise _RealSizeSkip()
-                    _real_tier = _execcfg.bankroll_tier(_real_wallet_usd)
-                    _real_stake = round(_real_wallet_usd * _real_tier["position_pct"], 2)
-                    _real_stake = _real_stake if _real_stake >= 5.0 else 0.0
-                    if not _real_stake:
-                        pos["live_attempted"] = True
-                        pos["live_ok"] = False
-                        pos["live_reason"] = (
-                            f"refusing real buy: real {d['chain']} wallet is ${_real_wallet_usd:.2f}, "
-                            f"sized real stake of ${_real_stake:.2f} is below the $5 floor"
-                        )
-                        paper_ledger.update_live_fields(pos)
-                        raise _RealSizeSkip()
-                    _result = _buy_fn(d["addr"], _real_stake)
-                    pos["live_attempted"] = True
-                    pos["live_usd_amount"] = _real_stake  # real dollars actually sent to this buy
-                                                           # (the number _real_stake sized against
-                                                           # real wallet balance), regardless of
-                                                           # whether the buy succeeded -- needed so
-                                                           # books.can_open() can gate compound's
-                                                           # capacity off REAL committed $ instead
-                                                           # of paper's `stake`
-                    pos["live_ok"] = bool(_result.ok)
-                    pos["live_reason"] = _result.reason
-                    pos["live_tx"] = _result.tx_signature
-                    if _result.ok:
-                        pos["live"] = True
-                        pos["live_amount_tokens"] = _result.filled_amount_tokens
-                        # Fixed, NEVER mutated after this -- see paper_ledger._sell()'s own
-                        # comment on why the real-sell size calculation needs an immutable
-                        # original base, separate from live_amount_tokens (which _sell() keeps
-                        # decrementing as a running "what's left" figure for reporting).
-                        pos["live_amount_tokens_original"] = _result.filled_amount_tokens
-                        # 14 Nov 2026 (Ali, real incident): a successful real buy here was
-                        # NEVER recorded into executor.position_state -- the ONLY store
-                        # exit_rules.check_and_exit() / scheduler.py's position-mgmt loop reads
-                        # from to decide real auto-sells (TP, trailing stop, time stop). Real
-                        # buys landed, real tx confirmed, but the auto-sell engine never knew
-                        # these positions existed, so 3 real compound positions sat unmanaged
-                        # with no way to ever auto-exit, no matter how far they dropped. This
-                        # mirrors it into position_state right after a successful real fill so
-                        # the SAME auto-exit path that already works for entrypoint.py's
-                        # Stage1/Stage2 real buys also covers multichain_sniper's real buys.
-                        try:
-                            import executor.position_state as _position_state
-                            _position_state.record_stage_entry(
-                                d["chain"], d["addr"], "compound_real", _real_stake,
-                                d.get("mcap"), f"real compound buy: {pos.get('live_reason', '')}"
-                            )
-                            _position_state.record_fill(
-                                d["chain"], d["addr"], _result.filled_amount_tokens,
-                                tx_signature=_result.tx_signature
-                            )
-                        except Exception as _pos_state_exc:  # noqa: BLE001 -- must never block
-                                                              # or unwind a successful real buy
-                            pos["live_reason"] = (pos.get("live_reason", "") +
-                                f" [WARNING: position_state mirror failed, auto-sell may not "
-                                f"see this position: {_pos_state_exc}]")
-                    paper_ledger.update_live_fields(pos)
-            except _RealSizeSkip:
-                # Already recorded (live_attempted/live_ok/live_reason + update_live_fields())
-                # by the real-balance sizing checks above -- nothing more to do here.
-                pass
-            except Exception as _live_exc:  # noqa: BLE001
-                try:
-                    pos["live_attempted"] = True
-                    pos["live_ok"] = False
-                    pos["live_reason"] = f"live buy hook raised: {_live_exc}"
-                    paper_ledger.update_live_fields(pos)
-                except Exception:  # noqa: BLE001
-                    pass
     try:
         state.log_full_alert("early_" + d["lane"], d["chain"], d["name"], d["addr"],
                              f"Multichain early entry ({d['age_min']}m old, ${d['mcap']:,.0f})",
