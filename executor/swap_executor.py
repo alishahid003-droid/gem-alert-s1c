@@ -1684,16 +1684,18 @@ def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> Execution
         return ExecutionResult(False, f"could not fetch gas price: {gas_price_result.get('reason')}")
     gas_price_wei = int(gas_price_result["result"], 16)
 
-    # 14 Nov 2026 (Ali, real incident): a real RHC sell on a thin/new pool reverted with
-    # "out of gas" in the UniversalRouter -> PoolManager -> UniversalRouter internal call chain
-    # (confirmed via Blockscout internal-transactions trace), at the previous 500_000 gas limit.
-    # The buy path's 500_000 limit is fine (single-hop, simpler call pattern); a v4 EXACT_IN sell
-    # that unlocks/settles through PoolManager needs more headroom. Raised to 900_000 -- real cost
-    # is only the ACTUAL gas used (RHC gas price is tiny, ~20 gwei), a higher limit just avoids
-    # a premature out-of-gas revert, it does not spend more unless the tx genuinely needs it.
+    # 14 Nov 2026 (Ali, real incident, round 2): the first fix (500_000 -> 900_000) was NOT
+    # enough -- re-verified against the real on-chain retry (tx 0x71dc2ef3...) via Blockscout's
+    # internal-transactions trace: still "out of gas" inside UniversalRouter -> PoolManager,
+    # at 900_000 total / 860_136 gas_used (innermost frame had only 824_401 gas_limit left).
+    # This specific pool's multi-hop unlock/settle through PoolManager is genuinely gas-hungry.
+    # Checked RHC's real block gas_limit via Blockscout (1_125_899_906_842_624) -- effectively no
+    # chain-level ceiling here, so there is no reason to be stingy. Raised to 2_500_000: real cost
+    # is only the ACTUAL gas used (RHC gas price confirmed ~20 gwei on-chain), a higher limit
+    # never spends more than the tx genuinely needs, it only avoids a premature out-of-gas revert.
     swap_result = _sign_and_send_evm_tx("robinhood_chain", ROBINHOOD_CHAIN_ID, account, router_addr, 0,
                                          "0x" + calldata.hex() if not calldata.hex().startswith("0x") else calldata.hex(),
-                                         gas=900_000)
+                                         gas=2_500_000)
     if not swap_result.ok:
         return ExecutionResult(False, f"approvals succeeded but swap failed: {swap_result.reason}")
 
