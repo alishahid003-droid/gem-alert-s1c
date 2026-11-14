@@ -20,9 +20,11 @@ def _base_pool(addr="0xabc", now=10_000.0):
     """Helper: a base-chain pool that earns growth + volume -- the Oct 28 2026 base gate's
     requirement (see test_base_requires_growth_and_volume below). 'growth' needs the SAME
     scanner instance to have first seen this pool >=40s ago at a lower mcap (now - t0 >= 40
-    and mcap >= 1.25 * m0), so this does two evaluate() calls on one Scanner."""
+    and mcap >= 1.25 * m0), so this does two evaluate() calls on one Scanner. liq=50_000
+    keeps mcap/liq under the 11 Nov 2026 MC_MAX_MCAP_LIQ_RATIO=1.4 gate at the post-growth
+    mcap of 60_000 (ratio 1.2x) -- _pool()'s own default liq=9_000 would fail that gate here."""
     sc = m.Scanner()
-    first_seen = _pool(addr=addr, now=now, mcap=40_000.0)
+    first_seen = _pool(addr=addr, now=now, mcap=40_000.0, liq=50_000.0)
     sc.evaluate(dict(first_seen), now)   # records self.first[k], too soon for growth, discarded
     later = dict(first_seen, mcap=60_000.0)   # 1.5x the first-seen mcap -> growth-eligible
     return sc, later, now + 45                # 45s later -> satisfies growth's time window
@@ -68,8 +70,9 @@ def test_robinhood_chain_requires_30k_entry_mcap():
     and more trustworthy than the eroded >=50k slice. Below 30k entry mcap, robinhood_chain
     trades are refused outright."""
     sc = m.Scanner()
-    assert sc.evaluate(_pool(addr="0xrh29k", chain="robinhood_chain", mcap=29_999.0), 10_000.0) is None
-    d = sc.evaluate(_pool(addr="0xrh30k", chain="robinhood_chain", mcap=30_000.0), 10_000.0)
+    assert sc.evaluate(_pool(addr="0xrh29k", chain="robinhood_chain", mcap=29_999.0, liq=25_000.0), 10_000.0) is None
+    # liq=25_000 keeps mcap/liq under the 11 Nov 2026 MC_MAX_MCAP_LIQ_RATIO=1.4 gate (ratio 1.2x at 30k)
+    d = sc.evaluate(_pool(addr="0xrh30k", chain="robinhood_chain", mcap=30_000.0, liq=25_000.0), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
@@ -91,16 +94,18 @@ def test_robinhood_chain_rejects_50k_plus_entry_mcap():
     still-strong $30-50k band (where old and new data agree) stays open; only $50k+ is newly
     excluded."""
     sc = m.Scanner()
-    d = sc.evaluate(_pool(addr="0xrh49k", chain="robinhood_chain", mcap=49_999.0), 10_000.0)
+    # liq=40_000 keeps mcap/liq under 1.4 at 49_999 (ratio ~1.25x); 50k still refused on its OWN gate
+    d = sc.evaluate(_pool(addr="0xrh49k", chain="robinhood_chain", mcap=49_999.0, liq=40_000.0), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
-    assert sc.evaluate(_pool(addr="0xrh50k", chain="robinhood_chain", mcap=50_000.0), 10_000.0) is None
+    assert sc.evaluate(_pool(addr="0xrh50k", chain="robinhood_chain", mcap=50_000.0, liq=40_000.0), 10_000.0) is None
 
 
 def test_robinhood_chain_mcap_ceiling_env_override(monkeypatch):
     monkeypatch.setenv("MC_RHC_MAX_MCAP_USD_FLOOR", "40000")
     sc = m.Scanner()
-    assert sc.evaluate(_pool(addr="0xrh45k", chain="robinhood_chain", mcap=45_000.0), 10_000.0) is None
-    d = sc.evaluate(_pool(addr="0xrh35k", chain="robinhood_chain", mcap=35_000.0), 10_000.0)
+    assert sc.evaluate(_pool(addr="0xrh45k", chain="robinhood_chain", mcap=45_000.0, liq=35_000.0), 10_000.0) is None
+    # liq=30_000 keeps mcap/liq under 1.4 at 35k (ratio ~1.17x)
+    d = sc.evaluate(_pool(addr="0xrh35k", chain="robinhood_chain", mcap=35_000.0, liq=30_000.0), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
@@ -113,7 +118,8 @@ def test_robinhood_chain_age_floor_disabled_by_default():
     (MC_RHC_MIN_AGE_MIN) stays available if a future, larger sample finds a real effect again.
     A very young robinhood_chain trade at the new $30k floor should pass through."""
     sc = m.Scanner()
-    d = sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=40_000.0, created_ago=90), 10_000.0)
+    # liq=32_000 keeps mcap/liq under 1.4 at 40k (ratio 1.25x)
+    d = sc.evaluate(_pool(addr="0xrhyoung", chain="robinhood_chain", mcap=40_000.0, liq=32_000.0, created_ago=90), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
@@ -121,8 +127,8 @@ def test_robinhood_chain_age_floor_env_override(monkeypatch):
     monkeypatch.setenv("MC_RHC_MIN_AGE_MIN", "2.0")
     sc = m.Scanner()
     # With the override restoring a 2min floor, a 90s-old (1.5min) trade is refused again.
-    assert sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=40_000.0, created_ago=90), 10_000.0) is None
-    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=40_000.0, created_ago=130), 10_000.0)
+    assert sc.evaluate(_pool(addr="0xrhquick", chain="robinhood_chain", mcap=40_000.0, liq=32_000.0, created_ago=90), 10_000.0) is None
+    d = sc.evaluate(_pool(addr="0xrhold", chain="robinhood_chain", mcap=40_000.0, liq=32_000.0, created_ago=130), 10_000.0)
     assert d and d["chain"] == "robinhood_chain"
 
 
@@ -133,7 +139,7 @@ def test_stonkfun_blocked_by_default_solana_gate(monkeypatch):
     Confirms it clears its own 2-confirmation bar but is still refused by the chain gate; the
     env override test below confirms it WOULD pass if solana were re-enabled."""
     sc = m.Scanner()
-    p = {"chain": "solana", "addr": "MintStonk", "name": "S", "src": "stonkfun", "mcap": 20_000.0, "liq": 5000.0,
+    p = {"chain": "solana", "addr": "MintStonk", "name": "S", "src": "stonkfun", "mcap": 20_000.0, "liq": 15_000.0,  # liq raised 11 Nov 2026: keeps mcap/liq under 1.4 (ratio 1.33x)
          "created": 9_900.0, "vol24": 5000.0, "grad": 0.4, "buys5": None, "sells5": None, "buyers5": None,
          "vol5": None, "chg5": None, "chg1h": None}
     assert sc.evaluate(p, 10_000.0) is None
@@ -174,17 +180,18 @@ def test_solana_momentum_bucket_above_cap_only_core1_and_needs_4_conf(monkeypatc
     override -- this test now proves both: (1) solana is refused by default even in this
     bucket, (2) the override restores the original momentum-lane behavior unchanged."""
     sc = m.Scanner()
-    big = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0)
+    # liq=120_000 keeps mcap/liq under 1.4 at 150k (ratio 1.25x)
+    big = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0, liq=120_000.0)
     assert sc.evaluate(big, 10_000.0) is None
     monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
     sc2 = m.Scanner()
-    big2 = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0)
+    big2 = _pool(addr="SolBig", chain="solana", src="gt", mcap=150_000.0, liq=120_000.0)
     d = sc2.evaluate(big2, 10_000.0)
     assert d and d["lanes"] == ["core1"] and "momentum" in d["confirmations"]
     # EVM above the cap is still refused regardless
-    assert sc2.evaluate(_pool(addr="0xbig", chain="bsc", mcap=150_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="0xbig", chain="bsc", mcap=150_000.0, liq=120_000.0), 10_000.0) is None
     # above the momentum ceiling is refused too
-    assert sc2.evaluate(_pool(addr="SolHuge", chain="solana", mcap=1_500_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="SolHuge", chain="solana", mcap=1_500_000.0, liq=1_200_000.0), 10_000.0) is None
 
 
 def test_big_launch_and_robinhood_lanes_are_probe_only(monkeypatch):
@@ -192,13 +199,14 @@ def test_big_launch_and_robinhood_lanes_are_probe_only(monkeypatch):
     gate's env override now; robinhood/bsc above-cap refusals are unaffected (their own gates,
     not the solana one)."""
     sc = m.Scanner()
-    assert sc.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0) is None
+    # liq set per-pool so mcap/liq stays under the 1.4 gate at each pool's own mcap
+    assert sc.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0, liq=480_000.0), 10_000.0) is None
     monkeypatch.setenv("MC_SOLANA_ENABLED", "1")
     sc2 = m.Scanner()
-    d = sc2.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0), 10_000.0)
+    d = sc2.evaluate(_pool(addr="SolBig2", chain="solana", mcap=600_000.0, liq=480_000.0), 10_000.0)
     assert d and d["lanes"] == ["core1"] and d["tier"] == "probe" and "biglaunch" in d["confirmations"]
-    assert sc2.evaluate(_pool(addr="0xrh2", chain="robinhood", mcap=400_000.0), 10_000.0) is None
-    assert sc2.evaluate(_pool(addr="0xbsc", chain="bsc", mcap=180_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="0xrh2", chain="robinhood", mcap=400_000.0, liq=320_000.0), 10_000.0) is None
+    assert sc2.evaluate(_pool(addr="0xbsc", chain="bsc", mcap=180_000.0, liq=140_000.0), 10_000.0) is None
 
 
 def test_solana_blocked_by_default_in_multichain_sniper():

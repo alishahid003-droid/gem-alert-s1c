@@ -74,6 +74,16 @@ _BOOK_ENV_VARS_TO_CLEAR = (
     "COMPOUND_SEED_USD", "COMPOUND_BANK_PCT",
     "CORE1_SEED_USD", "CORE1_TARGET_USD", "CORE1_DAYS",
     "CORE2_SEED_USD", "CORE2_TARGET_USD", "CORE2_DAYS",
+    # ADDED 14 Nov 2026 (Claude, found while fixing stale multichain_sniper tests): same leak
+    # class as the vars above -- Ali's real .env sets LIVE_BOOKS=compound (the current real go-live
+    # state, compound-only until it banks $500 and the Nov 13 cascade seeds sprint/core1/core2),
+    # and executor/books.py's _live_books_from_env() reads os.environ directly on every call, not
+    # through a singleton this fixture file already resets. Left uncleared, every test in this
+    # file that evaluates a pool through core1/core2/sprint/compound silently inherited the REAL
+    # live-armed state and got refused with "paused -- compound is live and no trades ... until
+    # the cross-module cascade seeds this book" -- not a code bug, a test-isolation gap, same
+    # shape as the *_SEED_USD leak documented above it.
+    "LIVE_BOOKS",
 )
 
 
