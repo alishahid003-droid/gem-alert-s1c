@@ -1287,9 +1287,19 @@ def equity_real() -> float:
 
 def committed_usd_real(book_id: str) -> float:
     """Real dollars still at risk in this book's open positions (successfully-executed real buys
-    only -- a failed live_ok=False attempt spent $0 real)."""
-    from executor import paper_ledger
-    return paper_ledger.module_open_cost_real(book_id)
+    only -- a failed buy spent $0 real).
+
+    15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"):
+    re-pointed from paper_ledger.module_open_cost_real() (which read a `live_usd_amount` field
+    bolted onto PAPER records -- a field multichain_sniper.py's and entrypoint.py's real-money
+    paths stopped ever setting, since both now write real outcomes directly into position_state
+    without creating a paper record at all) to position_state.module_open_cost_real(), which
+    reads real position_state records directly. Left on the old function, this would have
+    silently reported $0 committed for every NEW real trade, letting compound's real capital
+    gate think it had full headroom when it didn't -- the exact bug Fix #1 existed to close,
+    reintroduced as a side effect of Fix #2/#3."""
+    from executor import position_state
+    return position_state.module_open_cost_real(book_id)
 
 
 def free_equity_real(book_id: str) -> float:
@@ -1306,9 +1316,16 @@ def open_count_real(book_id: str, chain: str = None) -> int:
     open_count() but counting only confirmed real buys. Used by can_open() for compound's
     position-count LIMIT under the exact same _use_real_capital condition that already gates
     compound's capital check (equity_real/committed_usd_real) -- this was the missing other
-    half of that fix. sprint/core1/core2 are not live-armed and keep the original paper count."""
-    from executor import paper_ledger
-    return paper_ledger.module_open_count_real(book_id, chain=chain)
+    half of that fix. sprint/core1/core2 are not live-armed and keep the original paper count.
+
+    15 Nov 2026: re-pointed from paper_ledger.module_open_count_real() (which counted PAPER
+    records with live_ok=True -- a field only ever set by the old paper-first-then-bolt-on
+    architecture, which Fix #2/#3 removed for real-money chains) to
+    position_state.module_open_count_real(), which counts real position_state records
+    directly. See committed_usd_real() just above for the full reasoning -- same bug, same
+    fix, the count-side half of it."""
+    from executor import position_state
+    return position_state.module_open_count_real(book_id, chain=chain)
 
 
 def effective_max_share(book_id: str, now: Optional[float] = None) -> float:

@@ -377,6 +377,62 @@ def remaining_pct(chain: str, token: str) -> float:
     return max(0.0, 1.0 - sum(t["pct_of_original"] for t in trims.values()))
 
 
+def module_open_count_real(module_id: str, chain: str = None) -> int:
+    """15 Nov 2026 (Ali, explicit instruction -- "fix everything... cascade... every single
+    thing which is needed"): real on-chain open-position count for a module, reading
+    position_state DIRECTLY instead of paper_ledger's module_open_count_real(), which counted
+    paper records with live_ok=True.
+
+    That counting method went stale the moment multichain_sniper.py (Fix #2) and
+    entrypoint.py (Fix #3) stopped creating a paper shell at all for real-eligible entries --
+    both now write straight into position_state, so no new paper record ever gets live_ok=True
+    again for those paths. Left unfixed, books.open_count_real() would have silently reported
+    0 real positions open for compound/sprint/core1/core2 even while real trades were live,
+    defeating the exact position-count safety limit Fix #1 existed to enforce.
+
+    A position counts as "open for module_id" if ANY of its stage entries is named
+    f"{module_id}_real" (the convention multichain_sniper.py's act() and entrypoint.py's
+    handle_stage1/2_candidate both use for real-money stage names) and that stage's buy did
+    not fail (mark_stage_buy_failed sets buy_status='failed' -- a failed buy spent no real
+    money and must not count against the open-position limit, same rule stage_committed_usd
+    already applies)."""
+    stage_name = f"{module_id}_real"
+    count = 0
+    for pos in list_open_positions():
+        if chain is not None and pos.get("chain") != chain:
+            continue
+        entry = pos.get("stages", {}).get(stage_name)
+        if not entry:
+            continue
+        if entry.get("buy_status") == "failed":
+            continue
+        count += 1
+    return count
+
+
+def module_open_cost_real(module_id: str, chain: str = None) -> float:
+    """15 Nov 2026 (Ali, explicit instruction) -- real dollars still at risk in this module's
+    OPEN positions, mirroring module_open_count_real() above (same stage-name convention,
+    same failed-buy exclusion) but summing usd_amount x remaining_pct instead of counting.
+    This is the position_state-native replacement for paper_ledger.module_open_cost_real(),
+    which read paper's bolted-on live_usd_amount field -- stale for the same reason
+    module_open_count_real() above exists: Fix #2/#3 no longer create that paper record at
+    all for real-eligible entries."""
+    stage_name = f"{module_id}_real"
+    total = 0.0
+    for pos in list_open_positions():
+        if chain is not None and pos.get("chain") != chain:
+            continue
+        entry = pos.get("stages", {}).get(stage_name)
+        if not entry:
+            continue
+        if entry.get("buy_status") == "failed":
+            continue
+        remaining = remaining_pct(pos["chain"], pos["token"])
+        total += entry["usd_amount"] * remaining
+    return round(total, 2)
+
+
 def stage_committed_usd(stage: str) -> float:
     """Sum of capital still tied up in a given stage's entries across all
     OPEN positions -- i.e. the original stage amount minus whatever
