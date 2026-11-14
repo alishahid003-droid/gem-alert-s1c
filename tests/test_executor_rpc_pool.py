@@ -104,6 +104,22 @@ def test_unknown_chain_fails_cleanly_without_calling_anything(monkeypatch):
     assert calls == []
 
 
+def test_base_pool_has_only_live_verified_endpoints():
+    # UPDATED 14 Nov 2026 (Ali, real test): Base's pool used to have 3
+    # configured-but-never-live-tested endpoints. A real test from Ali's
+    # machine (bypassing this environment's own network proxy) found
+    # mainnet.base.org and base-rpc.publicnode.com both live and correct
+    # (200, chainId 0x2105), but base.llamarpc.com returned HTTP 525 (a
+    # Cloudflare SSL handshake failure, HTML error body, not JSON) -- a real
+    # dead endpoint, not a rate limit. It was removed rather than left in
+    # as a fallback that would silently do nothing if ever reached.
+    pool = rpc_pool.RPC_ENDPOINT_POOLS["base"]
+    assert len(pool) == 2
+    assert "mainnet.base.org" in pool[0]
+    assert "base-rpc.publicnode.com" in pool[1]
+    assert not any("llamarpc" in url for url in pool)
+
+
 def test_robinhood_chain_pool_has_real_failover():
     # UPDATED 14 Nov 2026 (Ali, real incident): a real second, live-tested,
     # free no-signup endpoint (rpc.nodeflare.app) was added as a genuine

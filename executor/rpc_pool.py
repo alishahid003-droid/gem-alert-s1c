@@ -103,13 +103,15 @@ RPC_ENDPOINT_POOLS = {
                                                         # under real polling frequency if used as the main endpoint.
     ],
     "base": [
-        "https://mainnet.base.org",            # Base's own official public RPC (Coinbase/OP Stack) -- no signup
-        "https://base-rpc.publicnode.com",      # Allnodes -- same free public-RPC provider already confirmed healthy for Solana/BSC above
-        "https://base.llamarpc.com",            # LlamaNodes public endpoint, no signup
-    ],  # added 3 Nov 2026 (Ali): Base chain execution. UNLIKE the 3 pools above, these have
-        # NOT yet been live-tested from Ali's machine -- same honest flag as everything else
-        # untested in this build. Run a real test call against each before trusting this pool
-        # under load, same as Solana/BSC/RHC's rounds above.
+        "https://mainnet.base.org",            # Base's own official public RPC (Coinbase/OP Stack) -- no signup.
+                                                 # LIVE-VERIFIED 14 Nov 2026 (Ali): real eth_chainId call, 200, correct 0x2105.
+        "https://base-rpc.publicnode.com",      # Allnodes -- same free public-RPC provider already confirmed healthy for Solana/BSC.
+                                                 # LIVE-VERIFIED 14 Nov 2026 (Ali): real eth_chainId call, 200, correct 0x2105.
+    ],  # REMOVED 14 Nov 2026 (Ali, real test): base.llamarpc.com dropped -- live test returned
+        # HTTP 525 (Cloudflare SSL handshake failure to the origin, HTML error body not JSON),
+        # not a rate limit or transient blip. A dead endpoint left in the pool is worse than no
+        # endpoint: it looks like real failover coverage but silently does nothing if ever reached.
+        # Both remaining endpoints are now real, live-confirmed failover, same bar as Solana/BSC/RHC.
 }
 
 # How long (seconds) to skip an endpoint after it fails, so a dead or
