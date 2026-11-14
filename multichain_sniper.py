@@ -718,6 +718,31 @@ def act(d: dict, now: Optional[float] = None) -> dict:
                         # original base, separate from live_amount_tokens (which _sell() keeps
                         # decrementing as a running "what's left" figure for reporting).
                         pos["live_amount_tokens_original"] = _result.filled_amount_tokens
+                        # 14 Nov 2026 (Ali, real incident): a successful real buy here was
+                        # NEVER recorded into executor.position_state -- the ONLY store
+                        # exit_rules.check_and_exit() / scheduler.py's position-mgmt loop reads
+                        # from to decide real auto-sells (TP, trailing stop, time stop). Real
+                        # buys landed, real tx confirmed, but the auto-sell engine never knew
+                        # these positions existed, so 3 real compound positions sat unmanaged
+                        # with no way to ever auto-exit, no matter how far they dropped. This
+                        # mirrors it into position_state right after a successful real fill so
+                        # the SAME auto-exit path that already works for entrypoint.py's
+                        # Stage1/Stage2 real buys also covers multichain_sniper's real buys.
+                        try:
+                            import executor.position_state as _position_state
+                            _position_state.record_stage_entry(
+                                d["chain"], d["addr"], "compound_real", _real_stake,
+                                d.get("mcap"), f"real compound buy: {pos.get('live_reason', '')}"
+                            )
+                            _position_state.record_fill(
+                                d["chain"], d["addr"], _result.filled_amount_tokens,
+                                tx_signature=_result.tx_signature
+                            )
+                        except Exception as _pos_state_exc:  # noqa: BLE001 -- must never block
+                                                              # or unwind a successful real buy
+                            pos["live_reason"] = (pos.get("live_reason", "") +
+                                f" [WARNING: position_state mirror failed, auto-sell may not "
+                                f"see this position: {_pos_state_exc}]")
                     paper_ledger.update_live_fields(pos)
             except _RealSizeSkip:
                 # Already recorded (live_attempted/live_ok/live_reason + update_live_fields())
