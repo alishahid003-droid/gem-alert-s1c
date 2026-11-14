@@ -156,3 +156,79 @@ def test_successful_buy_with_unparseable_fill_amount_is_tagged_not_silently_zero
     pos = position_state.get_position("solana", "MintY")
     assert pos["amount_tokens"] == 12345.0
     assert pos["fill_status"] == "confirmed"
+
+
+def test_stage1_real_chain_opens_no_paper_position(monkeypatch):
+    """15 Nov 2026 (Ali, explicit instruction -- "I do not want paper trades anymore... for
+    base/robinhood... real balances, real wallet balances, real equity, real trades"): a
+    real-money chain (robinhood_chain/base, i.e. anything not in _LIVE_BLOCKED_CHAINS) must
+    never open a paper_ledger position via handle_stage1_candidate any more -- only
+    position_state. Solana (a _LIVE_BLOCKED_CHAINS member, paper/pattern-ID only by design)
+    is unaffected and keeps opening paper exactly as before."""
+    import executor.paper_ledger as paper_ledger
+
+    assert len(paper_ledger._open()) == 0, "fixture leaked a paper position before the test ran"
+
+    entrypoint.handle_stage1_candidate(
+        "robinhood_chain", "0xRealToken1", score_band="A", deployer_tier="elite",
+        convergence_count=3, entry_mcap=50000,
+    )
+    assert len(paper_ledger._open()) == 0, (
+        "a paper position was opened for a real-money chain -- paper trading must not exist "
+        "at all for robinhood_chain/base"
+    )
+    # The real store still gets the entry, with the signal tagged on it.
+    pos = position_state.get_position("robinhood_chain", "0xRealToken1")
+    assert pos is not None
+    assert pos["stages"]["stage1"]["signal"] == "deployer_trusted"
+
+    # Solana (paper/pattern-ID only) is completely unaffected.
+    entrypoint.handle_stage1_candidate(
+        "solana", "MintPaperStillWorks", score_band="A", deployer_tier="elite",
+        convergence_count=3, entry_mcap=50000,
+    )
+    assert len(paper_ledger._open()) == 1, "solana's paper trading must be unaffected"
+
+
+def test_stage1_real_chain_uses_real_signal_gate_not_paper(monkeypatch):
+    """A real-money chain's signal_allowed check must come from
+    position_state.real_signal_allowed(), not paper_ledger.signal_allowed() -- so a signal
+    type's REAL track record (not its paper one) decides whether real money keeps flowing to
+    it. Verified by forcing the two gates to disagree and checking which one wins."""
+    import executor.paper_ledger as paper_ledger
+
+    monkeypatch.setattr(paper_ledger, "signal_allowed", lambda signal: (False, "paper says no"))
+    monkeypatch.setattr(position_state, "real_signal_allowed", lambda signal, **kw: (True, "real says yes"))
+
+    result = entrypoint.handle_stage1_candidate(
+        "robinhood_chain", "0xRealToken2", score_band="A", deployer_tier="elite",
+        convergence_count=3, entry_mcap=50000,
+    )
+    assert result["fired"] is True, f"expected the REAL gate (allow) to win, got: {result}"
+
+    # And the reverse: real gate refuses even though paper would have allowed it.
+    monkeypatch.setattr(paper_ledger, "signal_allowed", lambda signal: (True, "paper says yes"))
+    monkeypatch.setattr(position_state, "real_signal_allowed", lambda signal, **kw: (False, "real says no"))
+    result2 = entrypoint.handle_stage1_candidate(
+        "robinhood_chain", "0xRealToken3", score_band="A", deployer_tier="elite",
+        convergence_count=3, entry_mcap=50000,
+    )
+    assert result2["fired"] is False
+    assert "real-record gate" in result2["reason"]
+
+
+def test_stage2_real_chain_opens_no_paper_position(monkeypatch):
+    """Same guarantee as the stage1 test above, for handle_stage2_candidate."""
+    import executor.paper_ledger as paper_ledger
+
+    result = entrypoint.handle_stage2_candidate(
+        "base", "0xRealToken4", current_mcap_usd=200_000,
+        fomo_convergence_count=3, graduated=True,
+    )
+    assert len(paper_ledger._open()) == 0, (
+        "a paper position was opened for a real-money chain in handle_stage2_candidate"
+    )
+    assert result["fired"] is True, f"stage2 did not fire -- test setup issue, not the fix under test: {result}"
+    pos = position_state.get_position("base", "0xRealToken4")
+    assert pos is not None
+    assert pos["stages"]["stage2"]["signal"] == "fomo_convergence"

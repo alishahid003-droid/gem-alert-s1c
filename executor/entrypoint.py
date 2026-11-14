@@ -144,15 +144,28 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
     ctx.setdefault("liquidity_usd", liquidity_usd)
     ctx.setdefault("signals", 1 + int(deployer_tier in ("elite", "good")) + int(convergence_count >= 2))
     guard_ok, guard_why = entry_guards.check(score_band, triggers.stage1_position_usd_for_band(score_band), ctx)
-    if signal and _paper_eligible(decision):
+    # 15 Nov 2026 (Ali, explicit instruction -- "I do not want paper trades anymore... for
+    # base/robinhood... real balances, real wallet balances, real equity, real trades"): a
+    # real-money chain (not in _LIVE_BLOCKED_CHAINS, i.e. robinhood_chain/base) never opens a
+    # paper position here any more -- solana/bsc (both _LIVE_BLOCKED_CHAINS, paper-only by
+    # design) are completely unaffected and keep opening paper exactly as before. The
+    # signal_allowed() gate below is real-data for a real-money chain (real_signal_allowed(),
+    # built off executor.position_state's own closed positions) rather than paper's.
+    _real_chain = chain not in _LIVE_BLOCKED_CHAINS
+    if signal and _paper_eligible(decision) and not _real_chain:
         paper_ledger.open_paper(chain, token, "stage1", signal,
                                 triggers.stage1_position_usd_for_band(score_band), entry_mcap,
                                 band=score_band, liquidity_usd=liquidity_usd,
                                 guard="pass" if guard_ok else "blocked")
     if decision.should_fire:
-        allowed, why = paper_ledger.signal_allowed(signal)
+        if _real_chain:
+            allowed, why = position_state.real_signal_allowed(signal)
+            gate_label = "real-record gate"
+        else:
+            allowed, why = paper_ledger.signal_allowed(signal)
+            gate_label = "paper-record gate"
         if not allowed:
-            return {"fired": False, "stage": "stage1", "reason": f"paper-record gate: {why}"}
+            return {"fired": False, "stage": "stage1", "reason": f"{gate_label}: {why}"}
         if not guard_ok:
             return {"fired": False, "stage": "stage1", "reason": f"entry guard: {guard_why}"}
     if not decision.should_fire:
@@ -160,7 +173,8 @@ def handle_stage1_candidate(chain: str, token: str, score_band: Optional[str],
     if _sprint_only():
         return {"fired": False, "stage": "stage1", "reason": "sprint mode: wallet reserved for the sprint (paper only)"}
 
-    position_state.record_stage_entry(chain, token, "stage1", decision.position_usd, entry_mcap, decision.reason)
+    position_state.record_stage_entry(chain, token, "stage1", decision.position_usd, entry_mcap,
+                                       decision.reason, signal=signal)
     conviction = moonbag.assess_conviction(
         chain, token, deployer_tier=deployer_tier, convergence_count=convergence_count,
         double_confirmed=False,  # a lone Stage 1 fire can't be double-confirmed yet
@@ -185,21 +199,30 @@ def handle_stage2_candidate(chain: str, token: str, current_mcap_usd: Optional[f
     docstring for why a second scoring call can only upgrade a position's
     ladder, never downgrade one Stage 1 already locked in."""
     decision = triggers.evaluate_stage2(chain, token, current_mcap_usd, fomo_convergence_count, graduated)
-    if _paper_eligible(decision):
+    # 15 Nov 2026 (Ali, explicit instruction): same real-vs-paper split as handle_stage1_candidate
+    # above -- a real-money chain never opens a paper position here; solana/bsc are unaffected.
+    _real_chain = chain not in _LIVE_BLOCKED_CHAINS
+    if _paper_eligible(decision) and not _real_chain:
         from executor.config import EXECUTOR_CONFIG
         paper_ledger.open_paper(chain, token, "stage2", signal_name,
                                 EXECUTOR_CONFIG.stage2_position_usd, current_mcap_usd,
                                 tags={"traders": fomo_convergence_count})
     if decision.should_fire:
-        allowed, why = paper_ledger.signal_allowed(signal_name)
+        if _real_chain:
+            allowed, why = position_state.real_signal_allowed(signal_name)
+            gate_label = "real-record gate"
+        else:
+            allowed, why = paper_ledger.signal_allowed(signal_name)
+            gate_label = "paper-record gate"
         if not allowed:
-            return {"fired": False, "stage": "stage2", "reason": f"paper-record gate: {why}"}
+            return {"fired": False, "stage": "stage2", "reason": f"{gate_label}: {why}"}
     if not decision.should_fire:
         return {"fired": False, "stage": "stage2", "reason": decision.reason}
     if _sprint_only():
         return {"fired": False, "stage": "stage2", "reason": "sprint mode: wallet reserved for the sprint (paper only)"}
 
-    position_state.record_stage_entry(chain, token, "stage2", decision.position_usd, current_mcap_usd, decision.reason)
+    position_state.record_stage_entry(chain, token, "stage2", decision.position_usd, current_mcap_usd,
+                                       decision.reason, signal=signal_name)
     double_confirmed = triggers.is_double_confirmed(chain, token)
     conviction = moonbag.assess_conviction(
         chain, token, deployer_tier=deployer_tier, convergence_count=fomo_convergence_count,

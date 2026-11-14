@@ -27,16 +27,23 @@ def get_position(chain: str, token: str) -> Optional[dict]:
 
 
 def record_stage_entry(chain: str, token: str, stage: str, usd_amount: float,
-                        entry_mcap: Optional[float], reason: str):
+                        entry_mcap: Optional[float], reason: str, signal: Optional[str] = None):
     """stage: 'stage1' or 'stage2'. Adds to the position, doesn't overwrite
-    the other stage's entry if one already exists."""
+    the other stage's entry if one already exists.
+
+    signal (added 15 Nov 2026, Ali, explicit instruction -- real win-rate gate to replace
+    paper_ledger.signal_allowed()): the signal classification this entry fired under (e.g.
+    "deployer_trusted", "score_band_B", "fomo_convergence") -- a distinct, queryable field so
+    real_signal_allowed() below can filter real closed positions by signal type, the same way
+    paper_ledger.signal_allowed() already filters paper rows by r.get("signal"). Optional and
+    defaults to None so every pre-existing caller that doesn't pass it keeps working unchanged."""
     pos = get_position(chain, token)
     if not pos or pos.get("never_bought"):
         pos = {"chain": chain, "token": token, "stages": {}, "total_usd": 0.0,
                "opened_ts": time.time(), "status": "open"}
     pos["stages"][stage] = {
         "usd_amount": usd_amount, "entry_mcap": entry_mcap,
-        "reason": reason, "ts": time.time(),
+        "reason": reason, "ts": time.time(), "signal": signal,
     }
     pos["total_usd"] = sum(s["usd_amount"] for s in pos["stages"].values())
     pos["double_confirmed"] = "stage1" in pos["stages"] and "stage2" in pos["stages"]
@@ -222,6 +229,68 @@ def realized_pnl_summary() -> dict:
     }
 
 
+def _signal_of(pos: dict) -> Optional[str]:
+    """The signal classification a closed position fired under -- looks across every stage
+    this position ever recorded (stage1, stage2, ...) and returns the first one with a
+    signal tag, since a position only ever has one real signal story even if both stages
+    fired. Positions recorded before the `signal` field existed (15 Nov 2026) have none --
+    those are correctly excluded from real_signal_allowed()'s sample, not miscounted as a
+    signal-less entry, since this function is only ever called with a specific signal filter."""
+    for s in (pos.get("stages") or {}).values():
+        if s.get("signal"):
+            return s["signal"]
+    return None
+
+
+def real_signal_allowed(signal: Optional[str], chain: Optional[str] = None,
+                         min_trades: Optional[int] = None, min_win_rate: Optional[float] = None) -> tuple:
+    """15 Nov 2026 (Ali, explicit instruction -- real win-rate gate to replace
+    paper_ledger.signal_allowed()): mirrors that function's exact logic (too little real data ->
+    allowed; enough data with a losing win rate or non-positive expectancy -> refused) but reads
+    REAL, priced, closed positions from this module instead of paper_ledger's simulated rows.
+    This exists because signal_allowed() was a genuine safety gate, not cosmetic bookkeeping --
+    it kept a signal type's real buys paper-only until its OWN track record proved it, and simply
+    deleting it (rather than replacing it with a real-data equivalent) would silently remove that
+    protection the moment paper trading stops for a chain. chain=None checks the signal across
+    every chain combined (matches signal_allowed()'s own chain-blind behavior); pass chain= to
+    scope the verdict to one chain's real track record specifically, which is the more honest
+    read once a signal's real behavior can differ meaningfully by chain.
+
+    Defaults (MIN_TRADES_FOR_VERDICT/MIN_SIGNAL_WIN_RATE) are read fresh from the same env vars
+    paper_ledger.min_trades_for_verdict()/min_signal_win_rate() use, so one knob tunes both the
+    paper and real versions of this gate identically unless a caller overrides it here."""
+    import os
+    if not signal:
+        return True, "no signal"
+    if min_trades is None:
+        try:
+            min_trades = int(os.environ.get("MIN_TRADES_FOR_VERDICT", "20"))
+        except ValueError:
+            min_trades = 20
+    if min_win_rate is None:
+        try:
+            min_win_rate = float(os.environ.get("MIN_SIGNAL_WIN_RATE", "0.5"))
+        except ValueError:
+            min_win_rate = 0.5
+    closed = list_closed_positions(limit=100000)
+    rows = [p for p in closed if p.get("pnl_usd") is not None and _signal_of(p) == signal
+            and (chain is None or p.get("chain") == chain)]
+    n = len(rows)
+    if n < min_trades:
+        return True, f"{signal}: {n} real trades so far (verdict at {min_trades})"
+    wins = sum(1 for p in rows if p["pnl_usd"] > 0)
+    win_rate = wins / n
+    # pnl_pct per row: pnl_usd / the real cost basis (total_usd) -- real records don't store a
+    # pct directly the way paper rows do, so it's derived here the same way exit_rules/moonbag
+    # already express real returns as a fraction of cost.
+    pct_rows = [p["pnl_usd"] / p["total_usd"] * 100 for p in rows if p.get("total_usd")]
+    expectancy_pct = sum(pct_rows) / len(pct_rows) if pct_rows else 0.0
+    if win_rate < min_win_rate or expectancy_pct <= 0:
+        return False, (f"{signal} real record {wins}/{n} wins ({win_rate * 100:.0f}%, "
+                       f"expectancy {expectancy_pct:+.1f}%) below the {min_win_rate * 100:.0f}% bar")
+    return True, f"{signal} real win rate {win_rate * 100:.0f}% over {n}"
+
+
 def _index_add(chain: str, token: str):
     index = state.get_value("exec_position_index") or []
     key = _key(chain, token)
@@ -237,8 +306,8 @@ _record_stage_entry_inner = record_stage_entry
 
 
 def record_stage_entry(chain: str, token: str, stage: str, usd_amount: float,
-                        entry_mcap: Optional[float], reason: str):
-    pos = _record_stage_entry_inner(chain, token, stage, usd_amount, entry_mcap, reason)
+                        entry_mcap: Optional[float], reason: str, signal: Optional[str] = None):
+    pos = _record_stage_entry_inner(chain, token, stage, usd_amount, entry_mcap, reason, signal=signal)
     _index_add(chain, token)
     return pos
 
