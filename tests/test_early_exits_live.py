@@ -278,16 +278,20 @@ def test_sub_2x_rung_does_not_fire_below_1_5x():
     assert p["rungs_fired"] == []
 
 
-def test_compound_sub_2x_rung_uses_its_own_25pct_fraction():
-    """Compound's new 1.3x rung takes 25% (not core2/sprint's 15%) -- matches its existing, more
-    aggressive profit-banking design (its old first rung at 2x already took 60%, far more than
-    sprint/core1/core2's 20%)."""
+def test_compound_sub_2x_rung_uses_its_own_15pct_fraction():
+    """16 Nov 2026 (Claude, Ali's explicit delegation): compound's ladder was rebalanced from
+    {1.3: 0.25, 2: 0.60, 3: 0.40} to {1.3: 0.15, 2: 0.10, 3: 0.10} -- the old ladder fully
+    exhausted the position by exactly 2.0x at the real live EARLY_TRIM_MULT=2.0 (0.25*2 + 0.60*2
+    = 1.0), so the 3x rung could mathematically never fire and zero of a real 5x-10x runner's
+    upside past 2x was ever captured. See tests/test_compound_ladder_rebalance.py for the full
+    real-data verification. This test only exercises the 1.3x rung, so it now expects compound's
+    new (smaller) 15% fraction instead of the old 25%."""
     paper_ledger.open_paper("solana", "CMINT", "early_compound", "early_compound", 100.0, 5000.0,
                             strategy="early", exit_profile="compound", now=1000.0)
     paper_ledger.manage(lambda c, t: {"mcap_usd": 6500, "liquidity_usd": 9999}, now=1010,
                         source_prefix="early_")
     p = paper_ledger._open()["early_compound:solana:CMINT"]
-    assert abs(p["remaining"] - 0.75) < 1e-6
+    assert abs(p["remaining"] - 0.85) < 1e-6
     assert "1.3" in p["rungs_fired"]
 
 

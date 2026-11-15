@@ -452,7 +452,7 @@ EARLY_RUNG_PCT = {
     "sprint": {1.2: 0.20, 1.6: 0.20, 2.5: 0.15, 5: 0.10},
     "core1": {1.3: 0.10, 2: 0.15, 4: 0.15, 10: 0.10},
     "core2": {1.5: 0.05, 3: 0.10, 8: 0.10, 20: 0.10},
-    "compound": {1.3: 0.25, 2: 0.60, 3: 0.40},
+    "compound": {1.3: 0.15, 2: 0.10, 3: 0.10},
 }  # mirrors EARLY_RULES's ladder (fraction of ORIGINAL stake sold at each rung) -- kept as its
    # own lookup since EARLY_RULES bundles in stop/trail too and smart_swap_out() only needs this.
 
@@ -634,7 +634,7 @@ EARLY_RULES = {
     "fast_sprint": ({1.4: 0.30, 2.5: 0.20, 6: 0.15, 15: 0.10}, 0.55, 0.65),
     "fast_core": ({1.5: 0.20, 3: 0.20, 8: 0.10}, 0.45, 0.60),
     "fast_moon": ({5: 0.10, 20: 0.10}, 0.50, 0.50),                 # lottery: 80% rides, trail starts at 3x -- left as-is
-    "compound": ({1.3: 0.25, 2: 0.60, 3: 0.40}, 0.70, 0.78),
+    "compound": ({1.3: 0.15, 2: 0.10, 3: 0.10}, 0.70, 0.78),
     "leaderboard": ({2: 0.50, 3: 0.50}, 0.65, 0.78),
 }
 
