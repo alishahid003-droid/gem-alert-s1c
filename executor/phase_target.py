@@ -1,24 +1,25 @@
 """Combined-equity phase targets across sprint/core1/core2/compound.
 
-STALE/SUPERSEDED (11 Nov 2026, Claude): this module's PHASES dict (A/B/C/D, $10k/$40k/$40k/$40k)
-is an OLDER, separate 4-phase structure from 2 Nov 2026, never armed (phase_target_v1 state has
-never been initialized -- start_phase() is not called anywhere in the live codebase, confirmed by
-grep), so is_paused() always returns False and this module currently affects nothing live. The
-REAL, actually-tracked 5-phase plan (Ali, "Curve C", 7-8 Nov 2026) lives in executor/books.py as
-PHASE_DEFS + the milestone_ladder_v2 state key -- confirmed live and actively tracking real
-progress (Phase 1 past the $1,200 rung as of 11 Nov 2026). This module's structure below has been
-updated to match that real plan for consistency and to remove a stale reference that caused
-confusion earlier today -- if this module is ever armed via start_phase(), it should track the
-SAME real targets PHASE_DEFS already uses live, not the old 4-phase numbers.
+STALE/SUPERSEDED (11 Nov 2026, Claude): this module's PHASES dict is a separate structure,
+never armed (phase_target_v1 state has never been initialized -- start_phase() is not called
+anywhere in the live codebase, confirmed by grep), so is_paused() always returns False and this
+module currently affects nothing live. The REAL, actually-tracked phase plan lives in
+executor/books.py as PHASE_DEFS + the milestone_ladder_v2 state key -- confirmed live and
+actively tracking real progress. This module's structure below has been updated to match that
+real plan for consistency -- if this module is ever armed via start_phase(), it should track the
+SAME real targets PHASE_DEFS already uses live.
 
-Ali's confirmed 5-phase structure (7-8 Nov 2026 "Curve C", reseed/cashout amounts per PHASE_DEFS
-in executor/books.py; Phase 5 split confirmed 11 Nov 2026):
+Ali's confirmed 4-phase structure (16 Nov 2026, supersedes the earlier 5-phase "Curve C" plan
+wholesale; reseed/cashout amounts per PHASE_DEFS in executor/books.py):
 
-  Phase 1: $100     -> $10,000    On hit: withdraw $8,500. Leave $1,500 for Phase 2.
-  Phase 2: $1,500    -> $12,000    On hit: withdraw $10,000. Leave $2,000 for Phase 3.
-  Phase 3: $2,000    -> $12,000    On hit: withdraw $10,000. Leave $2,000 for Phase 4.
-  Phase 4: $2,000    -> $120,000   On hit: withdraw $115,000. Leave $5,000 for Phase 5.
-  Phase 5: $5,000    -> $1,000,000 On hit: withdraw $975,000. Leave $25,000 running.
+  Phase 1: $115   -> $6,000      On hit: withdraw $4,500 (fund S1b, all parts). Leave $1,500 for Phase 2.
+  Phase 2: $1,500 -> $13,000     On hit: withdraw $11,000 (pay Dec liability). Leave $2,000 for Phase 3.
+  Phase 3: $2,000 -> $105,000    On hit: withdraw $100,000 (main debt payment). Leave $5,000 for Phase 4.
+  Phase 4: $5,000 -> $1,000,000  On hit: withdraw $985,000 (financial freedom). Leave $15,000 running.
+
+Each phase's own ladder-rung partial banking is a risk-management side effect of normal trading,
+never counted as a separate "income" toward that phase's trigger -- the trigger is always
+checked against combined equity, which already includes any ladder-banked amount once.
 
 This is a single combined-equity watcher across sprint+core1+core2+compound together, with a
 hard stop (no book takes a new trade once the current phase's target is hit) and an explicit,
@@ -64,29 +65,28 @@ PHASE_KEY = "phase_target_v1"
 # window_group: phases sharing a window_group share one clock -- the window starts when the FIRST
 # phase in the group starts and does not reset when the next phase in the group begins. A phase
 # with no group (or alone in one) gets its own fresh clock starting at its own start_phase() call.
-# 11 Nov 2026 (Claude): rewritten to match the REAL confirmed 5-phase Curve C plan (see
+# 16 Nov 2026 (Claude): rewritten to match the REAL confirmed 4-phase structure (see
 # executor/books.py PHASE_DEFS, which is the live, actually-tracked version of these same
-# targets). hours_allowed/drawdown_pause_pct/window_group kept as placeholders consistent with
-# this module's original design; not yet confirmed against PHASE_DEFS, which has no time-window
+# targets). Each phase here gets its own independent window_group (1/2/3/4 -- no two phases
+# share a clock in the new 4-phase structure, unlike the old 5-phase plan where phases 2+3 once
+# shared one). hours_allowed/drawdown_pause_pct kept as placeholders consistent with this
+# module's original design; not yet confirmed against PHASE_DEFS, which has no time-window
 # concept at all -- if this module is ever armed, those fields should be reviewed against what
 # Ali actually wants for time limits, separately from the target/cashout/reseed amounts below
 # which ARE the confirmed real numbers.
 PHASES = {
-    "1": {"label": "Phase 1: $100 -> $10,000", "target_usd": 10_000.0,
-          "cashout_usd": 8_500.0, "reseed_usd": 1_500.0, "hours_allowed": 96.0,
+    "1": {"label": "Phase 1: $115 -> $6,000", "target_usd": 6_000.0,
+          "cashout_usd": 4_500.0, "reseed_usd": 1_500.0, "hours_allowed": 96.0,
           "drawdown_pause_pct": 0.50, "next": "2", "window_group": "1"},
-    "2": {"label": "Phase 2: $1,500 -> $12,000", "target_usd": 12_000.0,
-          "cashout_usd": 10_000.0, "reseed_usd": 2_000.0, "hours_allowed": 240.0,
+    "2": {"label": "Phase 2: $1,500 -> $13,000", "target_usd": 13_000.0,
+          "cashout_usd": 11_000.0, "reseed_usd": 2_000.0, "hours_allowed": 240.0,
           "drawdown_pause_pct": 0.50, "next": "3", "window_group": "23"},
-    "3": {"label": "Phase 3: $2,000 -> $12,000", "target_usd": 12_000.0,
-          "cashout_usd": 10_000.0, "reseed_usd": 2_000.0, "hours_allowed": 240.0,
-          "drawdown_pause_pct": 0.50, "next": "4", "window_group": "23"},
-    "4": {"label": "Phase 4: $2,000 -> $120,000", "target_usd": 120_000.0,
-          "cashout_usd": 115_000.0, "reseed_usd": 5_000.0, "hours_allowed": 360.0,
-          "drawdown_pause_pct": 0.50, "next": "5", "window_group": "4"},
-    "5": {"label": "Phase 5: $5,000 -> $1,000,000", "target_usd": 1_000_000.0,
-          "cashout_usd": 975_000.0, "reseed_usd": 25_000.0, "hours_allowed": None,
-          "drawdown_pause_pct": 0.50, "next": None, "window_group": "5"},
+    "3": {"label": "Phase 3: $2,000 -> $105,000", "target_usd": 105_000.0,
+          "cashout_usd": 100_000.0, "reseed_usd": 5_000.0, "hours_allowed": 360.0,
+          "drawdown_pause_pct": 0.50, "next": "4", "window_group": "3"},
+    "4": {"label": "Phase 4: $5,000 -> $1,000,000", "target_usd": 1_000_000.0,
+          "cashout_usd": 985_000.0, "reseed_usd": 15_000.0, "hours_allowed": None,
+          "drawdown_pause_pct": 0.50, "next": None, "window_group": "4"},
 }
 
 
@@ -141,10 +141,11 @@ def start_phase(phase: str, now: Optional[float] = None) -> dict:
     once when Ali says to begin tracking toward a phase target (or right after the previous
     phase's cashout/reseed handoff is done on his end).
 
-    Handles the B+C shared window_group: if the new phase shares a window_group with the phase
-    that was just active, the window's start timestamp carries forward unchanged (the clock keeps
-    counting through both phases). Any other case (first start, or a phase in a new group) resets
-    the window start to `now`.
+    Handles a shared window_group generically: if the new phase shares a window_group with the
+    phase that was just active, the window's start timestamp carries forward unchanged (the clock
+    keeps counting through both phases). Any other case (first start, or a phase in a new group)
+    resets the window start to `now`. (None of the current 4 phases share a group with each other,
+    but the mechanism stays generic in case that changes again.)
     """
     now = now if now is not None else time.time()
     if phase not in PHASES:
@@ -182,8 +183,8 @@ def _window_elapsed_hours(d: dict, phase: str, now: float) -> float:
 
 def status(now: Optional[float] = None) -> dict:
     """Read-only snapshot: current phase, combined equity, progress, drawdown state, time left.
-    Hours are measured against the PHASE'S WINDOW GROUP clock (B and C share one; A and D each
-    have their own), not against when that specific phase individually started."""
+    Hours are measured against the PHASE'S WINDOW GROUP clock (each of the 4 phases has its own
+    independent window_group now), not against when that specific phase individually started."""
     now = now if now is not None else time.time()
     d = _state()
     phase = d.get("current")

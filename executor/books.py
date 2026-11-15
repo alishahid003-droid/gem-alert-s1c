@@ -571,72 +571,56 @@ def is_live_armed(book_id: str) -> bool:
 #              sensible checkpoints within the SHORTER climbs Ali specified.
 # }
 PHASE_DEFS: Dict[int, dict] = {
-    # 13 Nov 2026 (Ali, NEW targets -- supersedes the 7 Nov 5-phase structure above wholesale):
-    # "my first target is an immediate $3,000 arrangement... once we achieve that, I'm going to
-    # cash out $2,000, and $1,000 is going to be refeed to phase 2... phase 2 target is going to
-    # be $15,000... the split is going to work the same, 65-35 rule... once $15,000 is achieved,
-    # $14,000 is going to be taken out and $1,000 is going to be reseeded for phase 3 target,
-    # which is going to be $12,000... once phase 3 target is achieved, $10,000 is taken out,
-    # $2,000 feeded for the next target of around $105,000... once that is achieved, $100,000
-    # taken out, remaining reseeded to phase 5 target, $1 million." Phase 4 trigger confirmed
-    # as exactly $105,000 (Ali chose this over $110,000 when asked to pin down "around 105 to
-    # 110"), cashout $100,000, reseed $5,000.
+    # 16 Nov 2026 (Ali, NEW targets -- supersedes the 13 Nov 5-phase structure above wholesale,
+    # old PHASE_DEFS[1..5] deleted entirely per Ali's explicit instruction "remove the old stale
+    # phase targets"): a new 4-phase structure, given as a handwritten plan:
+    #   Phase 1: $115 -> $6,000.   Cash out $4,500 (fund S1b, all parts). Reseed $1,500.
+    #   Phase 2: $1,500 -> $13,000. Cash out $11,000 (pay Dec liability).  Reseed $2,000.
+    #   Phase 3: $2,000 -> $105,000. Cash out $100,000 (main debt payment). Reseed $5,000.
+    #   Phase 4: $5,000 -> $1,000,000. Cash out $985,000 (financial freedom). Reseed $15,000,
+    #            left running -- same "no automatic cash-out past the final target, ask Ali"
+    #            convention the old phase 5 used.
+    # Note (Ali, explicit): each phase's own ladder-rung partial banking (the protective
+    # percentage banks below, same mechanism as before) is NOT counted toward reaching that
+    # phase's trigger -- the trigger is checked against combined EQUITY (open positions' value
+    # + free cash), which already includes any ladder-banked amount once; ladder banking is a
+    # risk-management side effect of normal trading, never a separate "income" tallied again
+    # on top of equity.
     #
-    # STRUCTURAL CHANGE from the 7 Nov version, also explicit (Ali, 13 Nov 2026): "to reach
-    # these targets for phase one, only compound will [run]... After phase one is reached and
-    # the reseeding happens of $1,000 to phase two target, that has to be split 65-35 to
-    # compound and sprint. From phase two to phase five, compound and sprint both will
-    # collectively work... core1/core2 work separately on their seeded capital [from the
-    # cascade] and will not be included in the win percentage." So PHASE_ENGINE_BOOKS-style
-    # combined-equity/65-35-split logic applies ONLY from phase 2 onward -- phase 1 is
-    # compound-ALONE (see PHASE1_SOLO_BOOK below and its use in check_milestone_ladder()).
-    # Ali also confirmed (explicit clarifying question, 13 Nov 2026): the cascade ($300 pulled
-    # from compound's own banked() once it crosses $500-600, split $100 each to sprint/core1/
-    # core2) MUST fire before phase 1's $3,000 cashout is allowed to complete -- phase 1 is not
-    # "done" until sprint/core1/core2 have already been seeded by that cascade. See
-    # _phase1_gate_cleared() and its use in check_milestone_ladder() below.
+    # Phase-1-solo-book / cascade-gate structure UNCHANGED from the 13 Nov version: phase 1
+    # still runs on compound ALONE (PHASE1_SOLO_BOOK below), and phases 2-4 still use the
+    # 65/35 compound/sprint split (PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT) -- only the dollar
+    # targets/cashouts/reseeds and the phase count (5 -> 4) changed; the structural rules
+    # Ali confirmed 13 Nov 2026 were not touched.
     #
     # Ladder rungs for every phase rescaled proportionally to each phase's NEW start->trigger
-    # span (same method used when the 5-phase ladder structure was first built 7 Nov 2026,
-    # confirmed with Ali as the right approach for this revision too, 13 Nov 2026) -- phase 5's
-    # rungs are left effectively unchanged in absolute terms (old span $25k->$1M vs new $5k->
-    # $1M converge to nearly the same checkpoints; recomputed directly off the new span rather
-    # than inherited as a fraction, since the old scheme's first rung ($20k) actually sat BELOW
-    # its own old start ($25k) -- a relationship that doesn't carry over as a fraction).
+    # span, same method used for the 13 Nov revision (template: phase 1 keeps its own old
+    # phase-1 rung shape; phase 2 borrows the old phase-3 rung shape, the closest matching
+    # span; phase 3 and phase 4 reuse the old phase-4/phase-5 rungs unchanged, since their
+    # start/trigger pairs are numerically identical to before).
     1: dict(
-        trigger=3_000.0, cashout=2_000.0, reseed=1_000.0,
+        trigger=6_000.0, cashout=4_500.0, reseed=1_500.0,
         ladder=(
-            (144.0,   0.10),
-            (246.0,   0.12),
-            (422.0,   0.15),
-            (803.0,   0.18),
-            (1_535.0, 0.20),
-            (2_414.0, 0.22),
+            (397.48,  0.10),
+            (597.57,  0.12),
+            (942.82,  0.15),
+            (1_690.22, 0.18),
+            (3_126.16, 0.20),
+            (4_850.46, 0.22),
         ),
     ),
     2: dict(
-        trigger=15_000.0, cashout=14_000.0, reseed=1_000.0,
+        trigger=13_000.0, cashout=11_000.0, reseed=2_000.0,
         ladder=(
-            (2_000.0,  0.10),
-            (4_000.0,  0.12),
-            (6_000.0,  0.15),
-            (8_333.0,  0.18),
-            (11_000.0, 0.20),
-            (13_400.0, 0.22),
+            (3_329.55,  0.10),
+            (4_897.73,  0.12),
+            (6_465.91,  0.15),
+            (8_295.45,  0.18),
+            (10_386.36, 0.20),
+            (11_954.55, 0.22),
         ),
     ),
     3: dict(
-        trigger=12_000.0, cashout=10_000.0, reseed=2_000.0,
-        ladder=(
-            (2_750.0,  0.10),
-            (4_250.0,  0.12),
-            (5_750.0,  0.15),
-            (7_500.0,  0.18),
-            (9_500.0,  0.20),
-            (11_000.0, 0.22),
-        ),
-    ),
-    4: dict(
         trigger=105_000.0, cashout=100_000.0, reseed=5_000.0,
         ladder=(
             (4_687.0,  0.10),
@@ -647,9 +631,9 @@ PHASE_DEFS: Dict[int, dict] = {
             (94_252.0, 0.22),
         ),
     ),
-    5: dict(
-        # Final target. No automatic cash-out wired yet -- same as the prior version, ask Ali
-        # what to do once $1,000,000 is actually close.
+    4: dict(
+        # Final target. No automatic cash-out wired yet -- same convention the old final phase
+        # used, ask Ali what to do once $1,000,000 is actually close.
         trigger=1_000_000.0, cashout=None, reseed=None,
         ladder=(
             (24_900.0,  0.10),
@@ -940,7 +924,7 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
         phase_split = PHASE_ENGINE_SPLIT
     combined = _combined_equity_for_milestones(phase_books)
 
-    if phase in (1, 2, 3, 4):
+    if phase in (1, 2, 3):
         # The hard cash-out trigger is checked FIRST, ahead of the lighter ladder legs below.
         # This matters: if the smaller percentage-banks fired first every call, repeatedly
         # bleeding equity off the top before the cashout check ever ran, a big jump that
@@ -999,7 +983,7 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
 
         return None
 
-    # phase == 5 (final target): ladder banking only, no automatic cash-out coded yet.
+    # final phase (no automatic cash-out coded yet): ladder banking only.
     for level, pct in pdef["ladder"]:
         key = f"{pkey}_{int(level)}"
         if key in fired_levels:
@@ -1009,7 +993,7 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
         bank = _bank_combined_pct(pct, f"milestone_{pkey}_{int(level)}_7nov2026", now)
         fired_levels.append(key)
         done["fired_levels"] = fired_levels
-        result = {"ts": now, "phase": 5, "level": level, "pct": pct, **bank}
+        result = {"ts": now, "phase": phase, "level": level, "pct": pct, **bank}
         done[key] = result
         state.set_value(MILESTONE_LADDER_KEY, done)
         return result
