@@ -662,15 +662,40 @@ def act(d: dict, now: Optional[float] = None) -> dict:
                             f"for a real buy amount"
                         )
                     else:
-                        _real_tier = _execcfg.bankroll_tier(_real_wallet_usd)
-                        _real_stake = round(_real_wallet_usd * _real_tier["position_pct"], 2)
-                        if _real_stake < 5.0:
+                        # 15 Nov 2026 (Claude, real incident): size the stake off wallet balance
+                        # MINUS the real gas this buy will actually be charged -- not the full
+                        # wallet balance. Before this fix, 3 real Base buys today passed this
+                        # pre-flight check (stake looked >= $5, wallet looked sufficient) but
+                        # still failed on-chain with "insufficient funds for gas * price + value",
+                        # because gas is drawn from the same native balance as the swap value and
+                        # this check never held any of it back. A failed gas-reserve read is
+                        # treated exactly like a failed wallet-balance read -- refuse the buy,
+                        # never guess a gas cost of $0.
+                        _gas_reserve_usd = _swap.estimate_real_gas_reserve_usd(d["chain"])
+                        if _gas_reserve_usd is None:
                             _real_reason = (
-                                f"refusing real buy: real {d['chain']} wallet is ${_real_wallet_usd:.2f}, "
-                                f"sized real stake of ${_real_stake:.2f} is below the $5 floor"
+                                f"refusing real buy: could not read a live gas price on "
+                                f"{d['chain']} to reserve real gas cost -- never guessing gas is free"
                             )
-                            _real_stake = 0.0
                         else:
+                            _real_spendable_usd = _real_wallet_usd - _gas_reserve_usd
+                            if _real_spendable_usd < 5.0:
+                                _real_reason = (
+                                    f"refusing real buy: real {d['chain']} wallet is ${_real_wallet_usd:.2f}, "
+                                    f"but ${_gas_reserve_usd:.2f} is reserved for real gas, leaving only "
+                                    f"${_real_spendable_usd:.2f} spendable -- below the $5 floor"
+                                )
+                            else:
+                                _real_tier = _execcfg.bankroll_tier(_real_spendable_usd)
+                                _real_stake = round(_real_spendable_usd * _real_tier["position_pct"], 2)
+                                if _real_stake < 5.0:
+                                    _real_reason = (
+                                        f"refusing real buy: real {d['chain']} wallet is ${_real_wallet_usd:.2f} "
+                                        f"(${_real_spendable_usd:.2f} after reserving ${_gas_reserve_usd:.2f} gas), "
+                                        f"sized real stake of ${_real_stake:.2f} is below the $5 floor"
+                                    )
+                                    _real_stake = 0.0
+                        if _real_stake >= 5.0:
                             _result = _buy_fn(d["addr"], _real_stake)
                             _real_ok = bool(_result.ok)
                             _real_reason = _result.reason

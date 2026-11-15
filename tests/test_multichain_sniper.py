@@ -436,6 +436,11 @@ def test_real_compound_buy_mirrors_into_position_state_for_autosell(monkeypatch,
     monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "execution_enabled", True)
     monkeypatch.setattr(execcfg.EXECUTOR_CONFIG, "ready_for_chain", lambda chain: True)
     monkeypatch.setattr(swap, "get_real_wallet_usd", lambda chain: 100.0)
+    # 15 Nov 2026 (Claude, real gas-reserve fix): the real-buy pre-flight check now also
+    # reserves real gas cost before sizing a stake (see estimate_real_gas_reserve_usd) -- a
+    # small, realistic reserve here so this test's $100 wallet still has plenty left to size
+    # a real stake from, same as before that fix existed.
+    monkeypatch.setattr(swap, "estimate_real_gas_reserve_usd", lambda chain: 0.50)
 
     class _FakeResult:
         ok = True

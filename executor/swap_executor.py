@@ -1681,6 +1681,54 @@ def get_real_wallet_usd(chain: str) -> Optional[float]:
     return (balance_wei / 10 ** 18) * native_price
 
 
+# 15 Nov 2026 (Claude, real incident -- 3 real Base buys today failed on-chain with
+# "insufficient funds for gas * price + value" even though get_real_wallet_usd() and the
+# $5-floor pre-flight sizing check in multichain_sniper.py both said the wallet had enough):
+# get_real_wallet_usd() returns the FULL native balance with zero gas held back, and the
+# pre-flight stake-sizing check (multichain_sniper.py's `_real_stake = wallet_usd * position_pct`)
+# only ever compares that against the swap's own dollar value -- it has no concept that gas is a
+# SEPARATE cost drawn from the same native balance. The real buy call (execute_buy_base /
+# execute_buy_robinhood_chain, below) spends `swap_value_wei + gas_limit * buffered_gas_price`
+# from the wallet, not just `swap_value_wei` -- so a stake that looks fully affordable pre-flight
+# can still be rejected on-chain once gas is added on top. This reproduces the real gas budget
+# each buy call actually reserves (same fixed gas limits -- 500_000 RHC / 400_000 Base -- and the
+# same _EVM_GAS_PRICE_BUFFER -- so this estimate and the real send-time cost can never drift
+# apart), so callers can subtract it from the wallet balance BEFORE sizing a stake, the same way
+# the real on-chain call will actually be charged. Returns None (never guesses a gas cost of $0)
+# if the gas price or native price can't be read live -- callers must treat None the same as a
+# failed get_real_wallet_usd() read and refuse the buy rather than assume gas is free.
+_REAL_BUY_GAS_LIMIT = {"robinhood_chain": 500_000, "base": 400_000}
+
+
+def estimate_real_gas_reserve_usd(chain: str):
+    """Real, live estimate (never a guess) of the native-currency gas cost a real buy on this
+    chain will actually be charged, converted to USD -- same fixed gas limit and the same 15%
+    buffer the real buy call itself uses, read fresh every call. Returns None if the live gas
+    price or native price can't be read -- callers must treat None the same as a failed
+    get_real_wallet_usd() read (refuse the buy, never fall back to zero reserve)."""
+    gas_limit = _REAL_BUY_GAS_LIMIT.get(chain)
+    if gas_limit is None:
+        return None
+
+    gas_price_result = rpc_call(chain, "eth_gasPrice", [])
+    if not gas_price_result.get("ok"):
+        return None
+    try:
+        buffered_gas_price_wei = int(int(gas_price_result["result"], 16) * _EVM_GAS_PRICE_BUFFER)
+    except (TypeError, ValueError):
+        return None
+
+    if chain == "base":
+        native_price = _eth_price_usd()
+    else:  # robinhood_chain
+        native_price = _rhc_native_price_usd(_RHC_NATIVE_PRICE_REFERENCE_TOKEN)
+    if native_price is None or native_price <= 0:
+        return None
+
+    gas_cost_native = (gas_limit * buffered_gas_price_wei) / 10 ** 18
+    return gas_cost_native * native_price
+
+
 def get_total_real_wallet_usd() -> float:
     """Sum of the real, live wallet balance across every chain with real
     execution wired up (robinhood_chain + base), in USD. A chain whose
