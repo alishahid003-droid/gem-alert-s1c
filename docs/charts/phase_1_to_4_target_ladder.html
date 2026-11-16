@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Phase 1-4 Target Ladder - Final Chart</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2933; --muted: #6b7280; --border: #d1d5db;
+    --accent: #2563eb; --good: #d1fae5; --good-fg: #065f46;
+    --warn: #fef3c7; --warn-fg: #92400e; --bad: #fee2e2; --bad-fg: #991b1b;
+    --header-bg: #1f2933; --header-fg: #ffffff; --section-bg: #e5e7eb;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111827; --fg: #e5e7eb; --muted: #9ca3af; --border: #374151;
+      --accent: #60a5fa; --good: #064e3b; --good-fg: #a7f3d0;
+      --warn: #78350f; --warn-fg: #fde68a; --bad: #7f1d1d; --bad-fg: #fecaca;
+      --header-bg: #0b1220; --header-fg: #e5e7eb; --section-bg: #1f2937;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111827; --fg: #e5e7eb; --muted: #9ca3af; --border: #374151;
+    --accent: #60a5fa; --good: #064e3b; --good-fg: #a7f3d0;
+    --warn: #78350f; --warn-fg: #fde68a; --bad: #7f1d1d; --bad-fg: #fecaca;
+    --header-bg: #0b1220; --header-fg: #e5e7eb; --section-bg: #1f2937;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: Arial, Helvetica, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-top: 24px; padding-bottom: 40px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; max-width: 70ch; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-size: 0.92rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+  th { background: var(--header-bg); color: var(--header-fg); }
+  .good { background: var(--good); color: var(--good-fg); }
+  .warn { background: var(--warn); color: var(--warn-fg); }
+  .bad { background: var(--bad); color: var(--bad-fg); }
+  .note { background: var(--section-bg); border-radius: 8px; padding: 14px 16px; font-size: 0.88rem; color: var(--muted); margin-bottom: 20px; }
+  .note b { color: var(--fg); }
+  h2 { font-size: 1.1rem; margin-top: 32px; }
+  @media (max-width: 480px) {
+    table, thead, tbody, th, td, tr { display: block; }
+    thead { display: none; }
+    tr { border: 1px solid var(--border); margin-bottom: 10px; border-radius: 6px; overflow: hidden; }
+    td { border: none; border-bottom: 1px solid var(--border); position: relative; padding-left: 46%; }
+    td:before { content: attr(data-label); position: absolute; left: 10px; width: 40%; font-weight: bold; color: var(--muted); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Phase 1-4 Target Ladder - Final Chart</h1>
+  <p class="subtitle">17 Nov 2026. Built from real trade variance (39 real compound trades), real pool liquidity data (38 priced trades), the live drawdown breaker, and the 5% liquidity stake cap fix (raised from a never-approved 2% default).</p>
+
+  <table>
+    <thead>
+      <tr><th>Phase</th><th>Start</th><th>Target</th><th>Window</th><th>Win Rate</th><th>Chance in Window</th><th>Median Time to Hit</th></tr>
+    </thead>
+    <tbody>
+      <tr><td data-label="Phase">Phase 1</td><td data-label="Start">$115</td><td data-label="Target">$6,000</td><td data-label="Window">96h</td><td data-label="WR">55%</td><td data-label="Chance" class="warn">83.7%</td><td data-label="Time">~2.0 days</td></tr>
+      <tr><td data-label="Phase">Phase 1</td><td data-label="Start">$115</td><td data-label="Target">$6,000</td><td data-label="Window">96h</td><td data-label="WR">60%</td><td data-label="Chance" class="good">96.6%</td><td data-label="Time">~1.6 days</td></tr>
+      <tr><td data-label="Phase">Phase 1</td><td data-label="Start">$115</td><td data-label="Target">$6,000</td><td data-label="Window">96h</td><td data-label="WR">65%</td><td data-label="Chance" class="good">99.5%</td><td data-label="Time">~1.3 days</td></tr>
+      <tr><td data-label="Phase">Phase 2</td><td data-label="Start">$1,500</td><td data-label="Target">$13,000</td><td data-label="Window">240h</td><td data-label="WR">55%</td><td data-label="Chance" class="good">100%</td><td data-label="Time">~1.5 days</td></tr>
+      <tr><td data-label="Phase">Phase 2</td><td data-label="Start">$1,500</td><td data-label="Target">$13,000</td><td data-label="Window">240h</td><td data-label="WR">60%</td><td data-label="Chance" class="good">100%</td><td data-label="Time">~1.2 days</td></tr>
+      <tr><td data-label="Phase">Phase 2</td><td data-label="Start">$1,500</td><td data-label="Target">$13,000</td><td data-label="Window">240h</td><td data-label="WR">65%</td><td data-label="Chance" class="good">100%</td><td data-label="Time">~1.0 days</td></tr>
+      <tr><td data-label="Phase">Phase 3</td><td data-label="Start">$2,000</td><td data-label="Target">$105,000</td><td data-label="Window">360h</td><td data-label="WR">55%</td><td data-label="Chance" class="warn">82.5%</td><td data-label="Time">~12.1 days</td></tr>
+      <tr><td data-label="Phase">Phase 3</td><td data-label="Start">$2,000</td><td data-label="Target">$105,000</td><td data-label="Window">360h</td><td data-label="WR">60%</td><td data-label="Chance" class="good">99.8%</td><td data-label="Time">~9.9 days</td></tr>
+      <tr><td data-label="Phase">Phase 3</td><td data-label="Start">$2,000</td><td data-label="Target">$105,000</td><td data-label="Window">360h</td><td data-label="WR">65%</td><td data-label="Chance" class="good">100%</td><td data-label="Time">~8.1 days</td></tr>
+      <tr><td data-label="Phase">Phase 4</td><td data-label="Start">$5,000</td><td data-label="Target">$1,000,000</td><td data-label="Window">No limit</td><td data-label="WR">55%</td><td data-label="Chance">n/a</td><td data-label="Time">~122.5 days</td></tr>
+      <tr><td data-label="Phase">Phase 4</td><td data-label="Start">$5,000</td><td data-label="Target">$1,000,000</td><td data-label="Window">No limit</td><td data-label="WR">60%</td><td data-label="Chance">n/a</td><td data-label="Time">~95.8 days</td></tr>
+      <tr><td data-label="Phase">Phase 4</td><td data-label="Start">$5,000</td><td data-label="Target">$1,000,000</td><td data-label="Window">No limit</td><td data-label="WR">65%</td><td data-label="Chance">n/a</td><td data-label="Time">~78.5 days</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>Supersedes</b> the earlier 5-phase, 0%-bust-rate chart (docs/charts/phase_1_to_5_target_ladder.html, committed under commit c3a243c) - that model applied a single average multiple-per-trade with zero variance, which cannot mathematically produce a loss, let alone a bust. This chart uses real per-trade win/loss outcomes from Ali's own 39 closed compound trades, real pool-liquidity data from 38 priced trades, the live drawdown breaker (50% of peak), and the corrected liquidity stake cap (5%, commit 1f9e895).
+  </div>
+
+  <h2>What changed to get here</h2>
+  <p>Three revisions in one night, each closing a real gap: (1) added real trade variance instead of an average multiple; (2) added realistic reseed-after-breaker-trip behavior instead of treating one trip as the end; (3) added the real liquidity stake cap (raised from a never-approved 2% default to 5%), which fixed the contradiction where Phase 4 (200x) looked faster than Phase 3 (52.5x) - bigger targets now correctly take longer, bound by how much any single memecoin pool can actually absorb per trade.</p>
+</div>
+</body>
+</html>
