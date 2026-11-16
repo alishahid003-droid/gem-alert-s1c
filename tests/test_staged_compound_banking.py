@@ -181,6 +181,18 @@ def _record_real_close(chain, token, module_id, usd_amount, pnl_usd):
     position_state.close_position(chain, token, "test_exit", exit_usd=usd_amount + pnl_usd)
 
 
+def _mock_live_wallet_usd(monkeypatch, total_usd):
+    """16 Nov 2026 (Ali, real incident -- total_value_real()/_compound_total_value_raw_real()
+    rewritten to use the LIVE wallet balance + committed_usd_real() instead of a fake seed
+    constant + realized_pnl_real(), see those functions' own docstrings): every test below that
+    exercises the real ladder must now mock the live chain read rather than rely on
+    realized_pnl_real() alone driving the total. Patches the swap_executor functions books.py
+    imports locally (from executor import swap_executor as _se) inside those two functions."""
+    from executor import swap_executor
+    monkeypatch.setattr(swap_executor, "get_total_real_wallet_usd", lambda: total_usd)
+    monkeypatch.setattr(swap_executor, "get_real_wallet_usd", lambda chain: total_usd)
+
+
 def test_compound_banked_uses_paper_ladder_when_not_live(monkeypatch):
     """compound not listed in LIVE_BOOKS -- banked() must stay on the paper ladder, completely
     unaffected by any real position_state records, exactly as before this fix."""
@@ -192,11 +204,20 @@ def test_compound_banked_uses_paper_ladder_when_not_live(monkeypatch):
 
 def test_compound_banked_uses_real_ladder_when_live(monkeypatch):
     """compound listed in LIVE_BOOKS -- banked() must switch to the REAL ladder
-    (compound_banked_real()), ignoring paper's realized_pnl() entirely."""
+    (compound_banked_real()), ignoring paper's realized_pnl() entirely.
+
+    16 Nov 2026: total_value_real() no longer derives from seed + realized_pnl_real() (that was
+    the real bug -- see that function's docstring) -- it is now the LIVE wallet balance +
+    committed_usd_real(). This test mocks the live wallet balance directly at $1030 (standing
+    in for "the real wallet, after a $930 real win, now holds $1030") rather than relying on
+    realized_pnl_real() to drive the total; realized_pnl_real() itself is still exercised and
+    asserted separately below, since position_state's real-close bookkeeping is unchanged."""
     monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
     _set_realized_pnl(monkeypatch, "compound", 99_999.0)  # huge paper total_value, must be ignored
-    # One real closed trade: $20 in, +$930 real pnl -> real total_value = 100 (seed) + 930 = 1030,
-    # clears the $1,000 real stage -> banks 1000 * 0.325 = 325.00.
+    _mock_live_wallet_usd(monkeypatch, 1030.0)  # live wallet balance after the real win below
+    # One real closed trade: $20 in, +$930 real pnl (position closed -> committed_usd_real = 0,
+    # so total_value_real = 1030 live wallet + 0 committed = 1030) -> clears the $1,000 real
+    # stage -> banks 1000 * 0.325 = 325.00.
     _record_real_close("robinhood_chain", "R1", "compound", 20.0, 930.0)
     assert books.realized_pnl_real("compound") == 930.0
     assert books.total_value_real("compound") == 1030.0
@@ -206,7 +227,7 @@ def test_compound_banked_uses_real_ladder_when_live(monkeypatch):
 
 def test_compound_real_ladder_stacks_stages_same_as_paper(monkeypatch):
     monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
-    # seed 100 + 4950 real pnl = total_value_real 5050, clears both $1k and $5k real stages.
+    _mock_live_wallet_usd(monkeypatch, 5050.0)  # live wallet balance clears both $1k and $5k real stages
     _record_real_close("robinhood_chain", "R1", "compound", 20.0, 4950.0)
     expected = round(1000 * 0.325 + 5000 * 0.375, 2)  # 2200.0 -- same math as the paper ladder
     assert books.compound_banked_real("compound") == expected
@@ -215,8 +236,11 @@ def test_compound_real_ladder_stacks_stages_same_as_paper(monkeypatch):
 
 def test_compound_real_ladder_excludes_failed_real_buys(monkeypatch):
     """A real buy attempt that failed outright (mark_stage_buy_failed) spent no real money and
-    has no priced close -- it must not contribute to realized_pnl_real() at all."""
+    has no priced close -- it must not contribute to realized_pnl_real() at all. Also confirms
+    a failed buy attempt contributes nothing to committed_usd_real() either, since it never
+    actually spent real money -- total_value_real() stays exactly at the mocked live balance."""
     monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
+    _mock_live_wallet_usd(monkeypatch, 1030.0)
     _record_real_close("robinhood_chain", "R1", "compound", 20.0, 930.0)  # real winner, as above
     position_state.record_stage_entry("robinhood_chain", "Rfail",
                                        "compound_real", 20.0, 50_000, "real compound buy attempt: refused")
@@ -224,6 +248,8 @@ def test_compound_real_ladder_excludes_failed_real_buys(monkeypatch):
     # Rfail was never filled/closed, so it has no pnl_usd and list_closed_positions() won't even
     # include it (status stays "open") -- but this test documents that explicitly either way.
     assert books.realized_pnl_real("compound") == 930.0
+    assert books.committed_usd_real("compound") == 0.0  # failed buy never actually committed real $
+    assert books.total_value_real("compound") == 1030.0
     assert books.compound_banked_real("compound") == 325.0
 
 
@@ -231,25 +257,32 @@ def test_sprint_compound_cascade_fires_off_real_banked_not_paper(monkeypatch, tm
     """The actual real-money consequence this fix protects: check_sprint_compound_cascade()'s
     $500 trigger must fire off compound's REAL banked vault, not a paper number -- it must NOT
     fire just because paper trading crossed $500 while compound sits well under that in real
-    dollars, and it MUST fire once the real vault genuinely crosses it."""
+    dollars, and it MUST fire once the real vault genuinely crosses it.
+
+    16 Nov 2026: the live wallet balance is mocked directly at each step (standing in for the
+    real wallet's balance after each real win), since total_value_real() no longer derives from
+    seed + realized_pnl_real() -- see that function's docstring."""
     monkeypatch.setattr(state, "LOCAL_STATE_FILE", str(tmp_path / "cascade.json"), raising=False)
     monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
 
     # Huge PAPER profit (would easily cross $500 banked on the old paper-based ladder) but a
-    # small REAL profit that has NOT crossed the $1,000 real stage yet -> real banked = $0.
+    # small REAL wallet balance that has NOT crossed the $1,000 real stage yet -> real banked = $0.
     _set_realized_pnl(monkeypatch, "compound", 99_999.0)
+    _mock_live_wallet_usd(monkeypatch, 220.0)
     _record_real_close("robinhood_chain", "R1", "compound", 20.0, 100.0)  # real total_value 220, no stage crossed
     assert books.banked("compound") == 0.0
     assert books.check_sprint_compound_cascade() is None  # must NOT fire on the paper number
 
     # Now give compound a real win that clears $1,000 real stage -> real banked = $325, still
     # under the $500 trigger -- cascade must still not fire.
+    _mock_live_wallet_usd(monkeypatch, 1030.0)
     _record_real_close("robinhood_chain", "R2", "compound", 20.0, 830.0)  # cumulative real pnl 930 -> total_value_real 1030
     assert books.banked("compound") == 325.0
     assert books.check_sprint_compound_cascade() is None  # 325 < 500, not yet
 
     # One more real win pushes real banked past $500 -> cascade must fire now, pulling $300 out
     # of compound and crediting sprint/core1/core2 $100 each as real deposited seed money.
+    _mock_live_wallet_usd(monkeypatch, 6030.0)
     _record_real_close("robinhood_chain", "R3", "compound", 20.0, 5000.0)  # total_value_real now way past $5k
     assert books.banked("compound") >= 500.0
     result = books.check_sprint_compound_cascade()

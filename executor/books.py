@@ -1019,11 +1019,47 @@ def total_value(book_id: str) -> float:
 
 
 def total_value_real(book_id: str, chain: str = None) -> float:
-    """15 Nov 2026: REAL counterpart to total_value() -- seed + realized_pnl_real() instead of
-    paper's realized_pnl(). Used by compound_banked_real() to walk COMPOUND_STAGES against the
-    book's REAL total value, so the real banking ladder and the real cascade trigger move off
-    real trading outcomes, not paper ones."""
-    return max(0.0, round(cfg(book_id)["seed"] + realized_pnl_real(book_id, chain=chain), 2))
+    """16 Nov 2026 (Ali, real incident -- reported figures of $337.30 then $32.89, both wrong
+    against a real wallet balance of $10.12, "the system should be actively detecting this...
+    only if it's going to be there, it's going to be able to trace trades and effectively show
+    the real status of the system"): REWRITTEN. The original 15 Nov version computed
+    cfg(book_id)["seed"] + realized_pnl_real(book_id, chain=chain) -- "seed" there reads
+    {BOOK}_SEED_USD from .env, a static $100 PAPER placeholder (the exact same constant paper
+    mode uses), with zero connection to what is actually in the live wallet. A fake $100 base
+    plus real realized P&L can never equal the real wallet's real total value.
+
+    Ali's explicit correction (asked whether to auto-detect-and-lock a baseline the first time a
+    real balance is read, vs. recompute live every call with no fixed baseline at all; he chose
+    the latter): real total value is now LIVE idle wallet balance (swap_executor.
+    get_real_wallet_usd(chain) for one chain, or get_total_real_wallet_usd() summed across
+    every real-execution chain when chain=None) PLUS committed_usd_real(book_id) (real dollars
+    currently locked in this book's open real positions, already correctly tracked -- see that
+    function's own 15 Nov docstring). This mirrors the real net worth of the book at this
+    instant: idle cash + capital tied up in flight, with no separate baseline to drift stale and
+    no realized_pnl_real() term (that P&L is already reflected IN the live wallet balance itself
+    -- a closed win leaves more cash sitting there, a closed loss leaves less; adding
+    realized_pnl_real() on top would double-count it). This also means total_value_real() no
+    longer takes the same "seed + realized P&L" shape total_value() (paper) does -- intentional:
+    paper has no live balance to read and must use a fixed seed constant instead, but real money
+    has an actual chain to check, so it checks it, every call, never cached.
+
+    Returns the un-degraded real figure whenever the live chain read succeeds. If it fails (RPC
+    down, key unreadable -- get_real_wallet_usd()/get_total_real_wallet_usd() return None for a
+    chain that couldn't be read), that chain contributes $0 to the wallet-balance side rather
+    than crash or silently substitute a paper number -- consistent with get_total_real_wallet_usd()'s
+    own "a chain whose balance can't be read right now contributes 0" stance. Logged so a run of
+    failed live reads is visible rather than passing as a real, trustworthy $0."""
+    from executor import swap_executor as _se
+    real_wallet_usd = (_se.get_real_wallet_usd(chain) if chain
+                        else _se.get_total_real_wallet_usd())
+    if real_wallet_usd is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "books.total_value_real(%s, chain=%s): live wallet read failed -- this chain's "
+            "balance is being counted as $0 for this call, NOT a real reading of $0",
+            book_id, chain)
+        real_wallet_usd = 0.0
+    return max(0.0, round(real_wallet_usd + committed_usd_real(book_id), 2))
 
 
 # 31 Oct 2026 (Ali): staged profit-banking for the $50->$20,000 attempt. Ali's own structure,
@@ -1056,12 +1092,36 @@ def _compound_total_value_raw(book_id: str) -> float:
 
 
 def _compound_total_value_raw_real(book_id: str, chain: str = None) -> float:
-    """15 Nov 2026: REAL counterpart to _compound_total_value_raw() -- the undiscounted REAL
-    total compound has ever made (seed + realized_pnl_real()), used only by
-    compound_banked_real() to figure out which COMPOUND_STAGES line has been crossed in real
-    dollars."""
-    c = cfg(book_id)
-    return max(0.0, round(c["seed"] + realized_pnl_real(book_id, chain=chain), 2))
+    """16 Nov 2026 (Ali, real incident -- same root bug as total_value_real()'s 16 Nov fix, see
+    that function's docstring for the full incident writeup): REWRITTEN. The original 15 Nov
+    version computed cfg(book_id)["seed"] (a static $100 PAPER placeholder) + realized_pnl_real()
+    -- a fake base with zero connection to the real wallet, exactly like total_value_real()'s
+    bug, just in a second, separate function feeding compound_banked_real() (the $500 real
+    cascade trigger that funds sprint/core1/core2, plus the $1k/$5k/$10k real banking stages).
+
+    Now the SAME formula total_value_real() uses: live idle wallet balance
+    (swap_executor.get_real_wallet_usd(chain) / get_total_real_wallet_usd()) + committed_usd_real
+    (book_id) (real dollars locked in this book's open real positions). No realized_pnl_real()
+    term -- already reflected in the live wallet balance itself (see total_value_real()'s
+    docstring for why adding it again would double-count).
+
+    This does NOT break COMPOUND_STAGES' "retraced below a threshold it once crossed keeps the
+    bank" property (see compound_banked()'s own docstring) -- that property only requires `raw`
+    to correctly reflect real total value at each check, and tolerates it moving down later for
+    ANY reason (capital temporarily tied up in open positions, a losing trade, whatever) exactly
+    the same way. The bug being fixed here was `raw` being wrong at every check, not the
+    threshold-crossing mechanism itself, which is unchanged and still correct."""
+    from executor import swap_executor as _se
+    real_wallet_usd = (_se.get_real_wallet_usd(chain) if chain
+                        else _se.get_total_real_wallet_usd())
+    if real_wallet_usd is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "books._compound_total_value_raw_real(%s, chain=%s): live wallet read failed -- "
+            "this chain's balance is being counted as $0 for this call, NOT a real reading of $0",
+            book_id, chain)
+        real_wallet_usd = 0.0
+    return max(0.0, round(real_wallet_usd + committed_usd_real(book_id), 2))
 
 
 def compound_banked(book_id: str) -> float:
