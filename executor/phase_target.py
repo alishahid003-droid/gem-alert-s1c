@@ -53,7 +53,9 @@ from typing import Optional
 import state
 import executor.books as books
 
-REAL_BOOKS = ("sprint", "core1", "core2", "compound")
+REAL_BOOKS = ("sprint", "core1", "core2", "compound")  # kept for backward compat only --
+# combined_equity() below no longer sums this whole tuple for any real phase; see its own
+# docstring (16 Nov 2026 fix) for the real per-phase book sets it actually uses now.
 
 PHASE_KEY = "phase_target_v1"
 
@@ -101,23 +103,53 @@ def _save(d: dict):
     state.set_value(PHASE_KEY, d)
 
 
-def combined_equity() -> float:
-    """Sum of equity() across the 4 real books -- the number Ali's targets are measured against.
+def combined_equity(phase: Optional[str] = None) -> float:
+    """The number Ali's phase targets are measured against.
 
-    16 Nov 2026 (Ali, arming this module for real after the job-loss conversation -- "make this
-    system brilliantly... I need your thorough help"): compound now uses REAL equity
-    (books.equity_real()) once it's live-armed for real money (same books.py-wide
-    "book_id == 'compound' and SC_CASCADE_FUNDER in _live_books_from_env()" condition every
-    other real-money gate in this codebase already uses), instead of books.equity("compound")
-    -- which is PAPER equity and has zero connection to the real wallet. Before this fix, this
-    module's drawdown circuit breaker (the one piece of real protection meant to pause trading
-    if equity craters) was comparing a paper number against its own paper peak, completely
-    blind to what the real wallet was actually doing -- defeating the entire point of arming
-    the breaker. sprint/core1/core2 are not live-armed yet and correctly stay on paper equity
-    (books.equity()) here, matching their own still-paper status in books.can_open()."""
+    16 Nov 2026 (Ali, arming this module for real, then immediately caught a second real bug
+    the same night: "the combined equity... has to be fixed right now"): TWO separate problems
+    fixed together, because fixing one without the other would have just traded one wrong
+    number for a different wrong number.
+
+    Problem 1 (first fix tonight): compound's slice must use REAL equity (books.equity_real())
+    once it's live-armed, not books.equity("compound") (PAPER, zero connection to the real
+    wallet) -- same "book_id == 'compound' and SC_CASCADE_FUNDER in _live_books_from_env()"
+    condition every other real-money gate in this codebase already uses.
+
+    Problem 2 (THIS fix): this function was unconditionally summing REAL_BOOKS = (sprint,
+    core1, core2, compound) for every phase -- but that is not what the live milestone-ladder
+    engine in books.py (check_milestone_ladder(), the mechanism that actually fires phase
+    cash-outs) has EVER used. books.py's own real behavior, confirmed by reading its code
+    directly: during PHASE 1, only compound counts at all (PHASE1_SOLO_BOOK, 100% split --
+    sprint/core1/core2 are excluded entirely, not just paper-vs-real, EXCLUDED); from phase 2
+    onward, only compound+sprint count (PHASE_ENGINE_BOOKS) -- core1/core2 NEVER count toward
+    any phase target, confirmed by books.py's own SC_CASCADE_KEY-area comment: "Core1/core2
+    then run fully independently of the phase-target engine... stays scoped to
+    PHASE_ENGINE_BOOKS = compound+sprint only."
+
+    Before this fix, arming phase 1 showed a $476.62 "combined equity" that was really $10.05
+    real compound + ~$466.57 of PAPER sprint/core1/core2 blended in -- not just the wrong
+    real/paper split, but core1/core2 contributing at all when books.py's own real mechanism
+    has never counted them during ANY phase. That blended number made the drawdown breaker
+    protect a mix of real money and three paper numbers simultaneously, instead of protecting
+    compound's actual real equity during phase 1 the way it's supposed to.
+
+    Now routes to the SAME book set books.py's check_milestone_ladder() uses for this exact
+    phase: phase "1" -> compound alone (real once live-armed, same as before); any other phase
+    (2/3/4, or None when the caller has no phase context) -> sprint+compound only, each counted
+    real or paper per its own live-armed status, core1/core2 never included. phase=None keeps
+    a book-set choice for callers with no phase context (e.g. a direct, ad-hoc check outside
+    the normal check()/status()/start_phase() flow) -- defaults to the phase-2-onward book set
+    (sprint+compound) since that's PHASE_ENGINE_BOOKS' own long-standing default elsewhere in
+    books.py, not the old, wrong 4-book blend."""
     from executor import books as _books_mod
+    if phase == "1":
+        book_set = (_books_mod.PHASE1_SOLO_BOOK,)   # compound alone, matching check_milestone_ladder()
+    else:
+        book_set = _books_mod.PHASE_ENGINE_BOOKS     # (sprint, compound) -- core1/core2 never included
+
     per_book = {}
-    for b in REAL_BOOKS:
+    for b in book_set:
         if b == "compound" and _books_mod.SC_CASCADE_FUNDER in _books_mod._live_books_from_env():
             per_book[b] = books.equity_real()
         else:
@@ -168,7 +200,7 @@ def start_phase(phase: str, now: Optional[float] = None) -> dict:
 
     d["current"] = phase
     d["started_ts"] = now
-    d["peak_equity"] = combined_equity()
+    d["peak_equity"] = combined_equity(phase)
     d["paused"] = False
     d["window_started_ts"] = windows
     d.setdefault("events", []).append({"ts": now, "type": "phase_started", "phase": phase,
@@ -198,7 +230,7 @@ def status(now: Optional[float] = None) -> dict:
     if not phase or phase not in PHASES:
         return {"active": False}
     p = PHASES[phase]
-    eq = combined_equity()
+    eq = combined_equity(phase)
     peak = max(d.get("peak_equity", 0.0), eq)
     elapsed_h = _window_elapsed_hours(d, phase, now)
     allowed_h = p["hours_allowed"]
@@ -247,7 +279,7 @@ def check(now: Optional[float] = None) -> dict:
         p = PHASES[phase]
         _EQUITY_DEBUG_FORCE["on"] = True
         try:
-            eq = combined_equity()
+            eq = combined_equity(phase)
         finally:
             _EQUITY_DEBUG_FORCE["on"] = False
 

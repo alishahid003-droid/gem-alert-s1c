@@ -32,32 +32,65 @@ def _isolated_state(tmp_path, monkeypatch):
 
 
 def _set_combined_equity(monkeypatch, value):
-    monkeypatch.setattr(pt, "combined_equity", lambda: value)
+    """Patches combined_equity() to ignore whichever phase it's called with and always
+    return `value` -- used by tests that don't care about the phase-aware book-set routing
+    itself (target-hit, drawdown-breaker, window-handling tests), only about a given number
+    flowing through start_phase()/status()/check() correctly."""
+    monkeypatch.setattr(pt, "combined_equity", lambda phase=None: value)
 
 
-def test_combined_equity_uses_paper_for_all_4_books_when_compound_not_live(monkeypatch):
-    """16 Nov 2026 (real incident -- combined_equity() was found still summing books.equity()
-    (PAPER) for compound even after compound went live, making the drawdown breaker blind to
-    the real wallet): when compound is NOT listed in LIVE_BOOKS, all 4 books (including
-    compound) must stay on paper equity -- unaffected by this fix, same as before."""
+def test_phase1_combined_equity_uses_compound_alone_paper_when_not_live(monkeypatch):
+    """16 Nov 2026 (real incident #2 -- combined_equity() was found blending REAL compound
+    equity ($10.05) with PAPER sprint/core1/core2 equity (~$466.57), producing a confusing
+    $476.62 "phase 1 baseline" that didn't match the real wallet at all): for phase "1",
+    combined_equity() must match books.check_milestone_ladder()'s own real mechanism, which
+    uses books.PHASE1_SOLO_BOOK ("compound") ALONE -- sprint/core1/core2 must never be summed
+    in during phase 1, live or not. When compound is NOT live-armed, it stays on paper equity."""
     monkeypatch.setattr(books, "_live_books_from_env", lambda: set())
     monkeypatch.setattr(books, "equity", lambda b: {"sprint": 10.0, "core1": 20.0,
                                                       "core2": 30.0, "compound": 9999.0}[b])
     monkeypatch.setattr(books, "equity_real", lambda: -1.0)  # must never be read in this case
-    assert pt.combined_equity() == 10.0 + 20.0 + 30.0 + 9999.0
+    assert pt.combined_equity("1") == 9999.0
 
 
-def test_combined_equity_uses_real_for_compound_once_live_paper_for_the_rest(monkeypatch):
-    """Core fix: once compound IS listed in LIVE_BOOKS, combined_equity() must use REAL equity
-    (books.equity_real()) for compound's contribution, not its paper equity -- while
-    sprint/core1/core2 (not live-armed) correctly stay on paper equity, matching their own
-    status in books.can_open()."""
+def test_phase1_combined_equity_uses_compound_real_once_live_sprint_core1_core2_excluded(monkeypatch):
+    """Core fix: once compound IS listed in LIVE_BOOKS, phase "1" combined_equity() must use
+    REAL equity (books.equity_real()) for compound alone -- sprint/core1/core2 paper equity
+    must NOT be added in at all (not even on paper), matching
+    books.check_milestone_ladder()'s compound-solo 100% split for phase 1."""
     monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
     monkeypatch.setattr(books, "equity", lambda b: {"sprint": 10.0, "core1": 20.0,
                                                       "core2": 30.0, "compound": 9999.0}[b])
     monkeypatch.setattr(books, "equity_real", lambda: 32.89)  # the real wallet number
-    # compound's PAPER 9999.0 must NOT be used -- only its real 32.89 contributes
-    assert pt.combined_equity() == 10.0 + 20.0 + 30.0 + 32.89
+    # compound's PAPER 9999.0 and sprint/core1/core2's paper equity must NOT be used --
+    # only compound's real 32.89 contributes.
+    assert pt.combined_equity("1") == 32.89
+
+
+def test_non_phase1_combined_equity_uses_sprint_plus_compound_core1_core2_always_excluded(monkeypatch):
+    """For any phase other than "1" (phase None/"2"/"3"/"4"), combined_equity() must match
+    books.check_milestone_ladder()'s PHASE_ENGINE_BOOKS = (sprint, compound) -- core1/core2
+    never feed phase targets in ANY phase, confirmed via the codebase's own comment on
+    _combined_equity_for_milestones(). Compound still swaps to real once live-armed; sprint
+    stays paper (books.py's real mechanism never has a real sprint leg here)."""
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
+    monkeypatch.setattr(books, "equity", lambda b: {"sprint": 10.0, "core1": 20.0,
+                                                      "core2": 30.0, "compound": 9999.0}[b])
+    monkeypatch.setattr(books, "equity_real", lambda: 32.89)
+    # core1 (20.0) and core2 (30.0) must NOT appear in the sum for phase 2/3/4 or bare calls.
+    assert pt.combined_equity("2") == 10.0 + 32.89
+    assert pt.combined_equity("4") == 10.0 + 32.89
+    assert pt.combined_equity() == 10.0 + 32.89   # bare call defaults the same as non-1 phases
+
+
+def test_non_phase1_combined_equity_all_paper_when_compound_not_live(monkeypatch):
+    """Sanity check for the non-phase-1 path when compound is not yet live: sprint+compound
+    both on paper, core1/core2 still excluded."""
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: set())
+    monkeypatch.setattr(books, "equity", lambda b: {"sprint": 10.0, "core1": 20.0,
+                                                      "core2": 30.0, "compound": 9999.0}[b])
+    monkeypatch.setattr(books, "equity_real", lambda: -1.0)  # must never be read
+    assert pt.combined_equity("3") == 10.0 + 9999.0
 
 
 def test_drawdown_breaker_never_trips_on_a_failed_real_read(monkeypatch):
