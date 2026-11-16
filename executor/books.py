@@ -1478,11 +1478,17 @@ def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional
     matter how many trades have already opened. Returns 0 when the book is broke.
 
     7 Nov 2026 (Ali): liquidity_usd, when given, caps the stake so it never exceeds
-    LIQUIDITY_STAKE_CAP_RATIO (default 2%) of the coin's own pool liquidity -- the same ratio
-    threshold executor.compound_scalper._liquidity_impact_penalty() uses before its cost model
-    jumps from ~2% to a 15% price-impact penalty. Real incident that motivated this: a compound
+    LIQUIDITY_STAKE_CAP_RATIO of the coin's own pool liquidity -- the same ratio threshold
+    executor.compound_scalper._liquidity_impact_penalty() uses before its cost model jumps
+    from ~2-5% to a 15% price-impact penalty. Real incident that motivated this: a compound
     stake (50% shot_pct, no liquidity awareness) sized itself at $90.34 against a thin pool,
     landed in that 15% penalty bracket, and lost 43.6% (-$39.39) on a coin that never even moved
+
+    17 Nov 2026 (Ali, explicit instruction): raised from 2% to 5% via .env
+    (LIQUIDITY_STAKE_CAP_RATIO=0.05) -- the 2% figure was never an instruction Ali gave, it
+    was this function's own hardcoded fallback default. The fallback below is updated to match
+    (0.05, not 0.02) so a missing/reset .env can never silently revert to the old, never-
+    approved 2% value -- the .env setting and this fallback are now the same number, by design.
     -- pure slippage/impact cost, nothing to do with the pick being bad or compound's aggressive
     shot_pct itself. shot_pct/max_share are left completely untouched by this -- a coin with
     healthy liquidity for its size gets the exact same stake as before; only a stake that would
@@ -1541,7 +1547,7 @@ def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional
     # thin relative to the stake; unknown liquidity (None) changes nothing, so every existing
     # caller that doesn't pass it is completely unaffected.
     if liquidity_usd and liquidity_usd > 0:
-        liq_cap = liquidity_usd * _f("LIQUIDITY_STAKE_CAP_RATIO", 0.02)
+        liq_cap = liquidity_usd * _f("LIQUIDITY_STAKE_CAP_RATIO", 0.05)
         out = min(out, liq_cap)
     # 8 Nov 2026 (Ali, backtest-confirmed): cross-book exposure cap for sprint/core1/core2 ONLY
     # (compound explicitly excluded -- real data showed compound shares coin exposure with
