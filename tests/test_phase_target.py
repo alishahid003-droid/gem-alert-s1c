@@ -35,6 +35,83 @@ def _set_combined_equity(monkeypatch, value):
     monkeypatch.setattr(pt, "combined_equity", lambda: value)
 
 
+def test_combined_equity_uses_paper_for_all_4_books_when_compound_not_live(monkeypatch):
+    """16 Nov 2026 (real incident -- combined_equity() was found still summing books.equity()
+    (PAPER) for compound even after compound went live, making the drawdown breaker blind to
+    the real wallet): when compound is NOT listed in LIVE_BOOKS, all 4 books (including
+    compound) must stay on paper equity -- unaffected by this fix, same as before."""
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: set())
+    monkeypatch.setattr(books, "equity", lambda b: {"sprint": 10.0, "core1": 20.0,
+                                                      "core2": 30.0, "compound": 9999.0}[b])
+    monkeypatch.setattr(books, "equity_real", lambda: -1.0)  # must never be read in this case
+    assert pt.combined_equity() == 10.0 + 20.0 + 30.0 + 9999.0
+
+
+def test_combined_equity_uses_real_for_compound_once_live_paper_for_the_rest(monkeypatch):
+    """Core fix: once compound IS listed in LIVE_BOOKS, combined_equity() must use REAL equity
+    (books.equity_real()) for compound's contribution, not its paper equity -- while
+    sprint/core1/core2 (not live-armed) correctly stay on paper equity, matching their own
+    status in books.can_open()."""
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
+    monkeypatch.setattr(books, "equity", lambda b: {"sprint": 10.0, "core1": 20.0,
+                                                      "core2": 30.0, "compound": 9999.0}[b])
+    monkeypatch.setattr(books, "equity_real", lambda: 32.89)  # the real wallet number
+    # compound's PAPER 9999.0 must NOT be used -- only its real 32.89 contributes
+    assert pt.combined_equity() == 10.0 + 20.0 + 30.0 + 32.89
+
+
+def test_drawdown_breaker_never_trips_on_a_failed_real_read(monkeypatch):
+    """16 Nov 2026 (real incident -- confirmed from this sandbox, get_real_wallet_usd()
+    genuinely returns None when the RPC can't be reached): once compound is live-armed, a
+    transient RPC failure must NOT be mistaken for a real equity crash. check()'s drawdown
+    pause/resume decision must stay frozen (neither fires) on a cycle where
+    get_total_real_wallet_usd_or_none() returns None, even though combined_equity() itself
+    still returns some float that cycle (via equity_real()'s own fail-to-$0 behavior, correct
+    for its OTHER callers but not for this one)."""
+    from executor import swap_executor
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: {"compound"})
+    monkeypatch.setattr(books, "equity_real", lambda: 500.0)   # real wallet reading fine so far
+    monkeypatch.setattr(books, "equity", lambda b: 0.0)         # sprint/core1/core2: paper, $0
+    pt.start_phase("1", now=1000.0)                              # peak_equity baseline = 500.0
+    assert pt.status(now=1000.0)["peak_equity"] == 500.0
+
+    # Now the live RPC read fails: equity_real() (used by other real-money callers, correctly
+    # fails to $0) would make combined_equity() report $0 -- normally well under ANY drawdown
+    # floor, which would wrongly trip the breaker. But get_total_real_wallet_usd_or_none()
+    # (the breaker's own confirmation check) also fails (None) this same cycle, so the pause
+    # must NOT fire.
+    monkeypatch.setattr(books, "equity_real", lambda: 0.0)
+    monkeypatch.setattr(swap_executor, "get_total_real_wallet_usd_or_none", lambda: None)
+    out = pt.check(now=1100.0)
+    assert "drawdown_pause" not in [e["type"] for e in out["fired"]]
+    assert pt.is_paused() is False
+
+    # Confirm the breaker is NOT permanently broken -- once the real read succeeds again and
+    # genuinely shows a real drawdown, it fires normally.
+    monkeypatch.setattr(books, "equity_real", lambda: 50.0)   # 50 / peak(500) = 10% -- below the 50% floor
+    monkeypatch.setattr(swap_executor, "get_total_real_wallet_usd_or_none", lambda: 50.0)
+    out2 = pt.check(now=1200.0)
+    assert "drawdown_pause" in [e["type"] for e in out2["fired"]]
+    assert pt.is_paused() is True
+
+
+def test_drawdown_breaker_guard_is_a_no_op_while_compound_is_still_paper(monkeypatch):
+    """The RPC-failure guard only matters once compound is live-armed -- while compound is
+    still paper, combined_equity() has no real-chain dependency at all, so the breaker must
+    keep working exactly as before (no guard interference) even if swap_executor's real-wallet
+    function would fail if called (it must not even be consulted in this case)."""
+    from executor import swap_executor
+    monkeypatch.setattr(books, "_live_books_from_env", lambda: set())  # compound NOT live
+    monkeypatch.setattr(swap_executor, "get_total_real_wallet_usd_or_none",
+                         lambda: (_ for _ in ()).throw(AssertionError("must not be called")))
+    monkeypatch.setattr(books, "equity", lambda b: 1000.0)
+    pt.start_phase("1", now=1000.0)
+    monkeypatch.setattr(books, "equity", lambda b: 100.0)  # genuine paper drawdown, 100/4000=2.5%
+    out = pt.check(now=1100.0)
+    assert "drawdown_pause" in [e["type"] for e in out["fired"]]
+    assert pt.is_paused() is True
+
+
 def test_inactive_by_default_never_blocks_trading():
     assert pt.is_paused() is False
     assert pt.status()["active"] is False

@@ -1744,6 +1744,27 @@ def get_total_real_wallet_usd() -> float:
     return round(total, 2)
 
 
+def get_total_real_wallet_usd_or_none():
+    """16 Nov 2026 (Ali, arming the real drawdown circuit breaker in executor/phase_target.py):
+    REAL counterpart to get_total_real_wallet_usd() that preserves the None/failure signal
+    instead of collapsing it to 0. get_total_real_wallet_usd()'s "a chain whose balance can't
+    be read contributes 0" stance is correct for its own callers (buy sizing: fail-safe, refuse
+    to size off an unknown balance) -- but it is WRONG for a drawdown breaker, which would
+    otherwise see a transient RPC failure as "real equity just crashed to $0" and falsely trip,
+    pausing all real trading on a phantom crash rather than an actual one. Returns None if
+    EITHER chain's read fails (never silently substitutes 0 for a failed chain and sums the
+    rest -- a drawdown comparison needs the WHOLE real balance or nothing, a partial read could
+    itself look like a crash), and the live USD total only when BOTH chains were read
+    successfully this call."""
+    total = 0.0
+    for chain in ("robinhood_chain", "base"):
+        usd = get_real_wallet_usd(chain)
+        if usd is None:
+            return None
+        total += usd
+    return round(total, 2)
+
+
 def _sell_robinhood_chain(token_address: str, amount_tokens: float) -> ExecutionResult:
     """Sells amount_tokens of an ERC20 token back to native RHC ether via
     Uniswap v4's Universal Router. Added Sept 25 2026, on top of the same

@@ -102,19 +102,26 @@ def _save(d: dict):
 
 
 def combined_equity() -> float:
-    """Sum of equity() across the 4 real books -- the number Ali's targets are measured against."""
-    # TEMP DEBUG (6 Nov 2026, Ali; widened 10 Nov 2026, Claude): instrumented to find the exact
-    # book(s) producing wrong reads during the recurring equity-flicker investigation. ORIGINAL
-    # trigger was total<300 only -- missed a real incident on 10 Nov (equity misread as $303.27,
-    # just above the <300 cutoff, during a drawdown_pause/resume pair 60s apart with ZERO real
-    # realized-P&L change in any book across the same window -- confirmed directly, not a real
-    # trading event). WIDENED to also log on every actual pause/resume firing itself (regardless
-    # of the total<300 heuristic), via the new `force` param the pause/resume call sites below
-    # now pass -- so the NEXT occurrence of this bug is captured with full per-book detail
-    # instead of being investigated blind again. Still silent on ordinary calls (force=False,
-    # old <300 heuristic unchanged) to avoid spamming the log every poll cycle. Remove once the
-    # root cause is confirmed and fixed.
-    per_book = {b: books.equity(b) for b in REAL_BOOKS}
+    """Sum of equity() across the 4 real books -- the number Ali's targets are measured against.
+
+    16 Nov 2026 (Ali, arming this module for real after the job-loss conversation -- "make this
+    system brilliantly... I need your thorough help"): compound now uses REAL equity
+    (books.equity_real()) once it's live-armed for real money (same books.py-wide
+    "book_id == 'compound' and SC_CASCADE_FUNDER in _live_books_from_env()" condition every
+    other real-money gate in this codebase already uses), instead of books.equity("compound")
+    -- which is PAPER equity and has zero connection to the real wallet. Before this fix, this
+    module's drawdown circuit breaker (the one piece of real protection meant to pause trading
+    if equity craters) was comparing a paper number against its own paper peak, completely
+    blind to what the real wallet was actually doing -- defeating the entire point of arming
+    the breaker. sprint/core1/core2 are not live-armed yet and correctly stay on paper equity
+    (books.equity()) here, matching their own still-paper status in books.can_open()."""
+    from executor import books as _books_mod
+    per_book = {}
+    for b in REAL_BOOKS:
+        if b == "compound" and _books_mod.SC_CASCADE_FUNDER in _books_mod._live_books_from_env():
+            per_book[b] = books.equity_real()
+        else:
+            per_book[b] = books.equity(b)
     total = round(sum(per_book.values()), 2)
     if total < 300 or _EQUITY_DEBUG_FORCE.get("on"):
         try:
@@ -248,15 +255,37 @@ def check(now: Optional[float] = None) -> dict:
         d["peak_equity"] = peak
 
         # --- drawdown circuit breaker: pause/resume, never force-closes anything ---
+        #
+        # 16 Nov 2026 (Ali, arming this breaker for real): combined_equity()'s compound slice
+        # (once live-armed) comes from books.equity_real(), which -- like every other real-money
+        # caller in this codebase -- fails SAFE by returning $0 for a chain whose live balance
+        # can't be read right now (RPC down, etc.), rather than erroring. That fail-$0 behavior
+        # is correct for buy sizing (refuse to size off an unknown balance), but would be WRONG
+        # here: a transient RPC failure would look exactly like "real equity just crashed to
+        # $0," falsely tripping the breaker and pausing all real trading on a phantom crash. So
+        # this pause/resume decision additionally confirms the REAL read actually succeeded this
+        # cycle (get_total_real_wallet_usd_or_none() returns None on any chain-read failure)
+        # before acting on it -- on a failed read, this cycle skips the pause/resume decision
+        # entirely (peak_equity is still updated above from whatever eq combined_equity()
+        # returned, which is harmless either way since peak is a max() and a lower/false reading
+        # can never corrupt it upward) and simply tries again next cycle. Only checked when
+        # compound is actually live-armed -- while compound stays paper, combined_equity() has
+        # no real-chain dependency at all and this guard is a complete no-op.
+        _real_read_ok = True
+        from executor import books as _books_mod_local
+        if _books_mod_local.SC_CASCADE_FUNDER in _books_mod_local._live_books_from_env():
+            from executor import swap_executor as _se
+            _real_read_ok = _se.get_total_real_wallet_usd_or_none() is not None
+
         floor = peak * p["drawdown_pause_pct"] if peak > 0 else 0.0
         was_paused = d.get("paused", False)
-        if not was_paused and peak > 0 and eq <= floor:
+        if _real_read_ok and not was_paused and peak > 0 and eq <= floor:
             d["paused"] = True
             ev = {"ts": now, "type": "drawdown_pause", "phase": phase, "equity": eq,
                   "peak_equity": peak, "floor": round(floor, 2)}
             d.setdefault("events", []).append(ev)
             fired.append(ev)
-        elif was_paused and eq > floor:
+        elif _real_read_ok and was_paused and eq > floor:
             d["paused"] = False
             ev = {"ts": now, "type": "drawdown_resume", "phase": phase, "equity": eq, "floor": round(floor, 2)}
             d.setdefault("events", []).append(ev)
