@@ -376,7 +376,26 @@ def check_sprint_compound_cascade(now: Optional[float] = None) -> Optional[dict]
         return {CASHOUT_KEY: rec, DEPOSITS_KEY: dep, SC_CASCADE_KEY: cascade_result}
 
     result = state.atomic_multi_fn([CASHOUT_KEY, DEPOSITS_KEY, SC_CASCADE_KEY], _apply)
-    return result[SC_CASCADE_KEY]
+    cascade_rec = result[SC_CASCADE_KEY]
+    # 18 Nov 2026 (Ali, explicit instruction): the cascade seeds sprint/core1/core2 with real
+    # money but does NOT itself turn their real execution on -- is_live_armed() keeps them
+    # paused (CASCADE_LIVE_PAUSE_KEY) until Ali explicitly clears it. Without an alert, Ali has
+    # no way to know the pause is now in effect and waiting on him. Sent exactly once, only on
+    # the real fire (never on a stale/already-fired return, which is why this checks `_now` was
+    # just set by THIS call's own _apply() rather than re-checking the guard a second time here
+    # -- cascade_rec["ts"] is only fresh when _apply() actually ran its fire branch this call).
+    if isinstance(cascade_rec, dict) and cascade_rec.get("fired") and cascade_rec.get("ts") == now:
+        try:
+            import telegram_alert
+            telegram_alert.send_telegram_message(
+                "\U0001F6A8 Sprint/Core1/Core2 cascade fired: $100 each seeded from compound's "
+                "banked vault. All three are PAUSED from real trading (per your own cascade "
+                "live-pause design) until you explicitly clear it. Call "
+                "executor.books.clear_cascade_live_pause() (or ask for it to be cleared) when "
+                "ready to arm them live.")
+        except Exception:
+            pass  # alert failures must never block or crash the cascade itself
+    return cascade_rec
 
 
 def check_compound_split(now: Optional[float] = None) -> Optional[dict]:
