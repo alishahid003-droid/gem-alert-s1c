@@ -318,8 +318,9 @@ def test_absolute_stake_ceiling_survives_any_equity_bug(monkeypatch):
     monkeypatch.setattr(books, "loss_streak", lambda book_id: 0)
     tier_stake = books.tier_stake_usd("compound", "conviction", mcap=50_000.0)
     plain_stake = books.stake_usd("compound")
-    # Curve C band at eq=1309.74 is the 600-10,000 band -> 35%
-    expected_curve_c_cap = 1309.74 * 0.35
+    # 17 Nov 2026: Curve C bands revised (25%/20%/10%/5% at $0/$600/$5,000/$100,000).
+    # eq=1309.74 now falls in the 600-5,000 band -> 20%, not the old 35%.
+    expected_curve_c_cap = 1309.74 * 0.20
     assert tier_stake <= expected_curve_c_cap + 0.01, (
         f"tier_stake_usd let {tier_stake} exceed Curve C's own {expected_curve_c_cap:.2f} band cap")
     assert plain_stake <= expected_curve_c_cap + 0.01, (

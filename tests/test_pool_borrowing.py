@@ -122,11 +122,30 @@ def test_stake_usd_can_exceed_own_free_equity_when_pool_has_room(monkeypatch):
 
 
 def test_borrow_never_lets_a_book_exceed_its_absolute_hard_cap(monkeypatch):
-    """Pool borrowing must never bypass the existing absolute seed-based hard_cap backstop --
-    confirms borrowing adds flexibility within the existing safety ceiling, not around it."""
+    """Pool borrowing must never bypass the existing absolute hard_cap backstop -- confirms
+    borrowing adds flexibility within the existing safety ceiling, not around it.
+
+    17 Nov 2026: this test previously computed hard_cap as seed*3.0 (MAX_STAKE_SEED_MULT), which
+    stopped being compound's real cap back on 8 Nov 2026 when Curve C replaced it -- the
+    assertion below was passing only because compound's real Curve C cap (at the ~$100 default
+    equity this test runs at, the 0-600 band) happens to be far smaller than the stale $300
+    figure, not because it was testing the real mechanism. Fixed to compute the real Curve C cap
+    the same way stake_usd() does, using the SAME band logic (kept as a local copy here,
+    deliberately NOT importing books._CURVE_C_BANDS directly, so this test independently proves
+    the real governing constant rather than trivially re-asserting whatever the source says)."""
     book_id = "compound"
+    eq = books.equity(book_id)
+    curve_c_bands = (
+        (0.0, 600.0, 0.25), (600.0, 5_000.0, 0.20),
+        (5_000.0, 100_000.0, 0.10), (100_000.0, float("inf"), 0.05),
+    )
+    curve_c_pct = curve_c_bands[-1][2]
+    for lo, hi, pct in curve_c_bands:
+        if lo <= eq < hi:
+            curve_c_pct = pct
+            break
+    hard_cap = max(5.0, eq * curve_c_pct)
     stake = books.stake_usd(book_id)
-    hard_cap = books.cfg(book_id)["seed"] * 3.0   # MAX_STAKE_SEED_MULT default
     assert stake <= hard_cap + 0.01
 
 

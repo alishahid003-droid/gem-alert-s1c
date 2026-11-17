@@ -1742,12 +1742,30 @@ def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional
     # meaningfully faster). compound ONLY -- sprint/core1/core2 keep their own separate
     # TIER_MAX_SHARE/hard_cap path in tier_stake_usd() below, completely untouched by this.
     if book_id == "compound":
+        # 17 Nov 2026 (Ali, explicit instruction, real finding): the first band was 50% --
+        # verified directly against this exact function (stake_usd() called with eq=$115,
+        # committed=$115, free_equity=$0) that two $57.50 trades at 50% each exhaust ALL free
+        # capital at $115 starting equity, leaving the book stuck at exactly 2 concurrent
+        # positions. Compound's own real exit design (see max_open()'s docstring) deliberately
+        # holds a winning position 11-21+ hours -- that design was proven out running 5-8
+        # concurrent positions at a ~$700+ equity band, NOT 2 positions at $115. A real replay
+        # of tonight's actual 53 candidate arrivals against the real hold-time design showed 51
+        # of 53 refused purely because capital was locked in just 2 open trades for most of a
+        # day. Lowered the first band's 50% -> 25% so four positions (not two) fit before free
+        # capital hits $0, closer to the system's real, proven operating range. Ali confirmed
+        # 25% is fine to also carry through right at/just past the $600 boundary. Ali then flagged
+        # (same night) the ORIGINAL curve's $600-10,000 band at 35% was ALSO too rich -- "when
+        # it crosses 3, 4, $5,000 equity... 10%, 8%, that should be the stake once it crosses
+        # $4,000 or $5,000." Full band structure confirmed via explicit clarifying questions:
+        # 25% ($0-600), 20% ($600-5,000), 10% ($5,000-100,000), 5% ($100,000+) -- the old
+        # $10,000/$500,000 boundaries collapsed into this simpler 4-band shape per Ali's own
+        # $5,000/$100,000 breakpoints, keeping the original curve's intent (taper further at
+        # very large equity) rather than going flat above $5,000.
         _CURVE_C_BANDS = (
-            (0.0,        600.0,     0.50),
-            (600.0,      10_000.0,  0.35),
-            (10_000.0,   100_000.0, 0.20),
-            (100_000.0,  500_000.0, 0.10),
-            (500_000.0,  float("inf"), 0.05),
+            (0.0,        600.0,     0.25),
+            (600.0,      5_000.0,   0.20),
+            (5_000.0,    100_000.0, 0.10),
+            (100_000.0,  float("inf"), 0.05),
         )
         _curve_c_pct = _CURVE_C_BANDS[-1][2]
         for _lo, _hi, _pct in _CURVE_C_BANDS:
@@ -1755,15 +1773,22 @@ def stake_usd(book_id: str, now: Optional[float] = None, liquidity_usd: Optional
                 _curve_c_pct = _pct
                 break
         # 8 Nov 2026 (Ali, final): Curve C's whole purpose is that ITS OWN banded percentage is
-        # the risk control -- as equity grows, the % of equity risked on one trade comes DOWN
-        # (50% -> 35% -> 20% -> 10% -> 5%), which is what keeps one trade from ever being an
-        # oversized bite of a large account (Ali's exact concern: a flat 50% on $60,000 equity
-        # would open a $30,000 position -- Curve C's real 10% band at that equity instead caps
-        # it at $6,000). No separate absolute-dollar ceiling belongs on top of this -- layering
-        # one back in (either a flat $300 or a phase-anchored figure, both tried and rejected
-        # tonight) either kills the curve's whole purpose above ~$860 equity or reintroduces a
-        # workaround Ali explicitly didn't ask for. The banded percentage itself, applied to the
-        # real eq at call time, IS the hard_cap.
+        # the risk control -- as equity grows, the % of equity risked on one trade comes DOWN,
+        # which is what keeps one trade from ever being an oversized bite of a large account
+        # (Ali's exact concern: a flat 50% on $60,000 equity would open a $30,000 position --
+        # Curve C's real 10% band at that equity instead caps it at $6,000, true under both the
+        # original and the 17 Nov 2026 band revision below). No separate absolute-dollar ceiling
+        # belongs on top of this -- layering one back in (either a flat $300 or a phase-anchored
+        # figure, both tried and rejected on 8 Nov) either kills the curve's whole purpose or
+        # reintroduces a workaround Ali explicitly didn't ask for. The banded percentage itself,
+        # applied to the real eq at call time, IS the hard_cap.
+        #
+        # 17 Nov 2026 (Ali, revised): the ORIGINAL 5-band shape here (50% -> 35% -> 20% -> 10% ->
+        # 5%, stepping at $600/$10,000/$100,000/$500,000) is SUPERSEDED -- see the updated
+        # _CURVE_C_BANDS tuple above for the current real bands and why they changed (both the
+        # 50% first band and the 35% second band were found too rich, confirmed against a real
+        # replay of this function). This comment is kept only for the $60,000/10%/$6,000 example
+        # above, which still holds exactly under the new bands.
         hard_cap = _f("COMPOUND_MAX_STAKE_USD", None) or max(5.0, eq * _curve_c_pct)
     else:
         hard_cap = _f(f"{book_id.upper()}_MAX_STAKE_USD", None) or c["seed"] * _f("MAX_STAKE_SEED_MULT", 3.0)
