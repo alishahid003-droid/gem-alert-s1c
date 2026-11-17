@@ -34,6 +34,38 @@ from typing import Optional
 import state
 
 GT_SLUGS = {"solana": "solana", "bsc": "bsc", "base": "base"}
+
+# 18 Nov 2026 (Ali, explicit instruction): pure observation logging, added to let a FUTURE
+# session measure sprint's real candidate-qualification rate (age_min<=10 AND confirmations>=5,
+# see Scanner.evaluate()'s lanes logic below) -- real data on this never existed anywhere in the
+# codebase, which blocked building a trustworthy Phase 2 time estimate (compound+sprint). This
+# function is write-only and read by nothing in the live decision path: it never returns a value
+# used by any caller, is wrapped in try/except so a failure here can NEVER raise into or alter
+# the real scan/buy/sell loop, and does not touch .gem_alert_state.json or any other file the
+# live bot reads from. Ali's explicit requirement: "paper trade or anything should not overlap
+# with the real trading and creating a mess and a havoc for us" -- satisfied by this being
+# strictly additive (one new append-only file, logs/candidate_eval.jsonl) and never read back by
+# any part of this bot.
+_CANDIDATE_EVAL_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "candidate_eval.jsonl")
+
+
+def _log_candidate_eval(p: dict, now: float, age_min: float, confirmations, lanes) -> None:
+    try:
+        rec = {
+            "ts": now,
+            "chain": p.get("chain"),
+            "addr": p.get("addr"),
+            "age_min": round(age_min, 2) if age_min is not None else None,
+            "confirmations": list(confirmations) if confirmations is not None else None,
+            "n_confirmations": len(confirmations) if confirmations is not None else None,
+            "lanes": list(lanes) if lanes else [],
+            "qualifies_sprint": bool(lanes and "sprint" in lanes),
+        }
+        os.makedirs(os.path.dirname(_CANDIDATE_EVAL_LOG), exist_ok=True)
+        with open(_CANDIDATE_EVAL_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception:  # noqa: BLE001 -- logging must never break the real scan/decision loop
+        pass
 RHC_CANDIDATES = ("robinhood-chain", "robinhood", "robinhood_chain")
 # 28 Oct 2026 (Ali): 1,023 early-sniper trades across all four chains, full history, show bsc/base/
 # robinhood_chain are not viable -- bsc is a flat 0% win rate across 37 trades (every single one a
@@ -447,10 +479,12 @@ class Scanner:
         raw_snapshot = {"buys5": p.get("buys5"), "sells5": p.get("sells5"), "buyers5": p.get("buyers5"),
                         "vol5": p.get("vol5"), "vol24": p.get("vol24"), "chg5": p.get("chg5"), "chg1h": p.get("chg1h")}
         if big:
+            _log_candidate_eval(p, now, age_min, conf + ["biglaunch"], ["core1"])
             return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["biglaunch"],
                     "lanes": ["core1"], "lane": "core1", "potential": "biglaunch", "tier": "probe", "raw": raw_snapshot}
         if momentum:
+            _log_candidate_eval(p, now, age_min, conf + ["momentum"], ["core1"])
             return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                     "liq": liq, "age_min": round(age_min, 1), "confirmations": conf + ["momentum"],
                     "lanes": ["core1"], "lane": "core1", "potential": "momentum",
@@ -473,7 +507,9 @@ class Scanner:
         if len(conf) >= 3 and "compound" not in lanes:
             lanes.append("compound")
         if not lanes:
+            _log_candidate_eval(p, now, age_min, conf, [])
             return None
+        _log_candidate_eval(p, now, age_min, conf, lanes)
         return {"chain": p["chain"], "addr": p["addr"], "name": p["name"], "src": p["src"], "mcap": mcap,
                 "liq": liq, "age_min": round(age_min, 1), "confirmations": conf, "lanes": lanes, "lane": lanes[0],
                 "potential": "100x+" if "core2" in lanes else "10x-50x", "tier": tier_of(conf), "raw": raw_snapshot}
