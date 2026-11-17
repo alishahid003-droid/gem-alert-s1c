@@ -571,70 +571,78 @@ def is_live_armed(book_id: str) -> bool:
 #              sensible checkpoints within the SHORTER climbs Ali specified.
 # }
 PHASE_DEFS: Dict[int, dict] = {
-    # 16 Nov 2026 (Ali, NEW targets -- supersedes the 13 Nov 5-phase structure above wholesale,
-    # old PHASE_DEFS[1..5] deleted entirely per Ali's explicit instruction "remove the old stale
-    # phase targets"): a new 4-phase structure, given as a handwritten plan:
-    #   Phase 1: $115 -> $6,000.   Cash out $4,500 (fund S1b, all parts). Reseed $1,500.
-    #   Phase 2: $1,500 -> $13,000. Cash out $11,000 (pay Dec liability).  Reseed $2,000.
-    #   Phase 3: $2,000 -> $105,000. Cash out $100,000 (main debt payment). Reseed $5,000.
-    #   Phase 4: $5,000 -> $1,000,000. Cash out $985,000 (financial freedom). Reseed $15,000,
-    #            left running -- same "no automatic cash-out past the final target, ask Ali"
-    #            convention the old phase 5 used.
-    # Note (Ali, explicit): each phase's own ladder-rung partial banking (the protective
-    # percentage banks below, same mechanism as before) is NOT counted toward reaching that
-    # phase's trigger -- the trigger is checked against combined EQUITY (open positions' value
-    # + free cash), which already includes any ladder-banked amount once; ladder banking is a
-    # risk-management side effect of normal trading, never a separate "income" tallied again
-    # on top of equity.
+    # 17 Nov 2026 (Ali, NEW 3-phase structure -- supersedes the 16 Nov 4-phase structure above
+    # wholesale, per Ali's explicit instruction "we have clear cut three phases... that needs to
+    # be changed... not the previous four targets or the previous five targets"):
+    #   Phase 1: $115 -> $25,000.    Cash out the FULL $25,000 (debt payment). Nothing held back
+    #            from trading equity -- "I will extract out all the $25,000."
+    #   Phase 2: reseeded from the Phase-1 VAULT remainder (see below) -> $100,000. Cash out the
+    #            FULL $100,000 (debt payment).
+    #   Phase 3: reseeded from the Phase-2 VAULT remainder -> $1,000,000. No automatic cash-out
+    #            wired yet -- ask Ali what to do once $1,000,000 is actually close, same
+    #            convention every prior final-phase version used.
     #
-    # Phase-1-solo-book / cascade-gate structure UNCHANGED from the 13 Nov version: phase 1
-    # still runs on compound ALONE (PHASE1_SOLO_BOOK below), and phases 2-4 still use the
-    # 65/35 compound/sprint split (PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT) -- only the dollar
-    # targets/cashouts/reseeds and the phase count (5 -> 4) changed; the structural rules
-    # Ali confirmed 13 Nov 2026 were not touched.
+    # 17 Nov 2026 (Ali, CRITICAL correction, explicit, repeated 3x after I got it wrong twice):
+    # the real banked VAULT (COMPOUND_STAGES / banked()) is a COMPLETELY SEPARATE pool from the
+    # phase target/trigger. Ali, verbatim: "these two mechanics are going to be separate... the
+    # bank vault is not going to be a part of the target. The target has to be reached on its
+    # own. The bank vault and the ladder leg through the rungs fired is going to be a separate
+    # thing which will not be touched by equity and will not be considered as that phase
+    # target." And on the cash-out sequencing specifically: "while we reach phase 1, the bank
+    # vault is going to be there. We'll take out $1,000. Then once we start from phase 1 to
+    # phase 2, phase 2 target achieved, total cashed out, whatever is in vault, $2,000 is going
+    # to be taken out, and the remaining refeeded for the phase 3 target."
     #
-    # Ladder rungs for every phase rescaled proportionally to each phase's NEW start->trigger
-    # span, same method used for the 13 Nov revision (template: phase 1 keeps its own old
-    # phase-1 rung shape; phase 2 borrows the old phase-3 rung shape, the closest matching
-    # span; phase 3 and phase 4 reuse the old phase-4/phase-5 rungs unchanged, since their
-    # start/trigger pairs are numerically identical to before).
+    # So, per phase, TWO separate things happen the moment that phase's trigger fires (both now
+    # wired in check_milestone_ladder()'s cashout branch via _vault_withdraw_and_reseed()):
+    #   1. The FULL target amount cashes out of TRADING EQUITY (cashout == trigger, reseed=0.0
+    #      -- nothing held back from equity; _combined_equity_for_milestones() already EXCLUDES
+    #      the vault, via equity() = total_value() - banked(), so this was already correct and
+    #      needed no change).
+    #   2. Separately, whatever the VAULT (banked(), via COMPOUND_STAGES -- now extended past
+    #      its old $10k ceiling, see that constant's 17 Nov 2026 comment) has accumulated gets
+    #      withdrawn: $1,000 taken as Phase 1's own expense (Phase 1->2 transition), $2,000 as
+    #      Phase 2's own expense (Phase 2->3 transition), and the VAULT REMAINDER (not equity)
+    #      is deposited as the next phase's starting seed via DEPOSITS_KEY.
+    # "reseed" below is therefore ALWAYS 0.0 (equity reseed is not used at all under this new
+    # structure) -- real reseeding happens from the vault, via vault_expense_usd below, not from
+    # equity left behind.
+    #
+    # Phase-1-solo-book / cascade-gate structure UNCHANGED: phase 1 still runs on compound ALONE
+    # (PHASE1_SOLO_BOOK), phases 2-3 still use the 65/35 compound/sprint split
+    # (PHASE_ENGINE_BOOKS/PHASE_ENGINE_SPLIT) -- only the dollar targets, the cashout=full-target
+    # change, and the phase count (4 -> 3) changed.
+    #
+    # Ladder rungs (the SEPARATE, smaller protective-banking mechanism inside pdef["ladder"] --
+    # NOT the real vault/COMPOUND_STAGES -- see check_milestone_ladder()'s own docstring)
+    # rescaled proportionally to each phase's new start->trigger span, same method used for
+    # every prior revision.
     1: dict(
-        trigger=6_000.0, cashout=4_500.0, reseed=1_500.0,
+        trigger=25_000.0, cashout=25_000.0, reseed=0.0, vault_expense_usd=1_000.0,
         ladder=(
-            (397.48,  0.10),
-            (597.57,  0.12),
-            (942.82,  0.15),
-            (1_690.22, 0.18),
-            (3_126.16, 0.20),
-            (4_850.46, 0.22),
+            (1_656.0,  0.10),
+            (2_490.0,  0.12),
+            (3_928.0,  0.15),
+            (7_042.0,  0.18),
+            (13_026.0, 0.20),
+            (20_210.0, 0.22),
         ),
     ),
     2: dict(
-        trigger=13_000.0, cashout=11_000.0, reseed=2_000.0,
+        trigger=100_000.0, cashout=100_000.0, reseed=0.0, vault_expense_usd=2_000.0,
         ladder=(
-            (3_329.55,  0.10),
-            (4_897.73,  0.12),
-            (6_465.91,  0.15),
-            (8_295.45,  0.18),
-            (10_386.36, 0.20),
-            (11_954.55, 0.22),
+            (6_625.0,  0.10),
+            (9_962.0,  0.12),
+            (15_714.0, 0.15),
+            (28_167.0, 0.18),
+            (52_102.0, 0.20),
+            (80_840.0, 0.22),
         ),
     ),
     3: dict(
-        trigger=105_000.0, cashout=100_000.0, reseed=5_000.0,
-        ladder=(
-            (4_687.0,  0.10),
-            (15_435.0, 0.12),
-            (33_348.0, 0.15),
-            (55_739.0, 0.18),
-            (78_130.0, 0.20),
-            (94_252.0, 0.22),
-        ),
-    ),
-    4: dict(
-        # Final target. No automatic cash-out wired yet -- same convention the old final phase
-        # used, ask Ali what to do once $1,000,000 is actually close.
-        trigger=1_000_000.0, cashout=None, reseed=None,
+        # Final target. No automatic cash-out wired yet -- same convention every prior final
+        # phase used, ask Ali what to do once $1,000,000 is actually close.
+        trigger=1_000_000.0, cashout=None, reseed=None, vault_expense_usd=None,
         ladder=(
             (24_900.0,  0.10),
             (64_700.0,  0.12),
@@ -791,6 +799,77 @@ def _fixed_cashout_combined(cashout_usd: float, reseed_usd: float, reason: str, 
             "combined_equity_after": _combined_equity_for_milestones(books)}
 
 
+def _vault_withdraw_and_reseed(vault_expense_usd: float, reason: str, now: float,
+                                next_phase_books: Optional[tuple] = None) -> dict:
+    """17 Nov 2026 (Ali, explicit, repeated instruction -- see PHASE_DEFS' 17 Nov 2026 comment
+    for the full history of getting this wrong twice before landing here): the REAL banked vault
+    (banked()/COMPOUND_STAGES) is a separate pool from trading equity and from the phase target.
+    When a phase's cash-out fires (the FULL target amount leaves trading equity, see
+    _fixed_cashout_combined above -- untouched by this function), this handles the vault side of
+    that same moment, exactly as Ali described it: "while we reach phase 1, the bank vault is
+    going to be there. We'll take out $1,000... the remaining refeeded for the phase 2 target."
+
+    Takes `vault_expense_usd` OUT of compound's real vault (banked("compound")) -- recorded in
+    CASHOUT_KEY under "compound", the same ledger _fixed_cashout_combined already uses, so
+    banked() correctly reflects the withdrawal afterward (banked() has no separate state of its
+    own -- it's derived fresh from COMPOUND_STAGES vs. realized_pnl() each call, same stateless
+    principle as everywhere else in this module; recording the withdrawal in CASHOUT_KEY is what
+    makes that derivation come out lower next time, via realized_pnl()'s `- withdrawn(book_id)`
+    term).
+
+    The REMAINDER of the vault (whatever's left after vault_expense_usd comes out) is then
+    deposited as new seed capital for the NEXT phase, via DEPOSITS_KEY (the same existing,
+    generic "capital credited into a book from outside its own trading" mechanism
+    check_sprint_compound_cascade() already uses) -- split across `next_phase_books` by
+    PHASE_ENGINE_SPLIT (or 100% to compound alone if next_phase_books is a one-book tuple, same
+    pattern as phase 1's own compound-solo routing).
+
+    If the vault is smaller than vault_expense_usd (shouldn't happen in practice given
+    COMPOUND_STAGES' thresholds, but never assume), takes everything the vault has and leaves
+    $0 to reseed with -- never goes negative, never invents money. Returns a record of exactly
+    what happened for the milestone-fire log."""
+    vault_before = banked("compound")
+    taken = min(vault_expense_usd, vault_before)
+    remainder = round(vault_before - taken, 2)
+
+    rec = state.get_value(CASHOUT_KEY)
+    rec = rec if isinstance(rec, dict) else {}
+    if taken > 0:
+        rec.setdefault("compound", []).append({"ts": now, "amount": taken, "reason": reason})
+    # The remainder also has to come OUT of compound's vault (it's being moved, not duplicated)
+    # before being deposited into the next phase's book(s) -- otherwise compound's own vault
+    # would still show it as banked AND the next phase would show it as fresh seed, double-
+    # counting the same real dollars.
+    if remainder > 0:
+        rec.setdefault("compound", []).append(
+            {"ts": now, "amount": remainder, "reason": f"{reason}_moved_to_next_phase_seed"})
+    state.set_value(CASHOUT_KEY, rec)
+
+    next_books = list(next_phase_books or PHASE_ENGINE_BOOKS)
+    split = {b: 1.0 / len(next_books) for b in next_books} if len(next_books) > 1 else {next_books[0]: 1.0}
+    if len(next_books) > 1:
+        split = dict(PHASE_ENGINE_SPLIT)
+    deposit_rec = state.get_value(DEPOSITS_KEY)
+    deposit_rec = deposit_rec if isinstance(deposit_rec, dict) else {}
+    per_book_deposited = {}
+    if remainder > 0:
+        remaining_to_split = remainder
+        for i, b in enumerate(next_books):
+            amount = round(remainder * split.get(b, 0.0), 2)
+            if i == len(next_books) - 1:
+                amount = round(remaining_to_split, 2)  # last book absorbs rounding remainder
+            remaining_to_split = round(remaining_to_split - amount, 2)
+            if amount <= 0:
+                continue
+            deposit_rec.setdefault(b, []).append(
+                {"ts": now, "amount": amount, "reason": f"{reason}_vault_reseed"})
+            per_book_deposited[b] = amount
+        state.set_value(DEPOSITS_KEY, deposit_rec)
+
+    return {"vault_before": vault_before, "vault_expense_taken": taken,
+            "vault_remainder_reseeded": remainder, "reseeded_per_book": per_book_deposited}
+
+
 def _phase1_cumulative_banked() -> float:
     """Sum of every Phase-1 ladder rung's banked amount recorded so far. 8 Nov 2026 fix (caught
     live right after deploy): the live state carries a genuine orphaned record, 'p1_240', left
@@ -924,7 +1003,18 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
         phase_split = PHASE_ENGINE_SPLIT
     combined = _combined_equity_for_milestones(phase_books)
 
-    if phase in (1, 2, 3):
+    # 17 Nov 2026 (Claude, real latent-crash catch during test rewrite -- found by the test
+    # agent, fixed here): this used to be a hardcoded `phase in (1, 2, 3)` check, left over from
+    # when phase 3 was mid-ladder (4-phase structure). Under the NEW 3-phase structure, phase 3
+    # is the FINAL phase and its PHASE_DEFS entry has cashout=None/reseed=None by design (no
+    # auto-cashout coded for $1,000,000 yet -- "ask Ali what to do once it's actually close").
+    # The old hardcoded tuple would let phase 3 fall into the hard-cashout branch below once its
+    # trigger is hit, and pdef["cashout"]/pdef["reseed"] being None would crash
+    # _fixed_cashout_combined() with a TypeError the first time real equity reached $1,000,000 --
+    # exactly the kind of failure that must never happen in live-money code. Gating on whether
+    # this phase actually HAS a cashout value defined (rather than a hardcoded phase-number
+    # tuple) is correct for any phase count, now or if it changes again later.
+    if pdef.get("cashout") is not None:
         # The hard cash-out trigger is checked FIRST, ahead of the lighter ladder legs below.
         # This matters: if the smaller percentage-banks fired first every call, repeatedly
         # bleeding equity off the top before the cashout check ever ran, a big jump that
@@ -946,15 +1036,34 @@ def check_milestone_ladder(now: Optional[float] = None) -> Optional[dict]:
         if (cashout_key not in fired_levels and combined >= pdef["trigger"]
                 and phase1_cascade_gate_cleared):
             cashout = _fixed_cashout_combined(pdef["cashout"], pdef["reseed"],
-                                               f"phase{phase}_cashout_13nov2026",
+                                               f"phase{phase}_cashout_17nov2026",
                                                now, phase_books, phase_split)
+            # 17 Nov 2026 (Ali, explicit): the vault (separate from equity, see PHASE_DEFS' 17
+            # Nov 2026 comment) is withdrawn from and reseeded into the NEXT phase at this exact
+            # same moment -- "while we reach phase 1, the bank vault is going to be there. We'll
+            # take out $1,000... the remaining refeeded for the phase 2 target." Only fires when
+            # this phase actually defines a vault_expense_usd (phase 3/final has none -- no
+            # "next phase" to reseed).
+            vault_result = None
+            next_phase = phase + 1
+            vault_expense = pdef.get("vault_expense_usd")
+            if vault_expense is not None:
+                next_pdef = PHASE_DEFS.get(next_phase)
+                if next_phase == 2:
+                    next_books = PHASE_ENGINE_BOOKS  # phase 2 onward uses compound+sprint
+                else:
+                    next_books = PHASE_ENGINE_BOOKS
+                vault_result = _vault_withdraw_and_reseed(
+                    vault_expense, f"phase{phase}_vault_expense_17nov2026", now, next_books)
             fired_levels.append(cashout_key)
             done["fired_levels"] = fired_levels
-            done["phase"] = phase + 1
-            done[f"phase{phase + 1}_started_ts"] = now
+            done["phase"] = next_phase
+            done[f"phase{next_phase}_started_ts"] = now
             result = {"ts": now, "phase": phase, "event": f"phase{phase}_cashout",
                        "cashout_usd": pdef["cashout"], "reseed_left_usd": pdef["reseed"],
                        **cashout}
+            if vault_result is not None:
+                result["vault"] = vault_result
             done[cashout_key] = result
             state.set_value(MILESTONE_LADDER_KEY, done)
             return result
@@ -1075,12 +1184,39 @@ def total_value_real(book_id: str, chain: str = None) -> float:
 # median of $373.56 PERMANENTLY LOCKED IN regardless of what happens after -- reported to Ali and
 # approved ("Yes wire this up"). This replaces the old flat BANK_AFTER_MULT/bank_pct scheme for
 # compound ONLY (sprint/core1/core2 keep that original mechanism unchanged below).
+#
+# 17 Nov 2026 (Ali, explicit instruction): the old $1k/$5k/$10k ladder stopped banking at $10k
+# (with a stale $20k "final goal, no more banking" stop-line left over from the old $20k target,
+# which no longer exists under the new 3-phase $25k/$100k/$1M structure below). Ali: "we are not
+# building and using the system for only a $10,000 target... this needs to be changed, as well as
+# that the compound stages stop at 10,000. This has nothing to do with our system." Extended the
+# SAME escalating pattern (32.5% -> 37.5% -> 55%) forward past $10k so the vault keeps growing
+# meaningfully all the way through the new phase targets instead of freezing at $7,700 once
+# equity clears $10k. New thresholds sit just under each new phase trigger (not AT it) so the
+# vault has already locked in a real amount by the time that phase's target fires -- same
+# "protective banking happens on the way up, not only at the finish line" principle as the
+# original three stages. Continuing the same escalation step as 32.5->37.5->55 and keeping each
+# new rate below 100% (never bank the entire book -- some must stay in play to keep compounding
+# toward the next target):
+#   $10k (existing, unchanged) -> 55%
+#   $20k -> 60%   (just under the old $20k marker, now a staging point not a goal)
+#   $50k -> 65%   (between Phase 1's $25k target and Phase 2's $100k target)
+#   $150k -> 70%  (past Phase 2's $100k target, protects profit made en route to Phase 3)
+#   $500k -> 75%  (well into Phase 3's run toward $1M)
+# Ali asked for the $10k ceiling itself to be removed ("this needs to be changed") without
+# specifying exact percentages for these new tiers -- these continue the existing, already-
+# approved escalation curve rather than inventing new arbitrary numbers; flagged to Ali in the
+# comparison sheet for confirmation/adjustment.
 COMPOUND_STAGES = (
-    # (total_value threshold the book must CLEAR to bank at this stage, fraction of total_value banked)
-    (1_000.0, 0.325),
-    (5_000.0, 0.375),
-    (10_000.0, 0.55),
-    (20_000.0, 0.0),   # final target stage: no further banking, this IS the goal
+    # (total_value threshold the book must CLEAR to bank at this stage, fraction of total_value
+    #  ABOVE THE PRIOR THRESHOLD banked -- incremental, not of the full threshold value. See
+    #  banked_vault_incremental() below.)
+    (1_000.0, 0.20),
+    (5_000.0, 0.25),
+    (10_000.0, 0.30),
+    (25_000.0, 0.30),
+    (100_000.0, 0.35),
+    (500_000.0, 0.45),
 )
 
 
@@ -1124,37 +1260,56 @@ def _compound_total_value_raw_real(book_id: str, chain: str = None) -> float:
     return max(0.0, round(real_wallet_usd + committed_usd_real(book_id), 2))
 
 
-def compound_banked(book_id: str) -> float:
-    """Staged version of banked() for compound: walks COMPOUND_STAGES in order, banking bank_pct of
-    the total value AT THE MOMENT each threshold is first crossed (not continuously re-banking a
-    percentage of ever-growing equity, which would double-bank). Stateless and idempotent: recomputed
-    fresh from realized_pnl() every call, like the rest of this module -- no separate stage-tracking
-    state to get out of sync. A book that has retraced below a threshold it once crossed keeps the
-    bank from having crossed it (money already taken off the table stays off), since each stage bank
-    amount is fixed at the threshold VALUE itself, not the book's current (possibly lower) value."""
-    raw = _compound_total_value_raw(book_id)
+def _banked_vault_incremental(raw: float) -> float:
+    """17 Nov 2026 (Ali, explicit, after reviewing the effect of the OLD full-threshold-value
+    banking math on the new $25k/$100k/$1M phase targets): walks COMPOUND_STAGES, but banks
+    bank_pct of the SLICE above the PRIOR threshold at each stage, not bank_pct of that
+    threshold's full value. The old "full value" math meant a stage's banked dollar amount never
+    shrank even as a proportion of a much bigger book, but it also meant adding any new stage
+    anywhere below a phase's own target immediately and heavily taxed that exact phase's climb
+    (verified: the old math made equity actually DROP the instant a new threshold was crossed on
+    the way to $25k, the opposite of what a phase target needs). Incremental banking fixes this:
+    each stage's own bank is computed ONLY on the growth between it and the previous stage, so
+    reaching a new stage threshold banks a modest additional slice instead of a huge fixed chunk,
+    keeping the dominant share of the book as live trading equity through Phase 1 ($25k) and
+    Phase 2 ($100k) specifically, while still growing a real, meaningful vault by the time each
+    phase's target fires (see PHASE_DEFS' 17 Nov 2026 comment for the full reasoning and Ali's
+    explicit approval of this exact shape and these exact percentages)."""
     total_banked = 0.0
+    prev_threshold = 0.0
     for threshold, bank_pct in COMPOUND_STAGES:
-        if raw >= threshold and bank_pct > 0:
-            total_banked += threshold * bank_pct
-    return round(total_banked, 2)
+        if bank_pct <= 0:
+            prev_threshold = threshold
+            continue
+        if raw >= threshold:
+            total_banked += (threshold - prev_threshold) * bank_pct
+            prev_threshold = threshold
+        else:
+            total_banked += (raw - prev_threshold) * bank_pct
+            break
+    return round(max(0.0, total_banked), 2)
+
+
+def compound_banked(book_id: str) -> float:
+    """Staged version of banked() for compound: walks COMPOUND_STAGES incrementally (see
+    _banked_vault_incremental() above) against compound's PAPER total value. Stateless and
+    idempotent: recomputed fresh from realized_pnl() every call, like the rest of this module --
+    no separate stage-tracking state to get out of sync. A book that has retraced below a
+    threshold it once crossed keeps the bank from having crossed it (money already taken off the
+    table stays off), since each stage's banked amount is fixed at the threshold VALUE itself,
+    not the book's current (possibly lower) value."""
+    return _banked_vault_incremental(_compound_total_value_raw(book_id))
 
 
 def compound_banked_real(book_id: str, chain: str = None) -> float:
-    """15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"):
-    REAL counterpart to compound_banked() -- walks the exact same COMPOUND_STAGES ladder
-    ($1k@32.5%, $5k@37.5%, $10k@55%, $20k final) but against compound's REAL total value
-    (_compound_total_value_raw_real()) instead of paper's. This is what check_sprint_compound_
-    cascade() below must use once compound is live for real money: the $500 cascade trigger
-    and the $1k/$5k/$10k banking stages all need to reflect the real wallet's real profit, not
-    a paper number with no connection to it -- compound_banked() alone was the last paper-based
-    link left in the real-money path after Fix #1/#2/#3 closed the sizing/count/entry gaps."""
-    raw = _compound_total_value_raw_real(book_id, chain=chain)
-    total_banked = 0.0
-    for threshold, bank_pct in COMPOUND_STAGES:
-        if raw >= threshold and bank_pct > 0:
-            total_banked += threshold * bank_pct
-    return round(total_banked, 2)
+    """15 Nov 2026 (Ali, "fix everything... cascade... every single thing which is needed"),
+    17 Nov 2026 (Ali, switched to incremental banking -- see _banked_vault_incremental()): REAL
+    counterpart to compound_banked() -- walks the same COMPOUND_STAGES ladder incrementally but
+    against compound's REAL total value (_compound_total_value_raw_real()) instead of paper's.
+    This is what check_sprint_compound_cascade() below must use once compound is live for real
+    money: the $500 cascade trigger and every banking stage all need to reflect the real
+    wallet's real profit, not a paper number with no connection to it."""
+    return _banked_vault_incremental(_compound_total_value_raw_real(book_id, chain=chain))
 
 
 def banked(book_id: str) -> float:

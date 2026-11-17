@@ -9,17 +9,23 @@ actively tracking real progress. This module's structure below has been updated 
 real plan for consistency -- if this module is ever armed via start_phase(), it should track the
 SAME real targets PHASE_DEFS already uses live.
 
-Ali's confirmed 4-phase structure (16 Nov 2026, supersedes the earlier 5-phase "Curve C" plan
-wholesale; reseed/cashout amounts per PHASE_DEFS in executor/books.py):
+Ali's confirmed 3-phase structure (17 Nov 2026, supersedes the 16 Nov 4-phase plan wholesale --
+Ali: "we have clear cut three phases... not the previous four targets or the previous five
+targets"; reseed/cashout amounts per PHASE_DEFS in executor/books.py):
 
-  Phase 1: $115   -> $6,000      On hit: withdraw $4,500 (fund S1b, all parts). Leave $1,500 for Phase 2.
-  Phase 2: $1,500 -> $13,000     On hit: withdraw $11,000 (pay Dec liability). Leave $2,000 for Phase 3.
-  Phase 3: $2,000 -> $105,000    On hit: withdraw $100,000 (main debt payment). Leave $5,000 for Phase 4.
-  Phase 4: $5,000 -> $1,000,000  On hit: withdraw $985,000 (financial freedom). Leave $15,000 running.
+  Phase 1: $115 -> $25,000      On hit: cash out the FULL $25,000 (debt payment).
+  Phase 2: (reseeded from Phase 1's vault, see below) -> $100,000.  On hit: cash out the FULL
+           $100,000 (debt payment).
+  Phase 3: (reseeded from Phase 2's vault) -> $1,000,000.  No automatic cash-out wired yet.
 
-Each phase's own ladder-rung partial banking is a risk-management side effect of normal trading,
-never counted as a separate "income" toward that phase's trigger -- the trigger is always
-checked against combined equity, which already includes any ladder-banked amount once.
+17 Nov 2026 (Ali, explicit, critical correction -- see PHASE_DEFS' own 17 Nov 2026 comment in
+books.py for the full history): the banked VAULT (COMPOUND_STAGES/banked()) is a SEPARATE pool
+from the phase target -- it is NOT counted toward reaching a phase's trigger, and the trigger
+is checked against TRADING EQUITY ALONE (equity() = total_value() - banked()), which already
+excludes the vault. Each phase's cash-out takes the FULL target amount out of equity (nothing
+held back/reseeded from equity itself); separately, at that same moment, $1,000 (Phase 1) or
+$2,000 (Phase 2) is withdrawn from the vault as expense, and the vault's remainder becomes the
+next phase's starting seed -- this is the ONLY source of reseed capital under the new structure.
 
 This is a single combined-equity watcher across sprint+core1+core2+compound together, with a
 hard stop (no book takes a new trade once the current phase's target is hit) and an explicit,
@@ -67,28 +73,25 @@ PHASE_KEY = "phase_target_v1"
 # window_group: phases sharing a window_group share one clock -- the window starts when the FIRST
 # phase in the group starts and does not reset when the next phase in the group begins. A phase
 # with no group (or alone in one) gets its own fresh clock starting at its own start_phase() call.
-# 16 Nov 2026 (Claude): rewritten to match the REAL confirmed 4-phase structure (see
+# 17 Nov 2026 (Claude): rewritten to match the REAL confirmed 3-phase structure (see
 # executor/books.py PHASE_DEFS, which is the live, actually-tracked version of these same
-# targets). Each phase here gets its own independent window_group (1/2/3/4 -- no two phases
-# share a clock in the new 4-phase structure, unlike the old 5-phase plan where phases 2+3 once
-# shared one). hours_allowed/drawdown_pause_pct kept as placeholders consistent with this
-# module's original design; not yet confirmed against PHASE_DEFS, which has no time-window
-# concept at all -- if this module is ever armed, those fields should be reviewed against what
+# targets). Each phase here gets its own independent window_group (1/2/3 -- no two phases
+# share a clock in the new 3-phase structure). hours_allowed/drawdown_pause_pct kept as
+# placeholders consistent with this module's original design; not yet confirmed against
+# PHASE_DEFS, which has no time-window concept at all -- if this module is ever armed, those
+# fields should be reviewed against what
 # Ali actually wants for time limits, separately from the target/cashout/reseed amounts below
 # which ARE the confirmed real numbers.
 PHASES = {
-    "1": {"label": "Phase 1: $115 -> $6,000", "target_usd": 6_000.0,
-          "cashout_usd": 4_500.0, "reseed_usd": 1_500.0, "hours_allowed": 96.0,
+    "1": {"label": "Phase 1: $115 -> $25,000", "target_usd": 25_000.0,
+          "cashout_usd": 25_000.0, "reseed_usd": 0.0, "hours_allowed": None,
           "drawdown_pause_pct": 0.50, "next": "2", "window_group": "1"},
-    "2": {"label": "Phase 2: $1,500 -> $13,000", "target_usd": 13_000.0,
-          "cashout_usd": 11_000.0, "reseed_usd": 2_000.0, "hours_allowed": 240.0,
-          "drawdown_pause_pct": 0.50, "next": "3", "window_group": "23"},
-    "3": {"label": "Phase 3: $2,000 -> $105,000", "target_usd": 105_000.0,
-          "cashout_usd": 100_000.0, "reseed_usd": 5_000.0, "hours_allowed": 360.0,
-          "drawdown_pause_pct": 0.50, "next": "4", "window_group": "3"},
-    "4": {"label": "Phase 4: $5,000 -> $1,000,000", "target_usd": 1_000_000.0,
-          "cashout_usd": 985_000.0, "reseed_usd": 15_000.0, "hours_allowed": None,
-          "drawdown_pause_pct": 0.50, "next": None, "window_group": "4"},
+    "2": {"label": "Phase 2: (vault reseed) -> $100,000", "target_usd": 100_000.0,
+          "cashout_usd": 100_000.0, "reseed_usd": 0.0, "hours_allowed": None,
+          "drawdown_pause_pct": 0.50, "next": "3", "window_group": "2"},
+    "3": {"label": "Phase 3: (vault reseed) -> $1,000,000", "target_usd": 1_000_000.0,
+          "cashout_usd": None, "reseed_usd": None, "hours_allowed": None,
+          "drawdown_pause_pct": 0.50, "next": None, "window_group": "3"},
 }
 
 
