@@ -50,6 +50,15 @@ _CANDIDATE_EVAL_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "
 
 
 def _log_candidate_eval(p: dict, now: float, age_min: float, confirmations, lanes) -> None:
+    # 18 Nov 2026 (fix, same day): pytest sets PYTEST_CURRENT_TEST for every test it runs --
+    # guard on it so running the test suite can NEVER write synthetic/fixture candidates into
+    # this real log, no matter which test calls Scanner.evaluate() directly or whether that
+    # test remembers to monkeypatch _CANDIDATE_EVAL_LOG. Confirmed real contamination from
+    # exactly this gap tonight: 45 fixture rows (ts=10000.0, addrs like "0xrh30k"/"SolBig")
+    # from 3 separate test-suite runs landed in the real logs/candidate_eval.jsonl before this
+    # guard existed. File was truncated clean once found; this stops it recurring.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
     try:
         rec = {
             "ts": now,
