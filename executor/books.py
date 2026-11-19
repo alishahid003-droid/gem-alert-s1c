@@ -1270,11 +1270,21 @@ def _compound_total_value_raw_real(book_id: str, chain: str = None) -> float:
     real_wallet_usd = (_se.get_real_wallet_usd(chain) if chain
                         else _se.get_total_real_wallet_usd())
     if real_wallet_usd is None:
-        import logging
-        logging.getLogger(__name__).warning(
-            "books._compound_total_value_raw_real(%s, chain=%s): live wallet read failed -- "
-            "this chain's balance is being counted as $0 for this call, NOT a real reading of $0",
-            book_id, chain)
+        # 19 Nov 2026 (Ali, real incident): this used to log via logging.getLogger(__name__).warning()
+        # -- which NOTHING in this codebase ever configures a handler for (confirmed: no
+        # logging.basicConfig/addHandler call exists anywhere in local_runner.py, multichain_sniper.py
+        # or this file), so every one of these warnings was being silently swallowed, never once
+        # reaching local_runner.log or any other file Ali could see. This was the real reason
+        # Robinhood Chain went completely silent (zero visible failure reason) while Base's
+        # equivalent failures DID show up -- Base fails one step later, inside execute_buy_base's
+        # own print()-based error path, which actually gets written. print(..., flush=True) matches
+        # every other real event in this codebase (see multichain_sniper.py's own ENTRY line) and
+        # will show up in local_runner.log exactly like those do.
+        print(f"[books] WARNING: live wallet read failed for chain={chain!r} (book={book_id}) -- "
+              f"this chain's balance is being counted as $0 for THIS call, NOT a real reading of "
+              f"$0 -- a real-balance-dependent decision (stake sizing, banked vault, cascade "
+              f"trigger) may be silently treating a temporarily-unreadable wallet as empty",
+              flush=True)
         real_wallet_usd = 0.0
     return max(0.0, round(real_wallet_usd + committed_usd_real(book_id), 2))
 

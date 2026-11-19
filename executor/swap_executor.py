@@ -1647,10 +1647,23 @@ def get_real_wallet_usd(chain: str) -> Optional[float]:
     balance or the price can't be read live.
 
     chain must be "robinhood_chain" or "base" -- the two chains with real
-    execution wired up (see executor/config.py's ready_for_chain)."""
+    execution wired up (see executor/config.py's ready_for_chain).
+
+    19 Nov 2026 (Ali, real incident): every None-return path below now prints a specific,
+    visible reason via print(..., flush=True) -- same convention multichain_sniper.py's own
+    ENTRY lines use, so these land in local_runner.log. Before this, a None from here propagated
+    silently all the way up through books._compound_total_value_raw_real() (which ALSO logged
+    silently, via a never-configured logging.getLogger() call -- fixed separately, same commit)
+    to stake_usd() returning $0 with zero trace of why. Confirmed real-world effect: Robinhood
+    Chain candidates were reaching the live module, qualifying, and getting a $0 stake with no
+    visible reason anywhere, while Base's equivalent failures DID show up (Base fails one step
+    LATER, inside execute_buy_base's own already-visible print-based error path). This makes
+    the earlier, silent failure visible too, at the exact point it happens."""
     try:
         from eth_account import Account  # type: ignore
     except ImportError:
+        print(f"[swap_executor] get_real_wallet_usd({chain}): eth_account not installed -- "
+              f"cannot read real wallet balance", flush=True)
         return None
 
     if chain == "robinhood_chain":
@@ -1658,17 +1671,26 @@ def get_real_wallet_usd(chain: str) -> Optional[float]:
     elif chain == "base":
         private_key = EXECUTOR_CONFIG.base_private_key
     else:
+        print(f"[swap_executor] get_real_wallet_usd({chain}): unsupported chain, no real "
+              f"execution wired up for it", flush=True)
         return None
     if not private_key:
+        print(f"[swap_executor] get_real_wallet_usd({chain}): no private key configured for "
+              f"this chain", flush=True)
         return None
 
     try:
         address = Account.from_key(private_key).address
-    except Exception:  # noqa: BLE001 -- a bad key must never crash the sizing path
+    except Exception as _key_exc:  # noqa: BLE001 -- a bad key must never crash the sizing path
+        print(f"[swap_executor] get_real_wallet_usd({chain}): could not derive address from "
+              f"configured private key: {_key_exc}", flush=True)
         return None
 
     balance_wei = _get_evm_native_balance(chain, address)
     if balance_wei is None:
+        print(f"[swap_executor] get_real_wallet_usd({chain}): live on-chain balance read "
+              f"failed (RPC unreachable/timed out/erroring) -- real stake sizing for this "
+              f"chain will see $0 this cycle, NOT a real $0 balance", flush=True)
         return None
 
     if chain == "base":
@@ -1676,6 +1698,9 @@ def get_real_wallet_usd(chain: str) -> Optional[float]:
     else:  # robinhood_chain
         native_price = _rhc_native_price_usd(_RHC_NATIVE_PRICE_REFERENCE_TOKEN)
     if native_price is None or native_price <= 0:
+        print(f"[swap_executor] get_real_wallet_usd({chain}): could not read a live native "
+              f"token price (got {native_price!r}) -- real stake sizing for this chain will "
+              f"see $0 this cycle, NOT a real $0 balance", flush=True)
         return None
 
     return (balance_wei / 10 ** 18) * native_price
