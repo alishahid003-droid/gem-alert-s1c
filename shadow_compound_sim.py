@@ -182,10 +182,27 @@ def main():
     seen = _load_seen_addrs()
     open_positions = {}  # (chain, addr) -> pos dict
     last_cand_ts = time.time() - 24 * 3600  # look back 24h on first run to backfill today's candidates
+    _last_slug_retry = time.time()
 
     while True:
         now = time.time()
         try:
+            # 19 Nov 2026 (bug fix, Ali caught it): resolve_rhc() was only called once at
+            # startup -- one transient failure there meant robinhood_chain (~95% of our real
+            # candidate volume) was silently skipped for the ENTIRE run with no recovery (the
+            # real live bot's own local_runner.log showed robinhood_chain resolving fine and
+            # continuously the whole time, confirming it was a one-off blip on this sim's side,
+            # not a real outage). Retry every 120s whenever robinhood_chain is still missing.
+            if "robinhood_chain" not in slugs and now - _last_slug_retry >= 120:
+                _last_slug_retry = now
+                try:
+                    from multichain_sniper import resolve_rhc as _rr
+                    _rhc = _rr()
+                    if _rhc:
+                        slugs["robinhood_chain"] = _rhc
+                        print(f"[shadow_compound_sim] robinhood_chain slug resolved on retry: {_rhc}", flush=True)
+                except Exception:
+                    pass
             already = set(open_positions.keys()) | seen
             new_cands = _new_candidates(last_cand_ts, already)
             for cand in new_cands:
