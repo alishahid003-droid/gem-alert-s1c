@@ -127,9 +127,34 @@ def _make_pos(cand, now):
 
 
 def _fetch_mcaps(chain, slug, addrs):
-    from winners_tracker import gt_multi_fetch
+    """19 Nov 2026 (bug fix, Ali caught it): originally used winners_tracker.gt_multi_fetch,
+    which hits GeckoTerminal's /tokens/multi/ endpoint (token-level index). For a token only
+    minutes old, that endpoint is frequently stale/unindexed and returned mcap values wildly
+    below the real pool price -- 5/5 early closes all hit the hard stop on the FIRST poll,
+    hold_min=0.0, peak=1.00x, which is a data-source bug, not real price action (confirmed:
+    independent unrelated tokens do not crash identically in the same second).
+
+    Fixed to use the exact same /new_pools endpoint (via _gt_get + parse_pools) the REAL live
+    bot itself uses for every real entry mcap in candidate_eval.jsonl -- so this is now the
+    same data source on both sides of the comparison, not two different GeckoTerminal indexes.
+    /new_pools returns the most recent pools for the chain; we match our open addresses
+    against whatever is in that response right now. A token that has aged out of the
+    new-pools window (no longer among the most recent) will simply return no match this
+    cycle -- handled by the existing no-price-data timeout path below, not a wrong price."""
+    from multichain_sniper import _gt_get, parse_pools
     try:
-        return gt_multi_fetch(slug, addrs) or {}
+        body = _gt_get(slug)
+        if not body:
+            return {}
+        pools = parse_pools(body, chain)
+        out = {}
+        want = set(addrs)
+        for p in pools:
+            a = p.get("addr")
+            mc = p.get("mcap")
+            if a in want and mc:
+                out[a] = mc
+        return out
     except Exception:
         return {}
 
