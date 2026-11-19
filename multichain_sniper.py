@@ -59,11 +59,17 @@ def _log_candidate_eval(p: dict, now: float, age_min: float, confirmations, lane
     # guard existed. File was truncated clean once found; this stops it recurring.
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return
+    # 19 Nov 2026 (Ali, explicit instruction): added mcap/liq -- both already present on `p`
+    # (Scanner.evaluate() reads them at its very first line: mcap, liq = p.get("mcap"), p.get("liq")),
+    # just never logged here before. This is purely additive to the row shape -- nothing else
+    # about what gets logged or when changes.
     try:
         rec = {
             "ts": now,
             "chain": p.get("chain"),
             "addr": p.get("addr"),
+            "mcap": p.get("mcap"),
+            "liq": p.get("liq"),
             "age_min": round(age_min, 2) if age_min is not None else None,
             "confirmations": list(confirmations) if confirmations is not None else None,
             "n_confirmations": len(confirmations) if confirmations is not None else None,
