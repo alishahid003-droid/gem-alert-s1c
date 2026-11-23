@@ -66,3 +66,39 @@ real Curve C stake sizing, real measured pace (13.8 trades/day):
 
 No real trades have closed yet under tonight's (23 Nov) ratchet + max-hold fixes -- this will be
 re-run once real post-fix trades exist. Phase 2/3 extension in progress.
+
+## Phase transition reseed values (23 Nov 2026, real Monte Carlo, real vault mechanics)
+
+At each phase transition, the vault (COMPOUND_STAGES banking, separate from trading equity)
+reseeds the next phase after its fixed expense comes out:
+
+| Transition | Vault balance at trigger | Fixed expense | Reseed into next phase |
+|---|---|---|---|
+| Phase 1 -> 2 | ~$7,750 (median; range ~$7,230-$8,960) | $1,000 | ~$6,750 (median; range ~$6,230-$7,960) |
+| Phase 2 -> 3 | ~$36,570 (median; range ~$34,600-$41,500) | $2,000 | ~$34,570 (median; range ~$32,600-$39,500) |
+
+These reseed values are already baked into the Phase 2/3 timing estimates below (each phase
+starts from its real reseed, not from $115 again).
+
+## Win-rate sensitivity (23 Nov 2026, same Curve C mechanics, real win/loss MAGNITUDE pools
+## separated and remixed at each win rate -- not the same blended sample resampled)
+
+| Win rate | Phase 1 | Phase 2 | Phase 3 | Total ($115->$1M) |
+|---|---|---|---|---|
+| 34.3% (real, bug-adjusted) | 18.1 days | 16.4 days | 33.3 days | ~68.5 days (~2.3 mo) |
+| 40% | 13.4 days | 12.3 days | 25.2 days | ~51.2 days (~1.7 mo) |
+| 45% | 10.9 days | 10.1 days | 20.5 days | ~41.9 days (~1.4 mo) |
+| 50% | 9.3 days | 8.6 days | 17.4 days | ~35.4 days (~1.2 mo) |
+
+Going from 34% to 50% win rate roughly halves total climb time.
+
+## Bust rate (23 Nov 2026)
+
+At the real measured 34.3% win rate: 0/4000 simulated runs busted (equity never dropped below
+$5 across all 3 phases). CAVEAT -- this likely UNDERSTATES real tail risk: the model draws from
+only 38 real historical trades (24 losses), so it cannot produce a true tail event (e.g. 10+
+consecutive losses) that hasn't happened yet in real trading but statistically could; it also
+does not model the real drawdown circuit breaker pausing trading (which would show up as a
+stall, not a clean bust), and it runs trades strictly sequentially while the real system holds
+multiple concurrent positions. Treat 0% as "no bust in this simplified model with this thin
+sample," not "the system cannot bust."
