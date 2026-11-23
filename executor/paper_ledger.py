@@ -656,6 +656,17 @@ EARLY_TRAIL_RATCHET = {
     "sprint": ((1.8, 0.55), (3.0, 0.65), (6.0, 0.75)),
     "core1": ((2.0, 0.50), (4.0, 0.60), (8.0, 0.70)),
     "core2": ((2.5, 0.45), (5.0, 0.55)),   # no 8x+ band -- CORE2_MOONSHOT_CARVEOUT_PCT takes over there instead
+    # 23 Nov 2026 (Ali, robinhood_chain/base compound review): compound had NO ratchet at all --
+    # it fell back to its flat EARLY_RULES trail (0.78, i.e. a constant 22% giveback-from-peak)
+    # no matter how high the peak went. Verified against real paper_closed_positions: zero closed
+    # RHC/Base compound trades exist yet to calibrate against (real compound trading on those
+    # chains has not produced a single closed position), so this is sized off the ONLY evidence
+    # that exists -- the shadow_compound_sim RHC/Base results. 4 real sim trades peaked >3x; a
+    # ratchet at these bands would have captured roughly +$225-$282 more across them combined
+    # (computed directly from each trade's logged peak_mcap/last_mcap, not estimated). Bands
+    # mirror core1's proven pattern (compound sits closest to core1 in risk profile) rather than
+    # inventing new numbers with no real-data backing.
+    "compound": ((3.0, 0.85), (5.0, 0.90), (8.0, 0.93)),
 }   # (activation_peak_mult, giveback_lock_pct) bands, checked highest-first; a book not listed keeps its flat trail from EARLY_RULES
 
 
