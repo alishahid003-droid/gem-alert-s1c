@@ -113,13 +113,28 @@ class _ShadowEquity:
             self.paused = False
         return was_paused, self.paused, floor
 
-    def next_stake(self):
+    def next_stake(self, n_open_now: int = 0):
         eq = self.equity
         if self.paused:
             return 0.0
         if eq < MIN_EQUITY_TO_TRADE:
             return 0.0
+        # 23 Nov 2026 (Ali, capital-starvation gap): real system spreads capital across up to
+        # max_open()'s floor of 8 concurrent positions, so no single stake ever claims more than
+        # roughly 1/8th of the capital ceiling at once -- real data confirmed 3 real open
+        # positions alone saturated the 75%-of-equity ceiling here (committed $279.05 vs a
+        # $279.05 ceiling, $0.0025 of room left), starving every new candidate for 10+ hours
+        # even though all 3 open positions were profitable and nothing was actually stuck. The
+        # shadow sim never had an equivalent of max_open()'s position-count awareness -- base
+        # stake size here was flat 50%-of-equity with no idea how many positions were already
+        # open. Fix: once MAX_CONCURRENT_POSITIONS-worth of slots are in play, shrink the stake
+        # toward an even per-slot share of the ceiling instead of always asking for a full
+        # 50%-of-equity bite -- same intent as the real system's capacity-based sizing, without
+        # importing max_open() itself (kept as a small, targeted fix, not a rebuild).
         base = eq * SHOT_PCT
+        if n_open_now > 0:
+            per_slot_share = (eq * MAX_SHARE) / max(1, MAX_CONCURRENT_POSITIONS)
+            base = min(base, per_slot_share)
         room_left = max(0.0, eq * MAX_SHARE - self.committed_usd)
         stake = min(base, room_left)
         if stake < STAKE_FLOOR_USD:
@@ -438,7 +453,7 @@ def main():
                                      "addr": cand["addr"], "n_open": n_open_now,
                                      "cap": MAX_CONCURRENT_POSITIONS})
                     continue
-                stake = eq_pool.next_stake()
+                stake = eq_pool.next_stake(n_open_now=n_open_now)
                 if stake <= 0.0:
                     _append_shadow({"event": "skip_no_capital", "ts": now, "chain": cand["chain"],
                                      "addr": cand["addr"], "equity": eq_pool.equity,
