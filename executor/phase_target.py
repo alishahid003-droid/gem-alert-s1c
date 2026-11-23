@@ -65,6 +65,24 @@ REAL_BOOKS = ("sprint", "core1", "core2", "compound")  # kept for backward compa
 
 PHASE_KEY = "phase_target_v1"
 
+
+def _dashboard_alert(phase: str, kind: str, headline: str, tags: dict, ts: float):
+    """23 Nov 2026 (Ali, explicit): phase_target events (target_hit, cashout_recommended,
+    drawdown_pause/resume) were only ever a console print() line before this -- invisible unless
+    someone was staring at local_runner.log at that exact moment. A target_hit is a HARD stop
+    with no auto-resume, so a missed alert means real trading sits idle indefinitely for no
+    reason. Posts to the dashboard's own Alerts tab via the SAME state.log_full_alert() call
+    dev_alerts.py already uses for real, proven dashboard alerts -- deliberately not Telegram
+    (restricted in Ali's country; he has said before he wants this on the dashboard, not
+    Telegram). Best-effort: never let a logging failure interfere with the real pause/resume
+    logic above, which must always take effect regardless of whether the alert itself lands."""
+    try:
+        import state as _state_mod
+        _state_mod.log_full_alert("phase_target", "multichain", f"PHASE_{phase}", f"phase_target_{kind}",
+                                   headline, tags or {}, ts=ts)
+    except Exception:
+        pass
+
 # Each phase: target_usd, cashout_usd, reseed_usd, time allowed, drawdown_pause_pct, next phase.
 # drawdown_pause_pct: pause new entries if combined equity falls below this fraction of its own
 # peak-so-far THIS phase (e.g. 0.65 = paused if equity drops to <=65% of the highest point reached
@@ -334,11 +352,21 @@ def check(now: Optional[float] = None) -> dict:
                   "peak_equity": peak, "floor": round(floor, 2)}
             d.setdefault("events", []).append(ev)
             fired.append(ev)
+            _dashboard_alert(phase, "drawdown_pause",
+                              f"DRAWDOWN PAUSE -- Phase {phase}: equity ${eq:,.2f} fell to/below "
+                              f"${floor:,.2f} ({p['drawdown_pause_pct']*100:.0f}% of peak "
+                              f"${peak:,.2f}). New entries paused -- open positions keep managing "
+                              f"normally. Will resume automatically once equity recovers above the floor.",
+                              {"Equity": f"${eq:,.2f}", "Floor": f"${floor:,.2f}", "Peak": f"${peak:,.2f}"}, now)
         elif _real_read_ok and was_paused and eq > floor:
             d["paused"] = False
             ev = {"ts": now, "type": "drawdown_resume", "phase": phase, "equity": eq, "floor": round(floor, 2)}
             d.setdefault("events", []).append(ev)
             fired.append(ev)
+            _dashboard_alert(phase, "drawdown_resume",
+                              f"DRAWDOWN RESUME -- Phase {phase}: equity ${eq:,.2f} back above "
+                              f"${floor:,.2f}. New entries allowed again.",
+                              {"Equity": f"${eq:,.2f}", "Floor": f"${floor:,.2f}"}, now)
 
         # --- target hit: alert, stop new entries (via paused=True), cash out, hand off to next phase ---
         if eq >= p["target_usd"]:
@@ -361,6 +389,22 @@ def check(now: Optional[float] = None) -> dict:
                        "note": note}
                 d.setdefault("events", []).append(ev2)
                 fired.append(ev2)
+                # 23 Nov 2026 (Ali, explicit): this is a HARD stop with no auto-resume -- unlike
+                # the drawdown breaker, trading stays fully paused until Ali manually cashes out
+                # and calls start_phase() for the next phase. If this alert is missed, real
+                # trading sits idle indefinitely for no reason -- so it MUST land somewhere Ali
+                # will actually see, not just a console print line nobody is watching. Posted to
+                # the dashboard Alerts tab via the same state.log_full_alert() path dev_alerts.py
+                # already proves works for real alerts, deliberately not Telegram (restricted in
+                # Ali's country, and he's said before he wants this on the dashboard specifically).
+                _dashboard_alert(phase, "target_hit",
+                                  f"PHASE {phase} TARGET HIT -- ${eq:,.2f} reached (target "
+                                  f"${p['target_usd']:,.0f}). ALL NEW TRADES PAUSED -- stays "
+                                  f"paused until you cash out and start the next phase yourself. "
+                                  f"{note}",
+                                  {"Equity": f"${eq:,.2f}", "Target": f"${p['target_usd']:,.0f}",
+                                   "Cashout": f"${cashed:,.0f}" if cashed is not None else "n/a",
+                                   "Next phase": str(next_phase) if next_phase else "FINAL PHASE"}, now)
         return d
 
     d = state.get_value(PHASE_KEY)
