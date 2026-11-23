@@ -74,18 +74,49 @@ EXEC_DELAY_S = float(os.environ.get("SHADOW_EXEC_DELAY_S", "4.0"))
 CONFIRM_CHECK_ENABLED = os.environ.get("SHADOW_CONFIRM_CHECK", "1").strip() != "0"
 
 
+# 23 Nov 2026 (Ali, drawdown breaker -- Monte Carlo evidence): tested against 38 real
+# robinhood_chain/base trades + real Curve C sizing + real overlapping concurrency. The
+# original 50%-of-peak pause threshold self-stalled ~40% of simulated climbs (pause-only
+# breaker, nothing forces recovery if too few positions are open to carry equity back over
+# the floor). Raised to 65% -- cuts stall rate to ~1% for ~1 extra day of climb time. Matches
+# the same tuning just applied to executor/phase_target.py's PHASES dict (real system).
+DRAWDOWN_PAUSE_PCT = float(os.environ.get("SHADOW_DRAWDOWN_PAUSE_PCT", "0.65"))
+# Matches executor/books.py max_open()'s real floor for "daily"-kind books (compound) -- 8.
+# The shadow sim had NO concurrency cap at all before this; real trading's own max_open()
+# already enforces one, so this brings the shadow sim in line with the real book it mirrors.
+MAX_CONCURRENT_POSITIONS = int(os.environ.get("SHADOW_MAX_CONCURRENT", "8"))
+
+
 class _ShadowEquity:
     def __init__(self, start_usd):
         self.realized_pnl = 0.0
         self.start_usd = start_usd
         self.committed_usd = 0.0
+        self.peak_equity = start_usd
+        self.paused = False
 
     @property
     def equity(self):
         return round(max(0.0, self.start_usd + self.realized_pnl), 2)
 
+    def update_drawdown_state(self):
+        """Call once per loop before sizing/opening decisions. Updates peak-equity tracking
+        and fires pause/resume -- pause-only, never force-closes anything, matching the real
+        system's phase_target.py design exactly."""
+        eq = self.equity
+        self.peak_equity = max(self.peak_equity, eq)
+        floor = self.peak_equity * DRAWDOWN_PAUSE_PCT if self.peak_equity > 0 else 0.0
+        was_paused = self.paused
+        if not was_paused and self.peak_equity > 0 and eq <= floor:
+            self.paused = True
+        elif was_paused and eq > floor:
+            self.paused = False
+        return was_paused, self.paused, floor
+
     def next_stake(self):
         eq = self.equity
+        if self.paused:
+            return 0.0
         if eq < MIN_EQUITY_TO_TRADE:
             return 0.0
         base = eq * SHOT_PCT
@@ -142,6 +173,13 @@ def _load_prior_equity_state():
                 stk = open_stakes.pop(key, r.get("stake_usd", 0.0))
                 eq.committed_usd = round(max(0.0, eq.committed_usd - stk), 2)
                 eq.realized_pnl = round(eq.realized_pnl + (r.get("pnl_usd") or 0.0), 2)
+                # 23 Nov 2026: track the real historical peak equity across restarts too, same
+                # fix pattern as _load_open_positions() -- without this, peak_equity resets to
+                # START_EQUITY_USD on every restart and the drawdown breaker could trip on a
+                # completely stale, artificially-low floor right after a restart.
+                equity_after_this_close = eq.equity
+                if equity_after_this_close > eq.peak_equity:
+                    eq.peak_equity = equity_after_this_close
     return eq
 
 
@@ -369,11 +407,36 @@ def main():
                 except Exception:
                     pass
 
+            was_paused, is_paused, dd_floor = eq_pool.update_drawdown_state()
+            if is_paused and not was_paused:
+                _append_shadow({"event": "drawdown_pause", "ts": now, "equity": eq_pool.equity,
+                                 "peak_equity": eq_pool.peak_equity, "floor": round(dd_floor, 2)})
+                print(f"[shadow_compound_sim] DRAWDOWN PAUSE: equity=${eq_pool.equity:,.2f} "
+                      f"<= floor=${dd_floor:,.2f} ({DRAWDOWN_PAUSE_PCT*100:.0f}% of peak "
+                      f"${eq_pool.peak_equity:,.2f}) -- new entries refused until equity recovers "
+                      f"above the floor; open positions keep managing normally.", flush=True)
+            elif was_paused and not is_paused:
+                _append_shadow({"event": "drawdown_resume", "ts": now, "equity": eq_pool.equity,
+                                 "floor": round(dd_floor, 2)})
+                print(f"[shadow_compound_sim] DRAWDOWN RESUME: equity=${eq_pool.equity:,.2f} "
+                      f"> floor=${dd_floor:,.2f} -- new entries allowed again.", flush=True)
+
             already = set(open_positions.keys()) | set(pending_closes.keys()) | seen
             new_cands = _new_candidates(last_cand_ts, already)
             for cand in new_cands:
                 last_cand_ts = max(last_cand_ts, cand["ts"])
                 if cand["chain"] not in slugs:
+                    continue
+                if eq_pool.paused:
+                    _append_shadow({"event": "skip_drawdown_paused", "ts": now, "chain": cand["chain"],
+                                     "addr": cand["addr"], "equity": eq_pool.equity,
+                                     "peak_equity": eq_pool.peak_equity})
+                    continue
+                n_open_now = len(open_positions) + len(pending_closes)
+                if n_open_now >= MAX_CONCURRENT_POSITIONS:
+                    _append_shadow({"event": "skip_max_concurrent", "ts": now, "chain": cand["chain"],
+                                     "addr": cand["addr"], "n_open": n_open_now,
+                                     "cap": MAX_CONCURRENT_POSITIONS})
                     continue
                 stake = eq_pool.next_stake()
                 if stake <= 0.0:

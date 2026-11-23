@@ -67,8 +67,22 @@ PHASE_KEY = "phase_target_v1"
 
 # Each phase: target_usd, cashout_usd, reseed_usd, time allowed, drawdown_pause_pct, next phase.
 # drawdown_pause_pct: pause new entries if combined equity falls below this fraction of its own
-# peak-so-far THIS phase (e.g. 0.50 = paused if equity drops to <=50% of the highest point reached
+# peak-so-far THIS phase (e.g. 0.65 = paused if equity drops to <=65% of the highest point reached
 # since the phase started) -- a real circuit breaker, not a projection.
+#
+# 23 Nov 2026 (Ali, tuned per Monte Carlo evidence): the original 0.50 threshold was tested
+# against real shadow_compound_sim trade data (38 real robinhood_chain/base trades, Curve C
+# sizing, real COMPOUND_STAGES vault mechanics, realistic overlapping concurrency up to
+# max_open()'s real floor) and found to self-stall ~40% of the time -- once paused, a pause-only
+# breaker (never force-closes anything, see is_paused()'s docstring) has nothing to recover with
+# if too few positions are open to carry equity back over the floor on their own. Raised 0.50 ->
+# 0.65 (pause only after a deeper, genuine 65%-of-peak drawdown, not a shallow 50% one) because
+# the simulation showed this single change cuts the stall rate to ~1% with almost no added
+# climb-time cost (same Monte Carlo: ~73 vs ~74 days median to Phase 1, nearly identical).
+# Combined with real concurrency (max_open() already returns >=8 for compound's "daily" kind at
+# any meaningful equity, well above the 3 the simulation needed), the breaker should now behave
+# as actually protective rather than a self-inflicted trap. Still unarmed in live code (see this
+# file's own docstring) -- this tunes the design so it is SAFE to arm, it does not arm it.
 #
 # window_group: phases sharing a window_group share one clock -- the window starts when the FIRST
 # phase in the group starts and does not reset when the next phase in the group begins. A phase
@@ -85,13 +99,13 @@ PHASE_KEY = "phase_target_v1"
 PHASES = {
     "1": {"label": "Phase 1: $115 -> $25,000", "target_usd": 25_000.0,
           "cashout_usd": 25_000.0, "reseed_usd": 0.0, "hours_allowed": None,
-          "drawdown_pause_pct": 0.50, "next": "2", "window_group": "1"},
+          "drawdown_pause_pct": 0.65, "next": "2", "window_group": "1"},
     "2": {"label": "Phase 2: (vault reseed) -> $100,000", "target_usd": 100_000.0,
           "cashout_usd": 100_000.0, "reseed_usd": 0.0, "hours_allowed": None,
-          "drawdown_pause_pct": 0.50, "next": "3", "window_group": "2"},
+          "drawdown_pause_pct": 0.65, "next": "3", "window_group": "2"},
     "3": {"label": "Phase 3: (vault reseed) -> $1,000,000", "target_usd": 1_000_000.0,
           "cashout_usd": None, "reseed_usd": None, "hours_allowed": None,
-          "drawdown_pause_pct": 0.50, "next": None, "window_group": "3"},
+          "drawdown_pause_pct": 0.65, "next": None, "window_group": "3"},
 }
 
 
