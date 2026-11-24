@@ -666,7 +666,20 @@ EARLY_TRAIL_RATCHET = {
     # (computed directly from each trade's logged peak_mcap/last_mcap, not estimated). Bands
     # mirror core1's proven pattern (compound sits closest to core1 in risk profile) rather than
     # inventing new numbers with no real-data backing.
-    "compound": ((3.0, 0.85), (5.0, 0.90), (8.0, 0.93)),
+    # 24 Nov 2026 (Ali: "investigate the losses, propose a fix, give me the real number"):
+    # added the missing 2.0x band. Before this, compound's trail armed at 2.0x (EARLY_TRAIL_AFTER)
+    # but the ratchet's first tightening band didn't start until 3.0x -- so every position peaking
+    # between 2.0x and 3.0x (several real robinhood_chain/base trades, 23-24 Nov) fell back to the
+    # flat EARLY_RULES giveback (0.78, i.e. a 22% giveback from peak) with no ratchet protection at
+    # all in that whole band. 0.82 is a modest 4-point tightening in the same step-size as the
+    # existing bands (0.85->0.90->0.93, each ~2-5 points tighter) -- not an aggressive guess.
+    # NOTE: a precise before/after dollar figure for this exact change was explicitly NOT estimated
+    # from the pre-24-Nov close log -- that log only records entry/peak/last/pnl per position, not
+    # remaining%% or the live price path after peak, so for a laddered position (partial rungs
+    # already sold) a dollar estimate built from pnl alone would be fabricated, not measured. The
+    # logging added in this same change (remaining_pct_at_trail_check, price_trace_tail) exists
+    # specifically so the next review of this band change has real numbers instead of a guess.
+    "compound": ((2.0, 0.82), (3.0, 0.85), (5.0, 0.90), (8.0, 0.93)),
 }   # (activation_peak_mult, giveback_lock_pct) bands, checked highest-first; a book not listed keeps its flat trail from EARLY_RULES
 
 

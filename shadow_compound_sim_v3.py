@@ -519,7 +519,24 @@ def main():
                                  "win": win, "hold_min": round(age_min, 1),
                                  "exec_delay_s": EXEC_DELAY_S, "exec_drift_pct": round(drift * 100, 2),
                                  "equity_after_close": eq_pool.equity,
-                                 "committed_after_close": eq_pool.committed_usd})
+                                 "committed_after_close": eq_pool.committed_usd,
+                                 # ADDED 24 Nov 2026 (Ali: "investigate the losses... give me the real
+                                 # number"): the close event previously logged only entry/peak/last mcap
+                                 # and the final pnl, which is NOT enough to reconstruct what a different
+                                 # ratchet/trail band would have done to a position that already sold
+                                 # partial rungs before its final trailing-stop/stop-loss sale -- pnl_usd
+                                 # alone conflates the rung proceeds with the final-slice proceeds, so a
+                                 # naive "pnl/stake" back-calculation of the final exit price is wrong
+                                 # for any laddered trade (confirmed: this caused a bad estimate this
+                                 # session before being caught). "remaining_before_close" is the fraction
+                                 # of the ORIGINAL stake still open when this close fired (near-0 for a
+                                 # clean exit_all); "sell_events" is the full per-slice sell history
+                                 # (why/pct/mult/usd for every rung + the final close sale) straight from
+                                 # pos["events"], so a future ratchet-band review can replay the EXACT
+                                 # slice math instead of estimating from the net pnl.
+                                 "remaining_before_close": round(pos.get("remaining", 0.0), 4),
+                                 "sell_events": pos.get("events", []),
+                                 "price_trace_tail": pos.get("price_trace", [])[-20:]})
                 print(f"[shadow_compound_sim] CLOSE {chain} {addr} exit={pos.get('exit_type')} "
                       f"stake=${stk:,.2f} pnl=${pnl_adj:+.2f} (exec_drift={drift*100:+.1f}%) "
                       f"peak={pos['peak_mcap']/pos['entry_mcap']:.2f}x rungs={pos['rungs_fired']} "
