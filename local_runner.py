@@ -162,6 +162,21 @@ def main() -> None:
         _threading_snap.Thread(target=state_snapshot.watch_loop, args=(_snap_interval,), name="snapshot", daemon=True).start()
         print(f"[local_runner] state snapshot thread started (every {_snap_interval // 60} min)", flush=True)
 
+    # ADDED 24 Nov 2026 (Ali: "add a watchdog" -- real incident: poll-fast hung
+    # 6.2 hours on 24 Nov 2026, scanning silently stalled 7.3 hours, nothing
+    # surfaced it anywhere). Read-only daemon thread, same pattern as the
+    # state-snapshot thread two lines above: checks logs/candidate_eval.jsonl
+    # and logs/local_poll-fast.log for staleness and posts to the existing
+    # dashboard Alerts tab (state.log_full_alert) if either goes quiet too
+    # long. See pipeline_watchdog.py's own docstring for exact thresholds.
+    if os.environ.get("LOCAL_RUNNER_WATCHDOG", "true").strip().lower() != "false":
+        import threading as _threading_wd
+        import pipeline_watchdog
+        _threading_wd.Thread(target=pipeline_watchdog.watch_loop, name="watchdog", daemon=True).start()
+        print("[local_runner] pipeline watchdog thread started "
+              f"(candidate feed/poll-fast staleness checks every {pipeline_watchdog.WATCHDOG_INTERVAL_S:.0f}s)",
+              flush=True)
+
     print("[local_runner] started. Jobs:", [(n, int(iv // 60)) for n, _, iv in schedule()], flush=True)
     while True:
         due = due_jobs(last, time.time())

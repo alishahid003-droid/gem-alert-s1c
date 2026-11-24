@@ -96,6 +96,45 @@ def _retry_after_seconds(resp):
     return min(seconds, _MAX_RETRY_AFTER_SECONDS)
 
 
+# FIXED 24 Nov 2026 (Ali: "fix the poll-fast hang right now" -- real incident,
+# local_runner.log: poll-fast ran 22335s/6.2 HOURS before exiting, when its own
+# subprocess timeout is 25 minutes). Root cause: `timeout=20` as a bare number
+# is passed straight through to requests/urllib3 as a single socket timeout
+# that only reliably bounds the CONNECT phase; once the TCP connection is
+# established and bytes start trickling in (a slow/flaky link -- Ali's own
+# connection out of Pakistan to GoPlus's servers here), a chunked response
+# that stalls mid-stream inside `.content`/`.json()` is NOT guaranteed to be
+# cut off by that single value, because urllib3's read-timeout semantics
+# differ for a single float vs. an explicit (connect, read) tuple. Confirmed:
+# the hung run's traceback (logs/local_poll-fast.log, run starting
+# 2026-11-24 15:58:39) shows this EXACT call -- fetch_goplus_security() ->
+# get_json() -> get() -> here -- finally raising
+# `ChunkedEncodingError: Response ended prematurely` 6.2 hours later, which is
+# not ConnectionError/Timeout so the @retry decorator below never even saw
+# it, and it is not a 429 so the loop above it never ran either. The 25-minute
+# subprocess timeout in local_runner.py did NOT fire because the *process*
+# never hung at the OS level -- a single `requests` call inside it did, for
+# hours, with no Python-level deadline enforcing a cutover. Passing an
+# explicit (connect_timeout, read_timeout) tuple instead of a bare number
+# makes urllib3 enforce a hard per-chunk read deadline, so a stalled stream
+# now raises requests.exceptions.ReadTimeout (which IS caught below and
+# converted to ApiUnreachable, and IS retried by the @retry decorator on
+# get()/post()) within read_timeout seconds of the last received byte,
+# instead of hanging indefinitely. Values: connect_timeout stays at the
+# existing 20s (no behavior change for a slow-to-connect host); read_timeout
+# is a new, separate 20s cap on silence between chunks once a response has
+# started streaming -- generous for any real API response in this codebase
+# (GoPlus/DexScreener/GeckoTerminal all normally reply in under 2s), tight
+# enough that the worst case for ANY single HTTP call through this module is
+# now ~20s connect + 20s stall + tenacity's bounded 3-attempt backoff, not 6+
+# hours. This is a narrow correction to how an existing default is passed to
+# an existing library, not a new retry/timeout system.
+def _as_connect_read_timeout(timeout):
+    if isinstance(timeout, tuple):
+        return timeout
+    return (timeout, timeout)
+
+
 def _request_with_429_retry(method, url, headers=None, params=None, data=None, json=None, timeout=20):
     attempts = 0
     while True:
@@ -105,8 +144,21 @@ def _request_with_429_retry(method, url, headers=None, params=None, data=None, j
         except Exception:  # noqa: BLE001
             pass
         try:
-            resp = _get_session().request(method, url, headers=headers, params=params, data=data, json=json, timeout=timeout)
-        except (requests.ConnectionError, requests.Timeout) as e:
+            resp = _get_session().request(method, url, headers=headers, params=params, data=data, json=json,
+                                           timeout=_as_connect_read_timeout(timeout))
+            # Force the body to download NOW, inside this try/except, instead of
+            # lazily on first .content/.json() access later in get_json()/
+            # post_json() (outside this function, outside the @retry decorator,
+            # and outside this except clause) -- that lazy-access gap is exactly
+            # where the real 6.2-hour hang occurred (ChunkedEncodingError raised
+            # from inside resp.json() in get_json(), several frames away from
+            # any retry/except logic). Reading .content here, under the same
+            # read-timeout and exception handling as the request itself, is what
+            # actually makes the fix above effective for a stream that stalls or
+            # truncates mid-body rather than mid-connect.
+            _ = resp.content
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.StreamConsumedError) as e:
             raise ApiUnreachable(f"{method} {url} failed at network level: {e}") from e
         try:
             import api_budget          # per-API call ledger (Oct 13 2026): audit calls/day vs free-tier limits
@@ -122,11 +174,20 @@ def _request_with_429_retry(method, url, headers=None, params=None, data=None, j
         time.sleep(wait_s)
 
 
+# FIXED 24 Nov 2026, same incident as _as_connect_read_timeout above: this
+# decorator's retry_if_exception_type only ever listed requests.ConnectionError
+# and requests.Timeout, but _request_with_429_retry() (the function this
+# decorator actually wraps) catches those and re-raises them as ApiUnreachable
+# -- so this retry clause has never actually matched anything raised by a
+# network failure; it was silently inert. Added ApiUnreachable so a transient
+# network failure (including the ChunkedEncodingError case above) is now
+# genuinely retried up to 3 times with backoff, instead of failing instantly
+# on the first blip with no retry at all.
 @retry(
     reraise=True,
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, ApiUnreachable)),
 )
 def get(url, headers=None, params=None, timeout=20):
     return _request_with_429_retry("GET", url, headers=headers, params=params, timeout=timeout)
@@ -152,7 +213,7 @@ def get_json(url, headers=None, params=None, timeout=20):
     reraise=True,
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, ApiUnreachable)),
 )
 def post(url, headers=None, params=None, data=None, json=None, timeout=20):
     return _request_with_429_retry("POST", url, headers=headers, params=params, data=data, json=json, timeout=timeout)
