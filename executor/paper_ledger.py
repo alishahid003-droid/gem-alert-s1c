@@ -256,7 +256,7 @@ def _open_paper_unlocked(chain: str, token: str, source: str, signal: str, usd: 
         return None
     pos = {"id": pid, "module": module, "chain": chain, "token": token, "source": source, "signal": signal,
            "band": band, "tags": tags or {}, "usd": float(usd), "entry_mcap": float(entry_mcap),
-           "peak_mcap": float(entry_mcap), "opened_ts": now, "remaining": 1.0,
+           "peak_mcap": float(entry_mcap), "peak_set_ts": now, "opened_ts": now, "remaining": 1.0,
            # 10 Nov 2026 (Claude, Ali's finding-gap close-out): price_trace -- a capped,
            # append-only {ts, mult} list sampled once per live management cycle (same cycle
            # that already updates peak_mcap below, zero extra network/API calls). Fills the
@@ -842,6 +842,30 @@ def _manage_early(pos: dict, mcap: float, now: float) -> bool:
     # so they always run regardless of which branch above matched.
     if why is None and age_min >= float(os.environ.get("EARLY_DEAD_MIN", "45")) and peak < 1.5 and mult < 1.2:
         why = ("time_stop", f"no move after {age_min:.0f} min")
+    # 28 Nov 2026 (Ali: "coins sitting between 1x-1.4x going nowhere, freeing capital for
+    # profitable signals" -- real finding: a coin that pops past 1.5x ONCE, even briefly/by
+    # noise, permanently disqualifies the EARLY_DEAD_MIN check above forever (peak is a
+    # one-way ratchet, never resets) -- even if it then goes flat for hours with no new
+    # high and no real profit banked. It's not down enough for stop_loss, not fallen back
+    # far enough from peak for trailing_stop (peak*trail only triggers on an actual pullback,
+    # not on "never climbed further"), so the ONLY thing that could still close it was the
+    # 24h max_hold safety net -- hours of capital tied up in a going-nowhere coin while real
+    # signals get skip_no_capital'd. This is independent of the above (own "if", not "elif")
+    # so it applies regardless of whether EARLY_DEAD_MIN already ruled itself out on peak.
+    # Deliberately narrow: only fires once BOTH (a) a meaningful time has passed since the
+    # coin's own last new high (not just since entry -- a real moonshot that peaked 10min ago
+    # and is still near that peak should NOT be cut), AND (b) current price is itself flat/near
+    # entry (mult < FLAT_COIN_MULT_CEILING), so a position still meaningfully above entry even
+    # off its peak is left to the normal trailing_stop/hard_stop logic, never force-closed here.
+    if why is None and peak >= 1.5:
+        _stale_min = (now - pos.get("peak_set_ts", pos["opened_ts"])) / 60.0
+        _flat_ceiling = float(os.environ.get("FLAT_COIN_MULT_CEILING", "1.4"))
+        _flat_min = float(os.environ.get("FLAT_COIN_STALE_MIN", "60"))
+        if _stale_min >= _flat_min and mult < _flat_ceiling:
+            why = ("time_stop", f"flat {mult:.2f}x for {_stale_min:.0f}min since last new high "
+                                 f"(peaked {peak:.2f}x, never fell back far enough for trailing_stop, "
+                                 "never dropped enough for stop_loss -- real capital freed instead of "
+                                 "waiting out the 24h cap)")
     if why is None and age_min >= float(os.environ.get("EARLY_MAX_HOLD_MIN", "1440")):
         why = ("max_hold", "24h hold limit")
     if why:
@@ -1057,6 +1081,8 @@ def manage(snapshot_fn: Optional[Callable[[str, str], Optional[dict]]] = None, n
         from executor.price_sanity import accept_dict
         if not accept_dict(pos, mcap):
             continue            # data glitch (pair/field switch), not a real move -- see price_sanity
+        if mcap > pos["peak_mcap"]:
+            pos["peak_set_ts"] = now
         pos["peak_mcap"] = max(pos["peak_mcap"], mcap)
         # 10 Nov 2026: see price_trace comment at open time. One append per managed cycle,
         # same cycle/same lock that already writes peak_mcap -- no new network call, no new

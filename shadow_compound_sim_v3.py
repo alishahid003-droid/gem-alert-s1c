@@ -290,6 +290,7 @@ def _load_open_positions():
             "module": "shadow_compound", "chain": chain, "token": addr,
             "source": "shadow_sim", "signal": "shadow", "band": "n/a", "tags": {},
             "usd": r.get("stake_usd", 0.0), "entry_mcap": entry_mcap, "peak_mcap": entry_mcap,
+            "peak_set_ts": r.get("ts", _time.time()),
             "opened_ts": r.get("ts", _time.time()), "remaining": 1.0, "price_trace": [],
             "breakeven_locked": False, "ladder_scale": 1.0, "rungs_fired": [], "proceeds_usd": 0.0,
             "cost_pct": r.get("cost_pct", 0.0), "liquidity_usd": None, "unpriced_cycles": 0,
@@ -347,7 +348,7 @@ def _make_pos(cand, now, stake_usd):
         "id": f"shadow:{cand['chain']}:{cand['addr']}:{int(now)}",
         "module": "shadow_compound", "chain": cand["chain"], "token": cand["addr"],
         "source": "shadow_sim", "signal": "shadow", "band": "n/a", "tags": {},
-        "usd": stake_usd, "entry_mcap": entry_mcap, "peak_mcap": entry_mcap,
+        "usd": stake_usd, "entry_mcap": entry_mcap, "peak_mcap": entry_mcap, "peak_set_ts": now,
         "opened_ts": now, "remaining": 1.0, "price_trace": [], "breakeven_locked": False,
         "ladder_scale": 1.0, "rungs_fired": [], "proceeds_usd": 0.0,
         "cost_pct": _cost_pct(cand["chain"], stake_usd, liq),
@@ -717,6 +718,7 @@ def main():
                         pos["ever_priced"] = True
                         if mc > pos["peak_mcap"]:
                             pos["peak_mcap"] = mc
+                            pos["peak_set_ts"] = now
                         pos["price_trace"].append({"ts": now, "mult": round(mc / pos["entry_mcap"], 4)})
                         if len(pos["price_trace"]) > 400:
                             pos["price_trace"] = pos["price_trace"][-400:]
