@@ -753,6 +753,42 @@ def act(d: dict, now: Optional[float] = None) -> dict:
                             _real_tx = _result.tx_signature
                             if _result.ok:
                                 _real_filled_tokens = _result.filled_amount_tokens
+                            # ADDED 27 Nov 2026 (Ali: "build execution-gap tracking in the real
+                            # system too, not just the shadow sim"): additive-only, logs to its
+                            # OWN new file (logs/execution_gap.jsonl), never touches or changes
+                            # anything about how the real buy itself executes -- this runs after
+                            # _result already exists, pure read-and-log. Captures what's already
+                            # real and available here with zero new network calls: the signal-time
+                            # mcap (d["mcap"], the "expected" reference this candidate was scored
+                            # against), the real intended stake vs. what was actually filled
+                            # (_real_stake vs. _result.filled_usd -- the real $ gap from gas/
+                            # slippage/partial-fill), and the real submit-to-confirm wall-clock
+                            # time (_result.elapsed_seconds) -- the real timing gap Ali specifically
+                            # flagged on 15 Nov 2026 ("we might lose the edge" on slow execution).
+                            # A true mcap-based price-impact % would need the token's live total
+                            # supply to convert filled_usd/filled_amount_tokens into a comparable
+                            # mcap, which is another network call this hot execution path should
+                            # not take on just for logging -- so this logs the real, already-known
+                            # dollar and timing gap instead of adding risk to get a slightly
+                            # richer number.
+                            try:
+                                _exec_gap_rec = {
+                                    "ts": time.time(), "chain": d["chain"], "addr": d["addr"],
+                                    "lane": lane, "signal_mcap": d.get("mcap"),
+                                    "intended_stake_usd": _real_stake,
+                                    "ok": _real_ok,
+                                    "filled_usd": _result.filled_usd if _real_ok else None,
+                                    "filled_amount_tokens": _real_filled_tokens,
+                                    "fill_gap_usd": (round(_real_stake - _result.filled_usd, 4)
+                                                     if _real_ok and _result.filled_usd is not None else None),
+                                    "elapsed_seconds": _result.elapsed_seconds,
+                                    "tx_signature": _real_tx,
+                                }
+                                os.makedirs("logs", exist_ok=True)
+                                with open(os.path.join("logs", "execution_gap.jsonl"), "a", encoding="utf-8") as _egf:
+                                    _egf.write(json.dumps(_exec_gap_rec) + "\n")
+                            except Exception:  # noqa: BLE001 -- logging must never affect a real trade
+                                pass
                 else:
                     _real_reason = "refusing real buy: EXECUTION_ENABLED is not true or no real key configured for this chain"
             except Exception as _live_exc:  # noqa: BLE001 -- a raised exception must never

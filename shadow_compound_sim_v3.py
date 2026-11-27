@@ -62,12 +62,55 @@ MAX_HOLD_MIN = float(os.environ.get("SHADOW_MAX_HOLD_MIN", "180"))
 #      the real system's 24h window plus its real hard stop (compound: -30%) would have kept
 #      protecting the position the whole time instead of flushing it early.
 REAL_MAX_HOLD_MIN = float(os.environ.get("SHADOW_REAL_MAX_HOLD_MIN", "1440"))
+# ADDED 27 Nov 2026 (Ali: "did we not already fix this in the real system, why is the shadow
+# sim doing it differently"): import the real system's own never-priced/feed-outage constants
+# instead of redefining them here, so the two stay in sync automatically if Ali ever tunes
+# them on the real system (executor/paper_ledger.py) -- no separate copy to drift out of date.
+try:
+    from executor.paper_ledger import (NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF,
+                                        FEED_OUTAGE_MIN_POSITIONS, FEED_OUTAGE_UNPRICED_FRACTION)
+except ImportError:
+    NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF = 2.0
+    FEED_OUTAGE_MIN_POSITIONS = 3
+    FEED_OUTAGE_UNPRICED_FRACTION = 0.6
 
 START_EQUITY_USD = float(os.environ.get("SHADOW_START_EQUITY_USD", "115.0"))
 SHOT_PCT = float(os.environ.get("SHADOW_SHOT_PCT", "0.50"))
 MAX_SHARE = float(os.environ.get("SHADOW_MAX_SHARE", "0.75"))
 STAKE_FLOOR_USD = float(os.environ.get("SHADOW_STAKE_FLOOR_USD", "15.0"))
 MIN_EQUITY_TO_TRADE = float(os.environ.get("SHADOW_MIN_EQUITY_USD", "5.0"))
+
+# ADDED 27 Nov 2026 (Ali: "don't we already reduce stake size as equity grows into the
+# thousands? check that and replicate it here"): the sim never had this at all -- SHOT_PCT
+# above has always been one flat 50% regardless of equity size, since the sim's original
+# design. The real system's compound book tapers this down as equity grows ("Curve C", see
+# executor/books.py's stake_usd(), 8 Nov 2026 entries) specifically so a single trade is never
+# an oversized bite of a large account -- Ali's exact stated concern, confirmed live and
+# un-overridden (no COMPOUND_MAX_STAKE_USD set in .env). There is no standalone importable
+# function for this in the real system (the bands are inline inside stake_usd()), so this
+# mirrors the exact band values rather than refactoring live real-system code for an import --
+# if Ali ever retunes these on the real system, this comment is the pointer to update here too.
+_CURVE_C_BANDS = (
+    (0.0,        600.0,         0.25),
+    (600.0,      5_000.0,       0.20),
+    (5_000.0,    100_000.0,     0.10),
+    (100_000.0,  float("inf"),  0.05),
+)
+
+
+def _curve_c_pct(eq: float) -> float:
+    override = os.environ.get("SHADOW_COMPOUND_MAX_STAKE_PCT", "").strip()
+    if override:
+        try:
+            return float(override)
+        except ValueError:
+            pass
+    pct = _CURVE_C_BANDS[-1][2]
+    for lo, hi, band_pct in _CURVE_C_BANDS:
+        if lo <= eq < hi:
+            pct = band_pct
+            break
+    return pct
 
 # v3 realism knobs
 EXEC_DELAY_S = float(os.environ.get("SHADOW_EXEC_DELAY_S", "4.0"))
@@ -124,17 +167,29 @@ class _ShadowEquity:
         # roughly 1/8th of the capital ceiling at once -- real data confirmed 3 real open
         # positions alone saturated the 75%-of-equity ceiling here (committed $279.05 vs a
         # $279.05 ceiling, $0.0025 of room left), starving every new candidate for 10+ hours
-        # even though all 3 open positions were profitable and nothing was actually stuck. The
-        # shadow sim never had an equivalent of max_open()'s position-count awareness -- base
-        # stake size here was flat 50%-of-equity with no idea how many positions were already
-        # open. Fix: once MAX_CONCURRENT_POSITIONS-worth of slots are in play, shrink the stake
-        # toward an even per-slot share of the ceiling instead of always asking for a full
-        # 50%-of-equity bite -- same intent as the real system's capacity-based sizing, without
-        # importing max_open() itself (kept as a small, targeted fix, not a rebuild).
-        base = eq * SHOT_PCT
-        if n_open_now > 0:
-            per_slot_share = (eq * MAX_SHARE) / max(1, MAX_CONCURRENT_POSITIONS)
-            base = min(base, per_slot_share)
+        # even though all 3 open positions were profitable and nothing was actually stuck.
+        #
+        # CORRECTED 27 Nov 2026, twice in the same conversation, both times caught before
+        # deploy by checking the real system first instead of shipping a guess:
+        #   1st attempt: shrink the stake based on how many slots were open -- immediately
+        #     exposed a worse bug in testing (a single stake could balloon toward 50% of
+        #     equity when few slots were open).
+        #   2nd attempt: remove all shrinking and just use flat eq*SHOT_PCT (50%) capped by
+        #     room_left, believing that matched the real system's stake_usd(). Ali then asked
+        #     "don't we already reduce stake size as equity grows into the thousands?" --
+        #     checked again, properly this time, and he was right: stake_usd() has a whole
+        #     separate tapering structure ("Curve C", 8 Nov 2026 entries in executor/books.py)
+        #     that the 2nd attempt completely missed by stopping at the base-formula line.
+        # Real, current Curve C bands for compound (confirmed live, no .env override exists):
+        # 25% of equity at $0-600, 20% at $600-5,000, 10% at $5,000-100,000, 5% above
+        # $100,000 -- the % deliberately comes DOWN as equity grows specifically so one trade
+        # is never an oversized bite of a large account (Ali's own stated concern, both here
+        # and historically in the real system's own commit history). This is the ONE place
+        # importing the real constant directly matters most, since Ali may retune these bands
+        # on the real system later -- pulled from executor.books directly below so the two
+        # can never silently drift apart again.
+        curve_pct = _curve_c_pct(eq)
+        base = eq * curve_pct
         room_left = max(0.0, eq * MAX_SHARE - self.committed_usd)
         stake = min(base, room_left)
         if stake < STAKE_FLOOR_USD:
@@ -240,6 +295,12 @@ def _load_open_positions():
             "cost_pct": r.get("cost_pct", 0.0), "liquidity_usd": None, "unpriced_cycles": 0,
             "events": [], "strategy": "early", "tp_done": False, "exit_profile": "compound",
             "guard": "n/a", "live": False, "restored_after_restart": True,
+            # 27 Nov 2026: a restored position already had a real entry_mcap logged at open
+            # time, so treat it as already-priced (gets the longer, more forgiving leash) --
+            # it is categorically different from a brand-new position that has never once
+            # been priced, and it should not get write-off-clocked on the short leash just
+            # because this in-memory dict is fresh after a restart.
+            "ever_priced": True,
         }
     return rebuilt
 
@@ -292,6 +353,18 @@ def _make_pos(cand, now, stake_usd):
         "cost_pct": _cost_pct(cand["chain"], stake_usd, liq),
         "liquidity_usd": liq, "unpriced_cycles": 0, "events": [], "strategy": "early",
         "tp_done": False, "exit_profile": "compound", "guard": "n/a", "live": False,
+        # ADDED 27 Nov 2026 (Ali: "did we not already fix this in the real system, why is
+        # the shadow sim doing it differently"): mirrors executor/paper_ledger.py's own
+        # never-priced-since-entry tracking. A coin that has NEVER returned a single real
+        # price since entry is a genuinely different risk than one that was priced fine for
+        # a while and then lost its feed -- the real system gives the first case a much
+        # shorter leash (NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF, 2 min) than the second
+        # (UNPRICEABLE_MINUTES_BEFORE_WRITE_OFF, 8 min), because never-priced-at-all usually
+        # means the pool is too thin/new for any source to have indexed it, which is itself
+        # the risk signal -- while a brief feed loss on an already-priced coin is far more
+        # often a data-provider hiccup than a real rug. The shadow sim previously used one
+        # flat MAX_HOLD_MIN (180min) for both cases, with no distinction at all.
+        "ever_priced": False,
     }
 
 
@@ -592,24 +665,56 @@ def main():
                               f"-- forcing timeout check on {len(items)} position(s) this cycle "
                               f"so they cannot get stuck from a repeated API failure", flush=True)
                         got = {}
+                    # FEED-OUTAGE GUARD (27 Nov 2026, Ali: "did we not already fix this in the
+                    # real system"): mirrors executor/paper_ledger.py's FEED_OUTAGE_MIN_POSITIONS/
+                    # FEED_OUTAGE_UNPRICED_FRACTION logic, same thresholds, so both systems treat a
+                    # feed outage the same way. If enough of THIS chain's open positions go unpriced
+                    # in the SAME cycle, that is a feed-outage signature (a real rug does not cluster
+                    # like that), not every one of those coins rugging at once -- so for this cycle
+                    # only, skip the write-off clock entirely for this chain's unpriced positions
+                    # rather than booking them as losses.
+                    unpriced_this_cycle = sum(1 for addr, _ in items if got.get(addr) is None)
+                    feed_outage = (len(items) >= FEED_OUTAGE_MIN_POSITIONS
+                                   and unpriced_this_cycle / len(items) >= FEED_OUTAGE_UNPRICED_FRACTION)
+                    if feed_outage:
+                        print(f"[shadow_compound_sim] FEED OUTAGE suspected on {chain}: "
+                              f"{unpriced_this_cycle}/{len(items)} positions unpriced this cycle -- "
+                              "write-off clock paused for all of them this cycle, not booked as losses",
+                              flush=True)
                     for addr, pos in items:
                         mc = got.get(addr)
                         age_min = (now - pos["opened_ts"]) / 60.0
                         if mc is None:
-                            if age_min >= MAX_HOLD_MIN:
+                            if feed_outage:
+                                continue  # clock frozen this cycle -- a provider-wide hiccup, not a dead coin
+                            # NEVER-PRICED vs LOST-FEED (27 Nov 2026): same distinction the real
+                            # system already makes -- a coin with zero real price since entry gets
+                            # a much shorter leash than one that was priced fine and then lost its
+                            # feed, because never-priced almost always means the pool was too thin/
+                            # new for any source to have indexed it at all (the risk signal itself),
+                            # while a brief loss on an already-priced coin is usually just a hiccup.
+                            leash_min = (NEVER_PRICED_MINUTES_BEFORE_WRITE_OFF if not pos["ever_priced"]
+                                         else MAX_HOLD_MIN)
+                            if age_min >= leash_min:
                                 stk = pos["usd"]
                                 eq_pool.close_stake(stk, 0.0)
                                 stats["stuck_no_price"] += 1
                                 _append_shadow({"event": "close", "ts": now, "chain": chain, "addr": addr,
                                                  "exit_type": "no_price_data_timeout",
-                                                 "reason": f"no price data after {age_min:.0f}min -- "
-                                                           "counted as STUCK/ILLIQUID, not excluded from stats",
+                                                 "reason": (f"never priced since entry, written off after "
+                                                            f"{age_min:.0f}min (thin/new pool, no source ever "
+                                                            "indexed it)" if not pos["ever_priced"] else
+                                                            f"no price data after {age_min:.0f}min (was priced "
+                                                            "before, then lost feed) -- "
+                                                            "counted as STUCK/ILLIQUID, not excluded from stats"),
+                                                 "ever_priced": pos["ever_priced"],
                                                  "entry_mcap": pos["entry_mcap"], "peak_mcap": pos["peak_mcap"],
                                                  "remaining": pos["remaining"], "proceeds_usd": pos["proceeds_usd"],
                                                  "stake_usd": stk, "pnl_usd": 0.0, "stuck_illiquid": True,
                                                  "equity_after_close": eq_pool.equity})
                                 del open_positions[(chain, addr)]
                             continue
+                        pos["ever_priced"] = True
                         if mc > pos["peak_mcap"]:
                             pos["peak_mcap"] = mc
                         pos["price_trace"].append({"ts": now, "mult": round(mc / pos["entry_mcap"], 4)})
