@@ -629,7 +629,13 @@ def main():
                 age_min = (now - pos["opened_ts"]) / 60.0
                 if age_min >= HARD_CAP_MIN:
                     stk = pos["usd"]
-                    eq_pool.close_stake(stk, 0.0)
+                    # BUG FIX (28 Nov 2026): same proceeds-discarding bug as the no_price_data_timeout
+                    # path below -- a position can reach the hard 48h safety net AFTER already banking
+                    # real profit via take-profit rungs (pos["proceeds_usd"]), hardcoding 0.0 here would
+                    # silently throw that real, already-realized pnl away exactly like the bug just
+                    # fixed on the normal write-off path.
+                    real_pnl = round(pos.get("proceeds_usd", 0.0) - stk, 2)
+                    eq_pool.close_stake(stk, real_pnl)
                     stats["stuck_no_price"] += 1
                     _append_shadow({"event": "close", "ts": now, "chain": chain, "addr": addr,
                                      "exit_type": "hard_cap_force_close",
@@ -637,7 +643,8 @@ def main():
                                                f"(2x normal {MAX_HOLD_MIN:.0f}min cap) -- normal timeout "
                                                "path failed to fire, likely a repeated upstream error",
                                      "entry_mcap": pos.get("entry_mcap"), "peak_mcap": pos.get("peak_mcap"),
-                                     "stake_usd": stk, "pnl_usd": 0.0, "stuck_illiquid": True,
+                                     "proceeds_usd": pos.get("proceeds_usd", 0.0),
+                                     "stake_usd": stk, "pnl_usd": real_pnl, "stuck_illiquid": True,
                                      "equity_after_close": eq_pool.equity})
                     print(f"[shadow_compound_sim] HARD CAP FORCE CLOSE {chain} {addr} "
                           f"age={age_min:.0f}min equity=${eq_pool.equity:,.2f}", flush=True)
@@ -698,7 +705,28 @@ def main():
                                          else MAX_HOLD_MIN)
                             if age_min >= leash_min:
                                 stk = pos["usd"]
-                                eq_pool.close_stake(stk, 0.0)
+                                # BUG FIX (28 Nov 2026, Ali: "why were the gains not realized" --
+                                # real finding, $3,410.51 position peaked 6.26x, banked $5,935.07
+                                # via real take-profit rungs BEFORE losing its price feed, then got
+                                # written off here as a flat $0.0 pnl close -- discarding a real
+                                # +$2,524.56 gain that had already been earned. _sell() (rung
+                                # take-profit) only mutates pos["proceeds_usd"]/pos["remaining"];
+                                # it never touches eq_pool.equity -- equity only updates at the
+                                # FINAL close via whatever pnl_usd this code passes to
+                                # close_stake(). Hardcoding 0.0 here silently discarded every
+                                # already-realized rung sale any time a position's feed died before
+                                # a normal exit could fire. Real pnl = proceeds already banked minus
+                                # the original stake (proceeds_usd already nets out whatever
+                                # fraction of the stake was sold at each rung, so this is the
+                                # correct full-position pnl, not a partial one) -- correct for both
+                                # directions: a real gain that was banked (this case) AND a real
+                                # loss on a coin that sold some rungs for less than it cost (the
+                                # other historical case this exact bug hid, -$697.01 silently
+                                # shown as $0.0). Still flagged as stuck_illiquid/not excluded from
+                                # win-loss stats either way -- only the pnl NUMBER was wrong, not
+                                # whether this counts as a clean win.
+                                real_pnl = round(pos["proceeds_usd"] - stk, 2)
+                                eq_pool.close_stake(stk, real_pnl)
                                 stats["stuck_no_price"] += 1
                                 _append_shadow({"event": "close", "ts": now, "chain": chain, "addr": addr,
                                                  "exit_type": "no_price_data_timeout",
@@ -711,7 +739,7 @@ def main():
                                                  "ever_priced": pos["ever_priced"],
                                                  "entry_mcap": pos["entry_mcap"], "peak_mcap": pos["peak_mcap"],
                                                  "remaining": pos["remaining"], "proceeds_usd": pos["proceeds_usd"],
-                                                 "stake_usd": stk, "pnl_usd": 0.0, "stuck_illiquid": True,
+                                                 "stake_usd": stk, "pnl_usd": real_pnl, "stuck_illiquid": True,
                                                  "equity_after_close": eq_pool.equity})
                                 del open_positions[(chain, addr)]
                             continue
